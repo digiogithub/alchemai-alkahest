@@ -1,0 +1,4 @@
+[
+  {"type":"directory","oid":"o3","size":0,"path":"extras"},
+  {"type":"file","oid":"o4","size":10,"path":"extras/notes.txt"}
+]

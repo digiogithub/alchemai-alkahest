@@ -1,0 +1,25 @@
+{
+  "_id": "66f0a1",
+  "id": "bartowski/Llama-3.2-3B-Instruct-GGUF",
+  "modelId": "bartowski/Llama-3.2-3B-Instruct-GGUF",
+  "author": "bartowski",
+  "sha": "5ab33fa94d1d04e903623ae72c95d1696f09f9e8",
+  "lastModified": "2024-10-19T12:00:00.000Z",
+  "private": false,
+  "disabled": false,
+  "gated": false,
+  "pipeline_tag": "text-generation",
+  "library_name": "gguf",
+  "tags": ["gguf", "text-generation", "license:llama3.2"],
+  "downloads": 250000,
+  "likes": 120,
+  "cardData": {"license": "llama3.2", "base_model": "meta-llama/Llama-3.2-3B-Instruct"},
+  "gguf": {"total": 3212749888, "architecture": "llama", "context_length": 131072},
+  "siblings": [
+    {"rfilename": ".gitattributes", "size": 3500},
+    {"rfilename": "README.md", "size": 9000},
+    {"rfilename": "Llama-3.2-3B-Instruct-Q8_0.gguf", "size": 3421899616, "blobId": "b1", "lfs": {"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size": 3421899616, "pointerSize": 135}},
+    {"rfilename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf", "size": 2019377696, "blobId": "b2", "lfs": {"sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "size": 2019377696, "pointerSize": 135}},
+    {"rfilename": "mmproj-Llama-F16.gguf", "size": 600000000, "blobId": "b3", "lfs": {"sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "size": 600000000, "pointerSize": 135}}
+  ]
+}
