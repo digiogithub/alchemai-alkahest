@@ -121,6 +121,14 @@ impl ModelEntry {
             .map(|l| l.path.as_path())
     }
 
+    /// Whether this is an Ollama cloud model (`remote_host` in its config): listed by Ollama
+    /// but without local weights, so it cannot be served by Alkahest.
+    pub fn is_remote(&self) -> bool {
+        self.config
+            .as_ref()
+            .is_some_and(|c| c.remote_host.is_some())
+    }
+
     /// Whether every blob the manifest references is on disk.
     pub fn is_complete(&self) -> bool {
         self.layers.iter().all(|l| l.present)

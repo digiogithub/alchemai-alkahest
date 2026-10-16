@@ -432,6 +432,13 @@ pub struct ModelConfig {
     /// Ollama output parser name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parser: Option<String>,
+    /// Ollama cloud models (`name:cloud`): the remote host serving it. Such manifests carry
+    /// no weights and cannot be run locally.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_host: Option<String>,
+    /// Ollama cloud models: the model name on the remote host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_model: Option<String>,
     /// Every other field, verbatim.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
