@@ -2,14 +2,15 @@
 id: ALK-US-0021
 type: story
 title: Model search
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0004
 milestone: ALK-M-0002
 labels: [hf, ollama, cli]
 estimate: 3
 created: 2026-10-16T22:39:35Z
-updated: 2026-10-16T22:39:39Z
+updated: 2026-10-16T23:33:12Z
+started: 2026-10-16T23:33:12Z
 links:
   - { kind: implements, target: ALK-SP-0002.R6 }
 ---

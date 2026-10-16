@@ -2,14 +2,15 @@
 id: ALK-T-0061
 type: task
 title: Model card and generation_config fetch
-status: backlog
+status: done
 priority: critical
 parent: ALK-US-0018
 milestone: ALK-M-0002
 labels: [hf]
 effort: 2
 created: 2026-10-16T22:39:24Z
-updated: 2026-10-16T22:39:24Z
+updated: 2026-10-16T23:31:48Z
+closed: 2026-10-16T23:31:48Z
 ---
 
 ## Description

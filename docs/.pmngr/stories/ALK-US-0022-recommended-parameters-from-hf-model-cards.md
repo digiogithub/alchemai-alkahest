@@ -2,14 +2,15 @@
 id: ALK-US-0022
 type: story
 title: Recommended parameters from HF model cards
-status: backlog
+status: in_progress
 priority: medium
 parent: ALK-EP-0004
 milestone: ALK-M-0002
 labels: [hf, config]
 estimate: 3
 created: 2026-10-16T22:39:40Z
-updated: 2026-10-16T22:39:44Z
+updated: 2026-10-16T23:33:12Z
+started: 2026-10-16T23:33:12Z
 links:
   - { kind: implements, target: ALK-SP-0010.R3 }
 ---

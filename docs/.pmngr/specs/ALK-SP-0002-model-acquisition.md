@@ -5,7 +5,7 @@ title: Model acquisition
 status: backlog
 labels: [pull, hf]
 created: 2026-10-16T22:37:33Z
-updated: 2026-10-16T22:37:33Z
+updated: 2026-10-16T23:31:48Z
 requirements:
   R1:
     status: backlog
@@ -13,8 +13,23 @@ requirements:
     status: backlog
   R3:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-hf/src/token.rs#resolve_token
+        - crates/alkahest-hf/src/client.rs#HfClient
+      tests:
+        - crates/alkahest-hf/tests/client.rs#token_is_sent_as_bearer_to_the_endpoint_only
+        - crates/alkahest-hf/tests/client.rs#no_token_means_anonymous_requests
+        - crates/alkahest-hf/src/token.rs#tests
   R4:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-fetch/src/download.rs#Downloader
+        - crates/alkahest-fetch/src/plan.rs#plan_parts
+      tests:
+        - crates/alkahest-fetch/tests/download.rs#resume_downloads_only_missing_bytes_and_digest_matches
+        - crates/alkahest-fetch/tests/download.rs#digest_mismatch_fails_and_removes_partial_files
   R5:
     status: backlog
   R6:
