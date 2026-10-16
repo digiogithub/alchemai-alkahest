@@ -66,6 +66,21 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: warn
 
+  # Release build of the headless binary; fails above the size budget (default 60 MiB).
+  size:
+    name: binary size (release, headless)
+    needs: lint
+    runs-on: ubuntu-latest
+    env:
+      ALKAHEST_SIZE_BUDGET_MIB: "60"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and report size
+        run: scripts/binary-size.sh
+
   # Unused dependencies.
   machete:
     name: cargo machete
