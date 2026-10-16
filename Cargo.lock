@@ -17,6 +17,7 @@ version = "0.1.0"
 dependencies = [
  "alkahest-core",
  "alkahest-desktop",
+ "alkahest-sysinfo",
  "anyhow",
  "assert_cmd",
  "clap",

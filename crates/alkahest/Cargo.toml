@@ -25,6 +25,7 @@ desktop = ["dep:alkahest-desktop"]
 [dependencies]
 alkahest-core.workspace = true
 alkahest-desktop = { workspace = true, optional = true }
+alkahest-sysinfo.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
