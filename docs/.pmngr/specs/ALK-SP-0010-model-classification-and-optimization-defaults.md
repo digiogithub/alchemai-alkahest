@@ -5,7 +5,7 @@ title: Model classification and optimization defaults
 status: backlog
 labels: [gguf, config]
 created: 2026-10-16T22:37:40Z
-updated: 2026-10-16T23:19:26Z
+updated: 2026-10-16T23:39:49Z
 requirements:
   R1:
     status: backlog
@@ -23,6 +23,13 @@ requirements:
         - crates/alkahest-gguf/tests/gguf_reader.rs#reads_v3_header_metadata_and_tensors
   R3:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-hf/src/recommended.rs#RecommendedParams
+        - crates/alkahest-hf/src/client.rs#HfClient
+      tests:
+        - crates/alkahest-hf/src/recommended.rs#sampling_defaults_match_the_qwen3_card
+        - crates/alkahest-hf/tests/recommended.rs#gguf_repo_falls_back_to_the_base_model
   R4:
     status: backlog
     trace:

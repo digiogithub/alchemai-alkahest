@@ -2,14 +2,15 @@
 id: ALK-US-0017
 type: story
 title: Ollama registry client and pull
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0004
 milestone: ALK-M-0002
 labels: [pull, ollama]
 estimate: 5
 created: 2026-10-16T22:39:17Z
-updated: 2026-10-16T22:39:21Z
+updated: 2026-10-16T23:43:32Z
+started: 2026-10-16T23:43:32Z
 links:
   - { kind: implements, target: ALK-SP-0002.R1 }
 ---
