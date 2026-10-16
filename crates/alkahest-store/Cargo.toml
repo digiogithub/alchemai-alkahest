@@ -13,3 +13,8 @@ publish = false
 workspace = true
 
 [dependencies]
+hex.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
