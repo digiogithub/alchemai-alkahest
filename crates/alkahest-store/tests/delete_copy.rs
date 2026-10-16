@@ -226,6 +226,46 @@ fn gc_deletes_only_unreferenced_blobs() {
     assert_eq!(alk.gc(false).unwrap().reclaimed, 0);
 }
 
+fn age_file(path: &Path, hours: u64) {
+    fs::write(path, b"x").unwrap();
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(SystemTime::now() - Duration::from_secs(hours * 3600))
+        .unwrap();
+}
+
+#[test]
+fn opening_the_store_removes_stale_temp_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("models");
+    let first = AlkahestStore::open(&root).unwrap();
+    let stale = first.staging_dir().join("blob-crashed.partial");
+    let fresh = first.staging_dir().join("blob-running.partial");
+    age_file(&stale, 30);
+    age_file(&fresh, 1);
+    AlkahestStore::open(&root).unwrap();
+    assert!(!stale.exists(), "older than 24 h goes");
+    assert!(fresh.exists(), "recent files may belong to a live writer");
+}
+
+#[test]
+fn opening_the_store_leaves_temp_files_while_a_writer_holds_the_lock() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("models");
+    let writer = AlkahestStore::open(&root).unwrap();
+    let stale = writer.staging_dir().join("blob-old.partial");
+    age_file(&stale, 30);
+    let _shared = writer.lock_shared().unwrap();
+    AlkahestStore::open(&root).unwrap();
+    assert!(stale.exists(), "a pull in progress keeps its staging area");
+    assert_eq!(
+        writer.try_clean_staging(Duration::from_secs(3600)).unwrap(),
+        None
+    );
+}
+
 #[test]
 fn stale_staging_files_are_cleaned_but_resumable_partials_are_not() {
     let w = world();

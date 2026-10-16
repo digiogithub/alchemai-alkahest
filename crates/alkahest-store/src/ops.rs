@@ -127,6 +127,16 @@ impl AlkahestStore {
         Ok(self.sweep_staging(older_than, false)?.0)
     }
 
+    /// [`AlkahestStore::clean_staging`] that never waits: returns `Ok(None)` without touching
+    /// anything when a pull, import or GC holds the store lock. Used when the store is
+    /// opened.
+    pub fn try_clean_staging(&self, older_than: Duration) -> Result<Option<usize>> {
+        let Some(_lock) = self.try_lock_exclusive()? else {
+            return Ok(None);
+        };
+        Ok(Some(self.sweep_staging(older_than, false)?.0))
+    }
+
     /// Like [`AlkahestStore::clean_staging`] for a caller that already holds the exclusive
     /// lock; returns the number of files and bytes (that would be) removed.
     fn sweep_staging(&self, older_than: Duration, dry_run: bool) -> Result<(usize, u64)> {

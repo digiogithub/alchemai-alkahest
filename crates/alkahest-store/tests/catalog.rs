@@ -270,6 +270,42 @@ fn detail_reads_text_layers_and_modelfile() {
 }
 
 #[test]
+fn ollama_cloud_models_are_marked_and_not_loadable() {
+    let w = world();
+    let rows = w.catalog.list().unwrap();
+    let cloud = rows
+        .iter()
+        .find(|r| r.entry.name.model() == "glm-5.1")
+        .expect("cloud models stay listed");
+    assert_eq!(cloud.source_label(), "ollama-cloud");
+    assert!(cloud.info.remote && !cloud.info.loadable);
+    let v = serde_json::to_value(cloud.summary()).unwrap();
+    assert_eq!(v["source"], "ollama-cloud");
+    assert_eq!(v["loadable"], false);
+    // Local models are loadable and keep the plain source.
+    let local = w.catalog.resolve("ollama:qwen3:8b").unwrap();
+    assert_eq!(local.source_label(), "ollama");
+    assert!(local.ensure_loadable().is_ok());
+
+    match w.catalog.resolve_loadable("glm-5.1:cloud") {
+        Err(StoreError::NotLoadable { reason, .. }) => assert!(reason.contains("cloud")),
+        other => panic!("{other:?}"),
+    }
+    // Resolving without the loadable requirement still works (for `show`).
+    assert!(w.catalog.resolve("glm-5.1:cloud").is_ok());
+}
+
+#[test]
+fn incomplete_models_are_not_loadable() {
+    let w = world();
+    let e = w.catalog.resolve("ollama:qwen3:4b").unwrap();
+    fs::remove_file(e.entry.model_path().unwrap()).unwrap();
+    let e = w.catalog.resolve("ollama:qwen3:4b").unwrap();
+    assert!(!e.info.complete && !e.info.loadable);
+    assert!(e.not_loadable_reason().unwrap().contains("missing"));
+}
+
+#[test]
 fn metadata_cache_lives_outside_both_stores() {
     let w = world();
     w.catalog.list().unwrap();
