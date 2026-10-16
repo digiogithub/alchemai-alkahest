@@ -15,10 +15,15 @@ dependencies = [
 name = "alkahest"
 version = "0.1.0"
 dependencies = [
+ "alkahest-core",
  "alkahest-desktop",
+ "anyhow",
  "assert_cmd",
  "clap",
  "predicates",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
