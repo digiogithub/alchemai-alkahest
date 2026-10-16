@@ -72,8 +72,9 @@ Directory = './.pando/data'
 TimeoutMs = 0
 
 [DecisionModel.Router]
-Model = ''
-Provider = ''
+KeepAlive = '30m'
+Model = 'tev1:0.8b'
+Provider = 'ollama'
 
 [Design]
 DefaultKind = ''
@@ -119,36 +120,36 @@ UseFilesAPI = false
 AskUserQuestionDisabled = false
 BraveAPIKey = ''
 BraveSearchEnabled = false
-BrowserEnabled = false
+BrowserEnabled = true
 BrowserExecutable = ''
 BrowserHeadless = false
 BrowserMaxSessions = 3
 BrowserTimeout = 30
 BrowserType = 'chrome'
 BrowserUserDataDir = ''
-Context7Enabled = false
+Context7Enabled = true
 DesktopActionTimeout = 10
-DesktopAllowPhysicalInput = false
+DesktopAllowPhysicalInput = true
 DesktopAllowedApps = []
 DesktopBackend = 'auto'
 DesktopDefaultDepth = 3
 DesktopDeniedApps = []
-DesktopEnabled = false
+DesktopEnabled = true
 DesktopMaxNodes = 500
 DesktopScreenshotScale = 1.0
 DesktopSnapshotTTL = 60
-ExaAPIKey = ''
+ExaAPIKey = 'age1:YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBIUUhUbVpuclVITUl2Mk5DUDVJNXpMY3FrNk5FWmZIa1g0TUM4L1V3WGw4ClJhZGlMQUM0ZVJHWUtOUytHaW4zbzJjOWl3QjlvdUxKSWlaNUlCcXpZSG8KLS0tIE1HL0k1QUl0dFQ5SVpGU0dYUCtCbC9zZ0wvdzlBMFRZL2NWL3JIcVN1OE0K+A6r051IvlgGpthNQgIXBjkUtdq93J1/0S5hXW4rxgtlnMxOji+/OpkwujuSMAA4XdXlkXK/SMupPAjvlOdH/hJyG70='
 ExaSearchEnabled = true
 FetchEnabled = true
 FetchMaxSizeMB = 10
-GoogleAPIKey = ''
+GoogleAPIKey = 'age1:YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBENjFGSWdoYVdIV3BtOFZYWnl1VU5zQzNGZXdIbGRra1k5NURCTlhtekFBCmh3TG1tY2NvRVdhUXhwN0t2cjg2TUNnZWhhMExQQThDY3Z5ZGxGWXpZczgKLS0tIEt2dnR6OUZHUEY5dlZlWkhwd1BvOFBEdHJIaGgrRWcrdzc5WGU0TVllTHMKUMsh8lgxYXSvQ3bR5nt0rwIHwm22lWzInO1agIxtNQk1a3tKkqajRGWlSkzUkbycZzqHfHeV6F3sTt83pevyUJEDhOFAQVM='
 GoogleSearchEnabled = true
-GoogleSearchEngineID = ''
+GoogleSearchEngineID = 'age1:YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB0Rm1VRm1jZFppZ0F1OUZrd0ZFZ0MzSmdBWGtncWN6MWw3UWhhckorSGxNCnhsc1hnS0VVWDgvV1dIbWdaV1R5OVFVdWdRTUxLU1JvS1ZKQTQ3VUQ4a2MKLS0tIGhqWlR0Q3hOSWxBOXh0cUs0a1RxaEQ5N3NLb3hpUnhOc2srQmNnQkFkWk0KqpdyrCl/InZa6aCUUvyKb2eLTPZIz7kblFdIfUrPx3SZCkFMtEwhsIp+1b31K/BZ1w=='
 PerplexityAPIKey = ''
 PerplexitySearchEnabled = false
 SetupModelSwitchEnabled = false
 SetupModelSwitchMaxPerRun = 0
-SourcegraphEnabled = false
+SourcegraphEnabled = true
 SourcegraphToken = ''
 
 [LLMCache]
