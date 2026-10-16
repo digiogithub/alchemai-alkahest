@@ -21,6 +21,7 @@ use crate::local::AlkahestStore;
 use crate::manifest::{LayerKind, SourceInfo};
 use crate::meta::{MetaCache, ModelInfo};
 use crate::ollama::OllamaStore;
+use crate::ops::{CopyReport, DeleteReport};
 use crate::reference::{ModelName, ModelRef, Origin, ScopedRef};
 use crate::source::{ModelEntry, ModelSource};
 
@@ -530,6 +531,64 @@ impl Catalog {
         } else {
             format!("; did you mean {}?", near.join(", "))
         }
+    }
+
+    /// `alkahest rm`: resolves `input` and deletes the model from the Alkahest store together
+    /// with the blobs nothing else uses. A model that lives in the Ollama store is refused
+    /// with [`StoreError::ReadOnly`] (a hint to use `ollama rm`) before anything is touched.
+    pub fn remove(&self, input: &str) -> Result<DeleteReport> {
+        let e = self.resolve(input)?;
+        match e.entry.origin {
+            Origin::Alkahest => {}
+            Origin::Ollama => {
+                let refused = self
+                    .source(Origin::Ollama)
+                    .and_then(|o| o.ensure_writable(&e.entry.name).err());
+                return Err(refused.unwrap_or_else(|| StoreError::ReadOnly {
+                    name: e.entry.name.display_short(),
+                    source_name: "ollama",
+                    hint: format!("use `ollama rm {}`", e.entry.name.display_short()),
+                }));
+            }
+        }
+        self.alkahest
+            .delete_model(&e.entry.name)?
+            .ok_or_else(|| StoreError::ModelNotFound {
+                reference: input.to_owned(),
+                hint: String::new(),
+            })
+    }
+
+    /// `alkahest cp`: resolves `source` in any store and creates `destination` in the
+    /// Alkahest store (an alias when the source is Alkahest's own, a copy of the blobs when it
+    /// is Ollama's). `destination` is a plain name (`my-llama`, `team/llama:v2`); store
+    /// prefixes and digests are not valid destinations.
+    pub fn copy(&self, source: &str, destination: &str) -> Result<(ModelName, CopyReport)> {
+        let dst = match ScopedRef::from_str(destination)? {
+            ScopedRef {
+                origin: None,
+                reference: ModelRef::Name { name, digest: None },
+            } => name,
+            ScopedRef {
+                origin: None,
+                reference: ModelRef::HuggingFace(hf),
+            } => hf.to_model_name()?,
+            _ => {
+                return Err(StoreError::InvalidManifest {
+                    what: destination.to_owned(),
+                    reason: "the destination must be a plain model name".into(),
+                });
+            }
+        };
+        let e = self.resolve(source)?;
+        let src = self
+            .source(e.entry.origin)
+            .ok_or_else(|| StoreError::ModelNotFound {
+                reference: source.to_owned(),
+                hint: String::new(),
+            })?;
+        let report = self.alkahest.copy_model(src, &e.entry, &dst)?;
+        Ok((dst, report))
     }
 
     /// Reads the text layers of a model (template, system prompt, parameters, licence,

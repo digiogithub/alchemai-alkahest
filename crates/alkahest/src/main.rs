@@ -85,6 +85,12 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Command::Sysinfo => sysinfo_cmd::run(cli.global.json),
         Command::Hf { action } => hf_cmd::run(action, &loaded.config, cli.global.json),
         Command::Ls => models_cmd::ls(&loaded, cli.global.json),
+        Command::Rm { models } => models_cmd::rm(models, &loaded, cli.global.json),
+        Command::Cp {
+            source,
+            destination,
+        } => models_cmd::cp(source, destination, &loaded, cli.global.json),
+        Command::Gc { dry_run } => models_cmd::gc(*dry_run, &loaded, cli.global.json),
         Command::Show(args) => models_cmd::show(args, &loaded, cli.global.json),
         Command::Search(args) => search_cmd::run(args, &loaded.config, cli.global.json),
         Command::Desktop => desktop(),

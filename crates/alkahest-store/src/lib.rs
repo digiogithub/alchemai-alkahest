@@ -11,6 +11,7 @@
 //! * [`catalog`]: [`Catalog`], the merged, metadata-enriched view of both stores and the
 //!   resolver for user references (ALK-SP-0001.R5).
 //! * [`meta`]: [`ModelInfo`] and the cached GGUF facts behind it.
+//! * [`ops`]: delete, copy and garbage collection on [`AlkahestStore`] (ALK-SP-0001.R4).
 //! * [`source`]: the [`ModelSource`] trait the catalog merges stores through.
 
 pub mod catalog;
@@ -21,6 +22,7 @@ pub mod local;
 pub mod manifest;
 pub mod meta;
 pub mod ollama;
+pub mod ops;
 pub mod reference;
 pub mod source;
 
@@ -34,5 +36,6 @@ pub use manifest::{
 };
 pub use meta::{GgufFacts, ModelInfo, format_parameters};
 pub use ollama::OllamaStore;
+pub use ops::{CopyReport, DeleteReport, GcReport, STALE_STAGING_AGE};
 pub use reference::{HfRef, HfSelector, ModelName, ModelRef, Origin, RefError, RefPart, ScopedRef};
 pub use source::{LayerInfo, ModelEntry, ModelSource};

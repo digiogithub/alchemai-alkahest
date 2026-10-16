@@ -143,6 +143,12 @@ pub enum Command {
         #[arg(required = true)]
         models: Vec<String>,
     },
+    /// Delete blobs no model references and abandoned temporary files.
+    Gc {
+        /// Report what would be deleted without deleting it.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Show details of a model.
     Show(ShowArgs),
     /// Copy a model under a new name.
@@ -277,7 +283,7 @@ impl Command {
             Self::Search(_) => "ALK-US-0021",
             Self::Ls | Self::Show(_) => "ALK-US-0012",
             Self::Ps | Self::Stop { .. } => "ALK-US-0031",
-            Self::Rm { .. } | Self::Cp { .. } => "ALK-US-0013",
+            Self::Rm { .. } | Self::Cp { .. } | Self::Gc { .. } => "ALK-US-0013",
             Self::Run { .. } => "ALK-US-0039",
             Self::Serve => "ALK-US-0033",
             Self::Desktop => "ALK-US-0064",
@@ -298,6 +304,7 @@ impl Command {
             Self::Ls => "ls",
             Self::Ps => "ps",
             Self::Rm { .. } => "rm",
+            Self::Gc { .. } => "gc",
             Self::Show(_) => "show",
             Self::Cp { .. } => "cp",
             Self::Run { .. } => "run",

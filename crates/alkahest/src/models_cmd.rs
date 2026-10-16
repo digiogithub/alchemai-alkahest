@@ -182,6 +182,108 @@ fn render_show<W: Write>(e: &CatalogEntry, d: &ModelDetail, out: &mut W) -> std:
     section(out, "Path", &paths.join("\n"))
 }
 
+/// `alkahest rm <model>...`: deletes from the Alkahest store only. Every model is attempted;
+/// the exit code is 1 when any failed (an Ollama model, an unknown name).
+pub fn rm(models: &[String], loaded: &Loaded, json: bool) -> Result<ExitCode> {
+    let catalog = open_catalog(loaded)?;
+    let mut failed = false;
+    let mut results = Vec::new();
+    for m in models {
+        match catalog.remove(m) {
+            Ok(r) => {
+                if json {
+                    results.push(json!({
+                        "model": r.name.display_short(),
+                        "deleted": true,
+                        "blobs_removed": r.blobs_removed.len(),
+                        "reclaimed": r.reclaimed,
+                    }));
+                } else {
+                    println!(
+                        "deleted '{}' ({} freed)",
+                        r.name.display_short(),
+                        human_size(r.reclaimed)
+                    );
+                }
+            }
+            Err(e) => {
+                failed = true;
+                if json {
+                    results.push(json!({"model": m, "deleted": false, "error": e.to_string()}));
+                } else {
+                    eprintln!("error: {e}");
+                }
+            }
+        }
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&results)?);
+    }
+    Ok(if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+/// `alkahest cp <source> <destination>`.
+pub fn cp(source: &str, destination: &str, loaded: &Loaded, json: bool) -> Result<ExitCode> {
+    let catalog = open_catalog(loaded)?;
+    let (dst, r) = catalog.copy(source, destination)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "destination": dst.display_short(),
+                "digest": r.manifest_digest.to_string(),
+                "blobs_copied": r.blobs_copied,
+                "bytes_copied": r.bytes_copied,
+                "blobs_shared": r.blobs_shared,
+            }))?
+        );
+    } else if r.blobs_copied > 0 {
+        println!(
+            "copied to '{}' ({} in {} blobs)",
+            dst.display_short(),
+            human_size(r.bytes_copied),
+            r.blobs_copied
+        );
+    } else {
+        println!("copied to '{}'", dst.display_short());
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `alkahest gc [--dry-run]`: reports the reclaimed bytes.
+pub fn gc(dry_run: bool, loaded: &Loaded, json: bool) -> Result<ExitCode> {
+    let catalog = open_catalog(loaded)?;
+    let r = catalog.alkahest().gc(dry_run)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "dry_run": r.dry_run,
+                "blobs_removed": r.blobs_removed.len(),
+                "staging_removed": r.staging_removed,
+                "reclaimed": r.reclaimed,
+            }))?
+        );
+    } else {
+        let verb = if dry_run {
+            "would reclaim"
+        } else {
+            "reclaimed"
+        };
+        println!(
+            "{verb} {} ({} unreferenced blobs, {} stale temp files)",
+            human_size(r.reclaimed),
+            r.blobs_removed.len(),
+            r.staging_removed
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 /// Prints a titled, indented block; empty bodies are omitted.
 fn section<W: Write>(out: &mut W, title: &str, body: &str) -> std::io::Result<()> {
     if body.trim().is_empty() {

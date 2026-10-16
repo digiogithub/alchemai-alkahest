@@ -153,3 +153,43 @@ fn show_unknown_model_fails_with_message() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("not found"));
 }
+
+/// Scenario "delete refuses Ollama model" (ALK-SP-0001.R2): exit 1, hint, nothing deleted.
+#[test]
+fn rm_refuses_ollama_models() {
+    let home = tempfile::tempdir().unwrap();
+    let ollama = ollama_store(home.path());
+    let out = alkahest(home.path(), &ollama)
+        .args(["rm", "llama3.2"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("ollama rm"));
+    assert!(stdout(alkahest(home.path(), &ollama).arg("ls")).contains("llama3.2"));
+}
+
+#[test]
+fn cp_rm_and_gc_round_trip() {
+    let home = tempfile::tempdir().unwrap();
+    let ollama = ollama_store(home.path());
+    let out = stdout(alkahest(home.path(), &ollama).args(["cp", "ollama:llama3.2", "mine"]));
+    assert!(out.contains("copied to 'mine:latest'"), "{out}");
+    let ls = stdout(alkahest(home.path(), &ollama).arg("ls"));
+    assert!(
+        ls.contains("mine:latest") && ls.contains("alkahest"),
+        "{ls}"
+    );
+
+    let out = stdout(alkahest(home.path(), &ollama).args(["rm", "mine"]));
+    assert!(out.contains("deleted 'mine:latest'"), "{out}");
+    let ls = stdout(alkahest(home.path(), &ollama).arg("ls"));
+    assert!(!ls.contains("mine:latest"));
+
+    let out = stdout(alkahest(home.path(), &ollama).args(["gc", "--dry-run"]));
+    assert!(out.contains("would reclaim"), "{out}");
+    let v: Value = serde_json::from_str(&stdout(
+        alkahest(home.path(), &ollama).args(["gc", "--json"]),
+    ))
+    .unwrap();
+    assert_eq!(v["reclaimed"], 0);
+}

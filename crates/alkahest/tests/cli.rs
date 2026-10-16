@@ -46,8 +46,6 @@ fn unbuilt_commands_name_their_story_and_exit_2() {
         (&["pull", "llama3"], "ALK-US-0017"),
         (&["ps"], "ALK-US-0031"),
         (&["stop", "m"], "ALK-US-0031"),
-        (&["rm", "m"], "ALK-US-0013"),
-        (&["cp", "a", "b"], "ALK-US-0013"),
         (&["run", "m"], "ALK-US-0039"),
         (&["serve"], "ALK-US-0033"),
         (&["keys", "ls"], "ALK-US-0041"),
