@@ -27,6 +27,9 @@ pub struct FetchConfig {
     pub stall_timeout: Duration,
     /// TCP connect timeout.
     pub connect_timeout: Duration,
+    /// Bandwidth cap in bytes per second, shared by all parts and downloads of one
+    /// [`crate::Downloader`]; `None` is unlimited.
+    pub max_bytes_per_sec: Option<u64>,
     /// How often the partial-state sidecar is flushed to disk.
     pub checkpoint_interval: Duration,
     /// `User-Agent` header.
@@ -44,6 +47,7 @@ impl Default for FetchConfig {
             backoff_max: Duration::from_secs(30),
             stall_timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(15),
+            max_bytes_per_sec: None,
             checkpoint_interval: Duration::from_millis(500),
             user_agent: format!("alkahest/{}", env!("CARGO_PKG_VERSION")),
         }

@@ -332,3 +332,58 @@ async fn empty_file_downloads() {
     assert_eq!(out.sha256, sha256_hex(&[]));
     assert!(dest.exists());
 }
+
+#[tokio::test]
+async fn bandwidth_cap_is_shared_by_parallel_parts() {
+    let data = sample(60_000);
+    let server = TestServer::start(data.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("blob");
+    let capped = Downloader::new(FetchConfig {
+        max_bytes_per_sec: Some(50_000),
+        ..config()
+    })
+    .unwrap();
+    let started = std::time::Instant::now();
+    let out = capped
+        .download(
+            &DownloadRequest::new(server.url("/file"), &dest).with_sha256(sha256_hex(&data)),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    // 60 kB at 50 kB/s is 1.2 s; the last chunk is free, so allow slack below.
+    assert!(
+        started.elapsed() >= Duration::from_millis(700),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(out.parts > 1);
+    assert_eq!(std::fs::read(&dest).unwrap(), data);
+}
+
+#[tokio::test]
+async fn cancellation_interrupts_a_throttled_wait() {
+    let data = sample(60_000);
+    let server = TestServer::start(data).await;
+    let dir = tempfile::tempdir().unwrap();
+    let capped = Downloader::new(FetchConfig {
+        max_bytes_per_sec: Some(1_000),
+        ..config()
+    })
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let c2 = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        c2.cancel();
+    });
+    let err = capped
+        .download(
+            &DownloadRequest::new(server.url("/file"), dir.path().join("blob")),
+            &cancel,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, FetchError::Cancelled), "{err:?}");
+}
