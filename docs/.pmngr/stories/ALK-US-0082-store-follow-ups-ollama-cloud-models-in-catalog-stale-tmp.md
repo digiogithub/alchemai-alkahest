@@ -2,14 +2,15 @@
 id: ALK-US-0082
 type: story
 title: "Store follow-ups: Ollama cloud models in catalog, stale tmp/ cleanup, hex digest prefixes"
-status: in_progress
+status: done
 priority: medium
 parent: ALK-EP-0003
 author: mcp
 labels: [store]
 created: 2026-10-16T23:37:04Z
-updated: 2026-10-16T23:38:16Z
+updated: 2026-10-16T23:56:42Z
 started: 2026-10-16T23:38:16Z
+closed: 2026-10-16T23:56:42Z
 inbox:
   status: accepted
   source: mcp

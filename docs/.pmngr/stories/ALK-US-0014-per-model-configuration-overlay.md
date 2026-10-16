@@ -2,15 +2,16 @@
 id: ALK-US-0014
 type: story
 title: Per-model configuration overlay
-status: in_progress
+status: done
 priority: high
 parent: ALK-EP-0003
 milestone: ALK-M-0002
 labels: [config]
 estimate: 3
 created: 2026-10-16T22:39:03Z
-updated: 2026-10-16T23:38:16Z
+updated: 2026-10-16T23:56:42Z
 started: 2026-10-16T23:38:16Z
+closed: 2026-10-16T23:56:42Z
 links:
   - { kind: implements, target: ALK-SP-0010.R4 }
 ---

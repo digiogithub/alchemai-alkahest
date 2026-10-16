@@ -2,14 +2,15 @@
 id: ALK-US-0024
 type: story
 title: Engine process supervisor
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0005
 milestone: ALK-M-0003
 labels: [engine]
 estimate: 5
 created: 2026-10-16T22:39:49Z
-updated: 2026-10-16T22:39:54Z
+updated: 2026-10-16T23:56:55Z
+started: 2026-10-16T23:56:55Z
 links:
   - { kind: implements, target: ALK-SP-0004.R6 }
   - { kind: implements, target: ALK-SP-0003.R5 }

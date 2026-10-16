@@ -5,7 +5,7 @@ title: Model store and Ollama compatibility
 status: backlog
 labels: [store]
 created: 2026-10-16T22:37:32Z
-updated: 2026-10-16T23:36:35Z
+updated: 2026-10-16T23:49:21Z
 requirements:
   R1:
     status: backlog
@@ -26,7 +26,9 @@ requirements:
   R2:
     status: backlog
     trace:
-      code: [crates/alkahest-store/src/ollama.rs#OllamaStore]
+      code:
+        - crates/alkahest-store/src/ollama.rs#OllamaStore
+        - crates/alkahest-store/src/catalog.rs#Catalog
       tests:
         - crates/alkahest-store/tests/ollama_store.rs#ollama_model_is_listed
         - crates/alkahest-store/tests/ollama_store.rs#delete_refuses_ollama_model
@@ -35,6 +37,9 @@ requirements:
         - crates/alkahest-store/tests/ollama_store.rs#resolves_manifests_v2_before_legacy
         - crates/alkahest-store/tests/ollama_store.rs#legacy_public_host_aliases
         - crates/alkahest-store/src/ollama.rs#ollama_module_has_no_write_calls
+        - crates/alkahest-store/tests/delete_copy.rs#delete_refuses_ollama_model
+        - crates/alkahest/tests/models.rs#rm_refuses_ollama_models
+        - crates/alkahest/tests/models.rs#ollama_model_is_listed
   R3:
     status: backlog
     trace:
@@ -53,8 +58,25 @@ requirements:
         - crates/alkahest-store/tests/reference_props.rs#parser_never_panics
   R4:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-store/src/ops.rs#delete_model
+        - crates/alkahest-store/src/ops.rs#gc
+        - crates/alkahest-store/src/ops.rs#copy_model
+      tests:
+        - crates/alkahest-store/tests/delete_copy.rs#shared_blob_kept
+        - crates/alkahest-store/tests/delete_copy.rs#gc_deletes_only_unreferenced_blobs
+        - crates/alkahest-store/tests/delete_copy.rs#copy_from_ollama_copies_blobs_and_never_writes_there
   R5:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-store/src/catalog.rs#Catalog
+        - crates/alkahest-store/src/meta.rs#ModelInfo
+        - crates/alkahest/src/models_cmd.rs#ls
+      tests:
+        - crates/alkahest-store/tests/catalog.rs#json_listing
+        - crates/alkahest/tests/models.rs#json_listing
 ---
 
 ## Purpose

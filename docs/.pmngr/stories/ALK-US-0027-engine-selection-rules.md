@@ -2,14 +2,15 @@
 id: ALK-US-0027
 type: story
 title: Engine selection rules
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0005
 milestone: ALK-M-0003
 labels: [engine]
 estimate: 2
 created: 2026-10-16T22:40:05Z
-updated: 2026-10-16T22:40:08Z
+updated: 2026-10-16T23:56:55Z
+started: 2026-10-16T23:56:55Z
 links:
   - { kind: implements, target: ALK-SP-0003.R2 }
 ---

@@ -5,12 +5,33 @@ title: Model acquisition
 status: backlog
 labels: [pull, hf]
 created: 2026-10-16T22:37:33Z
-updated: 2026-10-16T23:37:35Z
+updated: 2026-10-16T23:54:14Z
 requirements:
   R1:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-ollama/src/registry.rs#RegistryClient
+        - crates/alkahest-ollama/src/pull.rs#pull_ollama
+        - crates/alkahest-ollama/src/transfer.rs#Transfer
+        - crates/alkahest/src/pull_cmd.rs#run
+      tests:
+        - crates/alkahest-ollama/tests/pull.rs#pull_from_registry_installs_manifest_and_all_layers
+        - crates/alkahest-ollama/tests/pull.rs#manifest_is_not_installed_when_a_blob_fails
+        - crates/alkahest-ollama/tests/pull.rs#manifest_list_resolves_to_the_llamacpp_entry
+        - crates/alkahest-ollama/tests/pull.rs#model_in_the_ollama_store_is_reused_unless_forced
+        - crates/alkahest/tests/pull.rs#pull_json_installs_the_manifest_and_prints_events
   R2:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-hf/src/pull.rs#select_files
+        - crates/alkahest-hf/src/pull.rs#pull_hf
+      tests:
+        - crates/alkahest-hf/tests/pull.rs#quant_selection_downloads_only_that_file_and_the_projector
+        - crates/alkahest-hf/tests/pull.rs#default_pull_picks_q4_k_m_and_names_the_model_after_it
+        - crates/alkahest-hf/tests/pull.rs#gated_repository_without_token_explains_how_to_authenticate
+        - crates/alkahest-hf/src/pull.rs#shards_are_all_selected_by_any_shard_file
   R3:
     status: backlog
     trace:

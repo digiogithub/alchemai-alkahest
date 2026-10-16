@@ -5,7 +5,7 @@ title: Model classification and optimization defaults
 status: backlog
 labels: [gguf, config]
 created: 2026-10-16T22:37:40Z
-updated: 2026-10-16T23:39:49Z
+updated: 2026-10-16T23:53:13Z
 requirements:
   R1:
     status: backlog
@@ -33,8 +33,15 @@ requirements:
   R4:
     status: backlog
     trace:
-      code: [crates/alkahest-core/src/config.rs#Config]
-      tests: [crates/alkahest-core/src/config.rs#env_vars_override_file_values]
+      code:
+        - crates/alkahest-store/src/overlay.rs#resolve
+        - crates/alkahest-store/src/overlay.rs#ModelOverlays
+        - crates/alkahest-store/src/catalog.rs#Catalog
+        - crates/alkahest/src/model_config_cmd.rs#run
+      tests:
+        - crates/alkahest-store/tests/overlay.rs#precedence
+        - crates/alkahest-store/src/overlay.rs#precedence_is_request_model_recommended_global
+        - crates/alkahest/tests/models.rs#config_model_set_show_unset
   R5:
     status: backlog
     trace:
