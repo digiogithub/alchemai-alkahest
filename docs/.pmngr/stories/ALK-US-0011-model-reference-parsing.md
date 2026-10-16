@@ -2,15 +2,16 @@
 id: ALK-US-0011
 type: story
 title: Model reference parsing
-status: in_progress
+status: done
 priority: high
 parent: ALK-EP-0003
 milestone: ALK-M-0002
 labels: [store]
 estimate: 2
 created: 2026-10-16T22:38:49Z
-updated: 2026-10-16T23:18:00Z
+updated: 2026-10-16T23:38:16Z
 started: 2026-10-16T23:18:00Z
+closed: 2026-10-16T23:38:16Z
 links:
   - { kind: implements, target: ALK-SP-0001.R3 }
 ---

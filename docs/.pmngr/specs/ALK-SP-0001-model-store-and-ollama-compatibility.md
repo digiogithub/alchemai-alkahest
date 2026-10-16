@@ -5,14 +5,52 @@ title: Model store and Ollama compatibility
 status: backlog
 labels: [store]
 created: 2026-10-16T22:37:32Z
-updated: 2026-10-16T22:37:32Z
+updated: 2026-10-16T23:36:35Z
 requirements:
   R1:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-store/src/local.rs#AlkahestStore
+        - crates/alkahest-store/src/local.rs#BlobWriter
+        - crates/alkahest-store/src/manifest.rs#Manifest
+        - crates/alkahest-store/src/manifest.rs#media_type
+        - crates/alkahest-store/src/source.rs#ModelSource
+      tests:
+        - crates/alkahest-store/tests/alkahest_store.rs#blob_written_atomically
+        - crates/alkahest-store/tests/alkahest_store.rs#digest_mismatch_leaves_no_blob_and_no_partial
+        - crates/alkahest-store/tests/alkahest_store.rs#manifest_layout_and_round_trip
+        - crates/alkahest-store/tests/alkahest_store.rs#manifest_requires_every_blob
+        - crates/alkahest-store/tests/alkahest_store.rs#concurrent_writers_are_safe
+        - crates/alkahest-store/tests/alkahest_store.rs#exclusive_lock_blocks_writers
   R2:
     status: backlog
+    trace:
+      code: [crates/alkahest-store/src/ollama.rs#OllamaStore]
+      tests:
+        - crates/alkahest-store/tests/ollama_store.rs#ollama_model_is_listed
+        - crates/alkahest-store/tests/ollama_store.rs#delete_refuses_ollama_model
+        - crates/alkahest-store/tests/ollama_store.rs#never_writes
+        - crates/alkahest-store/tests/ollama_store.rs#works_on_read_only_store
+        - crates/alkahest-store/tests/ollama_store.rs#resolves_manifests_v2_before_legacy
+        - crates/alkahest-store/tests/ollama_store.rs#legacy_public_host_aliases
+        - crates/alkahest-store/src/ollama.rs#ollama_module_has_no_write_calls
   R3:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-store/src/reference.rs#ModelRef
+        - crates/alkahest-store/src/reference.rs#ScopedRef
+        - crates/alkahest-store/src/reference.rs#ModelName
+        - crates/alkahest-store/src/reference.rs#HfRef
+        - crates/alkahest-store/src/digest.rs#Digest
+      tests:
+        - crates/alkahest-store/src/reference.rs#short_name_resolves
+        - crates/alkahest-store/src/reference.rs#hf_spellings
+        - crates/alkahest-store/src/reference.rs#scope_prefixes
+        - crates/alkahest-store/tests/reference_props.rs#model_ref_round_trips
+        - crates/alkahest-store/tests/reference_props.rs#scoped_ref_round_trips
+        - crates/alkahest-store/tests/reference_props.rs#parser_never_panics
   R4:
     status: backlog
   R5:

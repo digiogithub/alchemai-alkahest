@@ -5,7 +5,7 @@ title: Model acquisition
 status: backlog
 labels: [pull, hf]
 created: 2026-10-16T22:37:33Z
-updated: 2026-10-16T23:31:48Z
+updated: 2026-10-16T23:37:35Z
 requirements:
   R1:
     status: backlog
@@ -34,6 +34,14 @@ requirements:
     status: backlog
   R6:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-ollama/src/library.rs#OllamaLibrary
+        - crates/alkahest/src/search_cmd.rs#run
+        - crates/alkahest-hf/src/client.rs#HfClient
+      tests:
+        - crates/alkahest/tests/search.rs#hf_search
+        - crates/alkahest-ollama/src/library.rs#parses_fixture_models
 ---
 
 ## Purpose

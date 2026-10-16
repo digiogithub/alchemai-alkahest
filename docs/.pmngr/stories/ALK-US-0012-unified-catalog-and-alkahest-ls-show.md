@@ -2,14 +2,15 @@
 id: ALK-US-0012
 type: story
 title: Unified catalog and `alkahest ls` / `show`
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0003
 milestone: ALK-M-0002
 labels: [store, cli]
 estimate: 3
 created: 2026-10-16T22:38:53Z
-updated: 2026-10-16T22:38:57Z
+updated: 2026-10-16T23:38:16Z
+started: 2026-10-16T23:38:16Z
 links:
   - { kind: implements, target: ALK-SP-0001.R5 }
 ---

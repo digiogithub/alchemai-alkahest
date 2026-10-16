@@ -2,14 +2,15 @@
 id: ALK-US-0013
 type: story
 title: Delete, copy and garbage collection
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0003
 milestone: ALK-M-0002
 labels: [store, cli]
 estimate: 3
 created: 2026-10-16T22:38:57Z
-updated: 2026-10-16T22:39:02Z
+updated: 2026-10-16T23:38:16Z
+started: 2026-10-16T23:38:16Z
 links:
   - { kind: implements, target: ALK-SP-0001.R4 }
   - { kind: implements, target: ALK-SP-0001.R2 }
