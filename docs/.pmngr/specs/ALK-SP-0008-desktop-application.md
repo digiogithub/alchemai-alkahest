@@ -1,0 +1,92 @@
+---
+id: ALK-SP-0008
+type: spec
+title: Desktop application
+status: backlog
+labels: [desktop]
+created: 2026-10-16T22:37:38Z
+updated: 2026-10-16T22:37:38Z
+requirements:
+  R1:
+    status: backlog
+  R2:
+    status: backlog
+  R3:
+    status: backlog
+  R4:
+    status: backlog
+  R5:
+    status: backlog
+  R6:
+    status: backlog
+  R7:
+    status: backlog
+---
+
+## Purpose
+
+Manage models, engines, keys and monitor runtime from a native desktop app started with `alkahest desktop`.
+
+## Scope
+
+Covers the GPUI app on Linux, macOS and Windows. It talks to the server over the admin API ([[ALK-SP-0005]]).
+
+Plan: [[plan/alkahest-v1-plan]]
+
+## Requirements
+
+### ALK-SP-0008.R1 — Desktop entry point
+
+`alkahest desktop` SHALL open the GPUI window on Linux, macOS and Windows; a binary built without the `desktop` feature SHALL print how to get the desktop build and exit non-zero.
+
+#### Scenario: headless build
+- **WHEN** a server-only build runs `alkahest desktop`
+- **THEN** it prints a clear message and exits 2
+
+### ALK-SP-0008.R2 — Server connection
+
+The app SHALL connect to the configured server (local service by default) and offer to start a server when none answers.
+
+#### Scenario: no server
+- **WHEN** no server is running
+- **THEN** the app offers to start one and connects after it is healthy
+
+### ALK-SP-0008.R3 — Model catalog view
+
+The app SHALL list local models from all sources with kind badges (chat, embeddings, vision, audio, image, video, decision, rerank), format (GGUF, vLLM-ready), size and state, and allow delete, load and unload.
+
+#### Scenario: unload
+- **WHEN** the user clicks unload on a loaded model
+- **THEN** the model process stops and the row updates
+
+### ALK-SP-0008.R4 — Model browsers
+
+The app SHALL search Hugging Face and the Ollama library, show model cards, let the user pick a quantization or tag and download to the store with progress, pause and resume.
+
+#### Scenario: download
+- **WHEN** the user downloads a HF GGUF
+- **THEN** progress is shown and the model appears in the catalog
+
+### ALK-SP-0008.R5 — Model settings editor
+
+The app SHALL edit per-model settings: context window, KV cache key and value types, flash attention, GPU layers, parallel slots, keep-alive, chat template, tools enablement and sampling defaults, prefilled from the HF model card and GGUF metadata, with a live memory estimate.
+
+#### Scenario: estimate
+- **WHEN** the user doubles the context window
+- **THEN** the memory estimate updates
+
+### ALK-SP-0008.R6 — Runtime monitor
+
+The app SHALL show loaded models with CPU/GPU placement, RAM and VRAM use, in-flight and queued requests, refreshed at least every 2 seconds.
+
+#### Scenario: activity
+- **WHEN** a client streams a completion
+- **THEN** the in-flight count is 1 during the stream
+
+### ALK-SP-0008.R7 — Keys and network settings
+
+The app SHALL create, list and revoke API keys and toggle external exposure (bind address).
+
+#### Scenario: create key
+- **WHEN** the user creates a key
+- **THEN** the secret is shown once with a copy button
