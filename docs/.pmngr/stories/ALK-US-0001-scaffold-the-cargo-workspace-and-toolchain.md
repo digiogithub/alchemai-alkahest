@@ -2,15 +2,16 @@
 id: ALK-US-0001
 type: story
 title: Scaffold the Cargo workspace and toolchain
-status: in_progress
+status: done
 priority: critical
 parent: ALK-EP-0001
 milestone: ALK-M-0001
 labels: [infra]
 estimate: 3
 created: 2026-10-16T22:37:59Z
-updated: 2026-10-16T23:00:19Z
+updated: 2026-10-16T23:05:59Z
 started: 2026-10-16T23:00:19Z
+closed: 2026-10-16T23:05:59Z
 ---
 
 ## Description
