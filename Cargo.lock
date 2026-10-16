@@ -137,9 +137,15 @@ dependencies = [
 name = "alkahest-store"
 version = "0.1.0"
 dependencies = [
+ "alkahest-core",
  "hex",
  "proptest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

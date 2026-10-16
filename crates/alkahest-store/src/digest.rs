@@ -102,6 +102,45 @@ impl fmt::Debug for Digest {
     }
 }
 
+impl serde::Serialize for Digest {
+    /// Serialises as `sha256:<hex>`, the spelling of Docker v2 manifests.
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Digest {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = <std::borrow::Cow<'de, str>>::deserialize(d)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+/// Incremental SHA-256 over bytes that are also being written somewhere else.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Hasher(sha2::Sha256);
+
+impl Hasher {
+    /// Feeds bytes.
+    pub(crate) fn update(&mut self, bytes: &[u8]) {
+        sha2::Digest::update(&mut self.0, bytes);
+    }
+
+    /// The digest of everything fed so far.
+    pub(crate) fn finish(self) -> Digest {
+        Digest(sha2::Digest::finalize(self.0).into())
+    }
+}
+
+impl Digest {
+    /// The digest of an in-memory byte string.
+    pub fn of(bytes: &[u8]) -> Self {
+        let mut h = Hasher::default();
+        h.update(bytes);
+        h.finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
