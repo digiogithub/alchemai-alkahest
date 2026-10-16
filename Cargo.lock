@@ -87,6 +87,10 @@ version = "0.1.0"
 [[package]]
 name = "alkahest-sched"
 version = "0.1.0"
+dependencies = [
+ "alkahest-gguf",
+ "thiserror",
+]
 
 [[package]]
 name = "alkahest-store"
