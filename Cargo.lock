@@ -45,6 +45,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "toml",
  "tracing",
  "wiremock",
 ]
@@ -170,6 +171,8 @@ name = "alkahest-store"
 version = "0.1.0"
 dependencies = [
  "alkahest-core",
+ "alkahest-gguf",
+ "alkahest-hf",
  "hex",
  "proptest",
  "serde",
@@ -177,6 +180,8 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "time",
+ "toml",
  "tracing",
 ]
 

@@ -76,6 +76,14 @@ impl AlkahestStore {
         ] {
             fs::create_dir_all(&dir).map_err(|e| StoreError::io("create", &dir, e))?;
         }
+        // Crashed processes leave temp files behind; sweeping them here keeps `tmp/` from
+        // growing without anyone running `gc`. Best effort: a busy or read-only store is
+        // opened all the same.
+        match store.try_clean_staging(crate::ops::STALE_STAGING_AGE) {
+            Ok(Some(n)) if n > 0 => tracing::info!(removed = n, "removed stale temp files"),
+            Ok(_) => {}
+            Err(e) => tracing::debug!(error = %e, "stale temp file cleanup skipped"),
+        }
         Ok(store)
     }
 
@@ -232,6 +240,19 @@ impl AlkahestStore {
         file.lock()
             .map_err(|e| StoreError::io("lock", &self.root.join(LOCK), e))?;
         Ok(StoreLock { _file: file })
+    }
+
+    /// Tries to take the store lock exclusively without waiting; `None` when a writer or GC
+    /// holds it.
+    pub(crate) fn try_lock_exclusive(&self) -> Result<Option<StoreLock>> {
+        let file = self.open_lock_file()?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(StoreLock { _file: file })),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+            Err(std::fs::TryLockError::Error(e)) => {
+                Err(StoreError::io("lock", &self.root.join(LOCK), e))
+            }
+        }
     }
 
     fn open_lock_file(&self) -> Result<File> {

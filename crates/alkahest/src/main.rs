@@ -5,6 +5,8 @@
 
 mod cli;
 mod hf_cmd;
+mod model_config_cmd;
+mod models_cmd;
 mod pull_cmd;
 mod search_cmd;
 mod sysinfo_cmd;
@@ -84,6 +86,14 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Command::Config { action } => config_command(action, &cli.global, &loaded),
         Command::Sysinfo => sysinfo_cmd::run(cli.global.json),
         Command::Hf { action } => hf_cmd::run(action, &loaded.config, cli.global.json),
+        Command::Ls => models_cmd::ls(&loaded, cli.global.json),
+        Command::Rm { models } => models_cmd::rm(models, &loaded, cli.global.json),
+        Command::Cp {
+            source,
+            destination,
+        } => models_cmd::cp(source, destination, &loaded, cli.global.json),
+        Command::Gc { dry_run } => models_cmd::gc(*dry_run, &loaded, cli.global.json),
+        Command::Show(args) => models_cmd::show(args, &loaded, cli.global.json),
         Command::Search(args) => search_cmd::run(args, &loaded.config, cli.global.json),
         Command::Pull {
             model,
@@ -146,6 +156,9 @@ fn config_command(action: &ConfigAction, global: &GlobalArgs, loaded: &Loaded) -
                 println!("# engines_dir  = {}", resolved.engines_dir.display());
                 println!("# log_dir      = {}", resolved.log_dir.display());
             }
+        }
+        ConfigAction::Model { model, action } => {
+            return model_config_cmd::run(model, action.as_ref(), loaded, global.json);
         }
         ConfigAction::Path => {
             if global.json {

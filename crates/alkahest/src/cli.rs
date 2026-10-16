@@ -93,6 +93,29 @@ pub struct SearchArgs {
     pub limit: u32,
 }
 
+/// Arguments of `alkahest show`.
+#[derive(Debug, Args)]
+pub struct ShowArgs {
+    /// Model reference: a name, `ollama:<name>`, `hf.co/org/repo:Q4_K_M`, a digest or the
+    /// first characters of the `ID` column.
+    pub model: String,
+    /// Print a Modelfile that recreates the model.
+    #[arg(long)]
+    pub modelfile: bool,
+    /// Print only the prompt template.
+    #[arg(long)]
+    pub template: bool,
+    /// Print only the default parameters.
+    #[arg(long)]
+    pub parameters: bool,
+    /// Print only the licence.
+    #[arg(long)]
+    pub license: bool,
+    /// Print only the system prompt.
+    #[arg(long)]
+    pub system: bool,
+}
+
 /// Every command of the tool. Variants that are not built yet name their owning story in
 /// [`Command::owner`].
 #[derive(Debug, Subcommand)]
@@ -126,11 +149,14 @@ pub enum Command {
         #[arg(required = true)]
         models: Vec<String>,
     },
-    /// Show details of a model.
-    Show {
-        /// Model reference.
-        model: String,
+    /// Delete blobs no model references and abandoned temporary files.
+    Gc {
+        /// Report what would be deleted without deleting it.
+        #[arg(long)]
+        dry_run: bool,
     },
+    /// Show details of a model.
+    Show(ShowArgs),
     /// Copy a model under a new name.
     Cp {
         /// Existing model.
@@ -253,6 +279,35 @@ pub enum ConfigAction {
     Show,
     /// Print the configuration file locations and whether they exist.
     Path,
+    /// Show or edit the configuration overlay of one model.
+    Model {
+        /// Model reference (an installed model, or a name to configure ahead of its pull).
+        model: String,
+        /// What to do; `show` when omitted.
+        #[command(subcommand)]
+        action: Option<ModelConfigAction>,
+    },
+}
+
+/// `alkahest config model <name> ...`
+#[derive(Debug, Subcommand)]
+pub enum ModelConfigAction {
+    /// Print the overlay, the recommended defaults and the effective settings.
+    Show,
+    /// Set one or more settings, `key=value` (for example `num_ctx=8192 kv_cache_type_k=q8_0`).
+    Set {
+        /// Assignments.
+        #[arg(required = true, value_name = "KEY=VALUE")]
+        assignments: Vec<String>,
+    },
+    /// Remove settings from the overlay.
+    Unset {
+        /// Setting names.
+        #[arg(required = true)]
+        keys: Vec<String>,
+    },
+    /// Print the path of the overlay file (edit it by hand if you prefer).
+    Path,
 }
 
 impl Command {
@@ -260,9 +315,9 @@ impl Command {
     pub fn owner(&self) -> Option<&'static str> {
         Some(match self {
             Self::Search(_) => "ALK-US-0021",
-            Self::Ls | Self::Show { .. } => "ALK-US-0012",
+            Self::Ls | Self::Show(_) => "ALK-US-0012",
             Self::Ps | Self::Stop { .. } => "ALK-US-0031",
-            Self::Rm { .. } | Self::Cp { .. } => "ALK-US-0013",
+            Self::Rm { .. } | Self::Cp { .. } | Self::Gc { .. } => "ALK-US-0013",
             Self::Run { .. } => "ALK-US-0039",
             Self::Serve => "ALK-US-0033",
             Self::Desktop => "ALK-US-0064",
@@ -287,7 +342,8 @@ impl Command {
             Self::Ls => "ls",
             Self::Ps => "ps",
             Self::Rm { .. } => "rm",
-            Self::Show { .. } => "show",
+            Self::Gc { .. } => "gc",
+            Self::Show(_) => "show",
             Self::Cp { .. } => "cp",
             Self::Run { .. } => "run",
             Self::Stop { .. } => "stop",
