@@ -1,0 +1,4 @@
+[
+  {"type":"file","oid":"o1","size":9000,"path":"README.md"},
+  {"type":"file","oid":"o2","size":135,"lfs":{"oid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":2019377696,"pointerSize":135},"path":"Llama-3.2-3B-Instruct-Q4_K_M.gguf"}
+]

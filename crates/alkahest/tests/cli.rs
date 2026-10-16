@@ -153,3 +153,32 @@ fn short_commands_do_not_create_log_files() {
     alkahest(tmp.path()).arg("ls").assert().code(2);
     assert!(!tmp.path().join("logs").exists());
 }
+
+#[test]
+fn sysinfo_json_reports_cpu_memory_and_accelerators() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = alkahest(tmp.path())
+        .args(["sysinfo", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(v["cpu"]["logical_cores"].as_u64().unwrap() >= 1);
+    assert!(v["memory"]["total_bytes"].as_u64().unwrap() > 0);
+    let accel = v["accelerators"].as_array().unwrap();
+    assert_eq!(accel.last().unwrap(), "cpu");
+}
+
+#[test]
+fn sysinfo_human_output_names_cpu_ram_and_accelerators() {
+    let tmp = tempfile::tempdir().unwrap();
+    alkahest(tmp.path())
+        .arg("sysinfo")
+        .assert()
+        .success()
+        .stdout(
+            contains("CPU:")
+                .and(contains("RAM:"))
+                .and(contains("Accelerators")),
+        );
+}

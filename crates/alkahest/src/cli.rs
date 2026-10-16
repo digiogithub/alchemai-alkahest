@@ -195,8 +195,7 @@ impl Command {
             Self::Keys { .. } => "ALK-US-0041",
             Self::Engines { .. } => "ALK-US-0049",
             Self::Service { .. } => "ALK-US-0045",
-            Self::Sysinfo => "ALK-US-0006",
-            Self::Config { .. } | Self::Completions { .. } => return None,
+            Self::Config { .. } | Self::Completions { .. } | Self::Sysinfo => return None,
         })
     }
 
