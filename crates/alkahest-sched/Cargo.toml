@@ -13,3 +13,5 @@ publish = false
 workspace = true
 
 [dependencies]
+alkahest-gguf.workspace = true
+thiserror.workspace = true

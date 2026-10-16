@@ -13,3 +13,10 @@ publish = false
 workspace = true
 
 [dependencies]
+libloading.workspace = true
+serde.workspace = true
+sysinfo.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
