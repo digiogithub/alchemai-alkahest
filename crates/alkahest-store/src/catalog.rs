@@ -22,6 +22,7 @@ use crate::manifest::{LayerKind, SourceInfo};
 use crate::meta::{MetaCache, ModelInfo};
 use crate::ollama::OllamaStore;
 use crate::ops::{CopyReport, DeleteReport};
+use crate::overlay::{Effective, ModelOverlays, ModelSettings};
 use crate::reference::{ModelName, ModelRef, Origin, ScopedRef};
 use crate::source::{ModelEntry, ModelSource};
 
@@ -248,6 +249,7 @@ pub struct Catalog {
     alkahest: AlkahestStore,
     ollama: Option<OllamaStore>,
     cache: MetaCache,
+    overlays: Option<ModelOverlays>,
     warnings: Vec<String>,
 }
 
@@ -264,6 +266,7 @@ impl Catalog {
             alkahest,
             ollama,
             cache: MetaCache::new(meta_cache_dir),
+            overlays: None,
             warnings: Vec::new(),
         }
     }
@@ -284,7 +287,51 @@ impl Catalog {
         };
         let mut c = Self::new(alkahest, ollama, Some(paths.cache_dir.join("gguf-meta")));
         c.warnings = warnings;
+        c.overlays = Some(ModelOverlays::in_data_dir(&paths.data_dir));
         Ok(c)
+    }
+
+    /// Stores per-model overlays in `overlays` (`Catalog::open` already does, below the data
+    /// dir).
+    pub fn with_overlays(mut self, overlays: ModelOverlays) -> Self {
+        self.overlays = Some(overlays);
+        self
+    }
+
+    /// The per-model overlay store, when the catalog was given one.
+    pub fn overlays(&self) -> Option<&ModelOverlays> {
+        self.overlays.as_ref()
+    }
+
+    /// Effective settings for a request on `entry`: request > model overlay > recommended >
+    /// global (ALK-SP-0010.R4). `thinking` selects the thinking or non-thinking recommended
+    /// sampling. Recommendations derived from the weights themselves (tool support seen in
+    /// the GGUF chat template) apply when the stored recommended layer is silent. Works for
+    /// Ollama models too: the overlay is keyed by name in Alkahest's own data dir.
+    pub fn effective_settings(
+        &self,
+        entry: &CatalogEntry,
+        request: &ModelSettings,
+        global: &ModelSettings,
+        thinking: Option<bool>,
+    ) -> Result<Effective> {
+        let overlays = self
+            .overlays
+            .as_ref()
+            .ok_or_else(|| StoreError::InvalidSettings {
+                what: entry.entry.name.display_short(),
+                reason: "this catalog has no overlay store".into(),
+            })?;
+        let from_weights = ModelSettings {
+            tools_enabled: entry
+                .info
+                .capabilities
+                .iter()
+                .any(|c| c == "tools")
+                .then_some(true),
+            ..ModelSettings::default()
+        };
+        overlays.resolve(&entry.entry.name, request, global, thinking, &from_weights)
     }
 
     /// Problems found while opening or listing that did not stop the catalog.
@@ -551,12 +598,18 @@ impl Catalog {
                 }));
             }
         }
-        self.alkahest
-            .delete_model(&e.entry.name)?
-            .ok_or_else(|| StoreError::ModelNotFound {
+        let report = self.alkahest.delete_model(&e.entry.name)?.ok_or_else(|| {
+            StoreError::ModelNotFound {
                 reference: input.to_owned(),
                 hint: String::new(),
-            })
+            }
+        })?;
+        // The recommended defaults are re-created by the next pull; the user's own overlay
+        // stays so that a re-pulled model keeps its tuning.
+        if let Some(o) = &self.overlays {
+            o.remove_recommended(&report.name)?;
+        }
+        Ok(report)
     }
 
     /// `alkahest cp`: resolves `source` in any store and creates `destination` in the

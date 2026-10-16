@@ -273,6 +273,35 @@ pub enum ConfigAction {
     Show,
     /// Print the configuration file locations and whether they exist.
     Path,
+    /// Show or edit the configuration overlay of one model.
+    Model {
+        /// Model reference (an installed model, or a name to configure ahead of its pull).
+        model: String,
+        /// What to do; `show` when omitted.
+        #[command(subcommand)]
+        action: Option<ModelConfigAction>,
+    },
+}
+
+/// `alkahest config model <name> ...`
+#[derive(Debug, Subcommand)]
+pub enum ModelConfigAction {
+    /// Print the overlay, the recommended defaults and the effective settings.
+    Show,
+    /// Set one or more settings, `key=value` (for example `num_ctx=8192 kv_cache_type_k=q8_0`).
+    Set {
+        /// Assignments.
+        #[arg(required = true, value_name = "KEY=VALUE")]
+        assignments: Vec<String>,
+    },
+    /// Remove settings from the overlay.
+    Unset {
+        /// Setting names.
+        #[arg(required = true)]
+        keys: Vec<String>,
+    },
+    /// Print the path of the overlay file (edit it by hand if you prefer).
+    Path,
 }
 
 impl Command {

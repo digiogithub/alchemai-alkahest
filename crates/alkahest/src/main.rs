@@ -5,6 +5,7 @@
 
 mod cli;
 mod hf_cmd;
+mod model_config_cmd;
 mod models_cmd;
 mod search_cmd;
 mod sysinfo_cmd;
@@ -149,6 +150,9 @@ fn config_command(action: &ConfigAction, global: &GlobalArgs, loaded: &Loaded) -
                 println!("# engines_dir  = {}", resolved.engines_dir.display());
                 println!("# log_dir      = {}", resolved.log_dir.display());
             }
+        }
+        ConfigAction::Model { model, action } => {
+            return model_config_cmd::run(model, action.as_ref(), loaded, global.json);
         }
         ConfigAction::Path => {
             if global.json {

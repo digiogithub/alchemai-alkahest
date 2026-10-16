@@ -106,6 +106,14 @@ pub enum StoreError {
         /// Why it cannot run locally.
         reason: String,
     },
+    /// A per-model settings file or value is invalid.
+    #[error("invalid model settings {what}: {reason}")]
+    InvalidSettings {
+        /// The file or model concerned.
+        what: String,
+        /// Why it was rejected.
+        reason: String,
+    },
     /// A name or reference is invalid.
     #[error(transparent)]
     Reference(#[from] RefError),

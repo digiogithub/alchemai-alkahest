@@ -12,6 +12,8 @@
 //!   resolver for user references (ALK-SP-0001.R5).
 //! * [`meta`]: [`ModelInfo`] and the cached GGUF facts behind it.
 //! * [`ops`]: delete, copy and garbage collection on [`AlkahestStore`] (ALK-SP-0001.R4).
+//! * [`overlay`]: per-model settings overlay and the effective-settings resolver
+//!   (ALK-SP-0010.R4).
 //! * [`source`]: the [`ModelSource`] trait the catalog merges stores through.
 
 pub mod catalog;
@@ -23,6 +25,7 @@ pub mod manifest;
 pub mod meta;
 pub mod ollama;
 pub mod ops;
+pub mod overlay;
 pub mod reference;
 pub mod source;
 
@@ -37,5 +40,9 @@ pub use manifest::{
 pub use meta::{GgufFacts, ModelInfo, format_parameters};
 pub use ollama::OllamaStore;
 pub use ops::{CopyReport, DeleteReport, GcReport, STALE_STAGING_AGE};
+pub use overlay::{
+    Effective, Layer, Layers, ModelOverlays, ModelSettings, RecommendedLayer, RecommendedSampling,
+    resolve as resolve_settings,
+};
 pub use reference::{HfRef, HfSelector, ModelName, ModelRef, Origin, RefError, RefPart, ScopedRef};
 pub use source::{LayerInfo, ModelEntry, ModelSource};

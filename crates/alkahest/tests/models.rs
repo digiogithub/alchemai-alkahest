@@ -168,6 +168,54 @@ fn rm_refuses_ollama_models() {
     assert!(stdout(alkahest(home.path(), &ollama).arg("ls")).contains("llama3.2"));
 }
 
+/// `alkahest config model <name> set|show|unset` on a read-only Ollama model (ALK-SP-0010.R4).
+#[test]
+fn config_model_set_show_unset() {
+    let home = tempfile::tempdir().unwrap();
+    let ollama = ollama_store(home.path());
+    let out = stdout(alkahest(home.path(), &ollama).args([
+        "config",
+        "model",
+        "llama3.2",
+        "set",
+        "num_ctx=8192",
+        "kv_cache_type_k=q8_0",
+        "keep_alive=1h",
+    ]));
+    assert!(out.contains("context_length = 8192"), "{out}");
+
+    let shown: Value = serde_json::from_str(&stdout(
+        alkahest(home.path(), &ollama).args(["config", "model", "llama3.2", "--json"]),
+    ))
+    .unwrap();
+    assert_eq!(shown["overlay"]["context_length"], 8192);
+    assert_eq!(shown["effective"]["context_length"], 8192);
+    assert_eq!(shown["origins"]["context_length"], "model");
+    // keep_alive: the overlay wins over the global default.
+    assert_eq!(shown["origins"]["keep_alive"], "model");
+
+    let text = stdout(alkahest(home.path(), &ollama).args(["config", "model", "llama3.2"]));
+    assert!(text.contains("context_length = 8192  [model]"), "{text}");
+
+    stdout(alkahest(home.path(), &ollama).args([
+        "config",
+        "model",
+        "llama3.2",
+        "unset",
+        "num_ctx",
+        "kv_cache_type_k",
+        "keep_alive",
+    ]));
+    let path = stdout(alkahest(home.path(), &ollama).args(["config", "model", "llama3.2", "path"]));
+    assert!(!std::path::Path::new(path.trim()).exists());
+
+    let bad = alkahest(home.path(), &ollama)
+        .args(["config", "model", "llama3.2", "set", "num_ctx=lots"])
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(1));
+}
+
 #[test]
 fn cp_rm_and_gc_round_trip() {
     let home = tempfile::tempdir().unwrap();

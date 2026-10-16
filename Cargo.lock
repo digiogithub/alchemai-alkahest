@@ -41,6 +41,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "toml",
  "tracing",
  "wiremock",
 ]
@@ -155,6 +156,7 @@ version = "0.1.0"
 dependencies = [
  "alkahest-core",
  "alkahest-gguf",
+ "alkahest-hf",
  "hex",
  "proptest",
  "serde",
@@ -163,6 +165,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "time",
+ "toml",
  "tracing",
 ]
 
