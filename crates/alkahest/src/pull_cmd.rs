@@ -11,7 +11,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use alkahest_core::config::Loaded;
+use alkahest_core::paths::process_env;
 use alkahest_fetch::FetchConfig;
+use alkahest_hf::pull::pull_hf;
+use alkahest_hf::{HfClient, KeyringStore};
 use alkahest_ollama::{PullEvent, PullOptions, PullOutcome, RegistryClient, Transfer, pull_ollama};
 use alkahest_store::{AlkahestStore, ModelRef, OllamaStore, ScopedRef};
 use anyhow::{Context, Result, bail};
@@ -118,13 +121,42 @@ async fn run_async(
                 )?,
             }
         }
-        ModelRef::HuggingFace(_) => {
-            bail!("Hugging Face pulls are not implemented yet (ALK-US-0019)")
+        ModelRef::HuggingFace(hf) => {
+            let client = HfClient::from_config(&loaded.config.hf, &process_env, &KeyringStore)?;
+            let transfer = Transfer::new(store, reqwest_client()?, FetchConfig::default(), cancel)
+                .with_progress(progress);
+            let outcome = pull_hf(&transfer, &client, &hf)
+                .await
+                .with_context(|| format!("pulling {hf}"))?;
+            renderer.finish();
+            report(
+                &mut out,
+                json,
+                json!({"event":"done","outcome":"installed","name":outcome.name.to_string(),
+                       "manifest":outcome.manifest_digest.to_string(),
+                       "revision":outcome.revision,"files":outcome.files,
+                       "downloaded":outcome.downloaded}),
+                &format!(
+                    "pulled {} ({}, revision {})",
+                    outcome.name,
+                    outcome.manifest_digest.short(),
+                    outcome.revision.get(..12).unwrap_or(&outcome.revision)
+                ),
+            )?;
         }
         ModelRef::Digest(d) => bail!("`{d}` is a digest, not a model name; nothing to pull"),
     }
     out.flush()?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// A plain redirect-following client for Hub downloads (the downloader sets the headers).
+fn reqwest_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(concat!("alkahest/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(15))
+        .build()
+        .context("building the HTTP client")
 }
 
 /// Prints the final line: JSON object, or human text.
