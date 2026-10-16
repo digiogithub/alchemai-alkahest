@@ -7,12 +7,14 @@
 //! file cannot force a large allocation.
 
 mod accessors;
+mod classify;
 mod error;
 mod ggml;
 mod reader;
 mod value;
 
 pub use accessors::PoolingType;
+pub use classify::{Classification, ClassifyInput, ModelFormat, ModelKind, classify};
 pub use error::GgufError;
 pub use ggml::{GgmlType, QuantFamily, file_type_name};
 pub use reader::{Gguf, Limits, TensorInfo};
