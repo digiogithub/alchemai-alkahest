@@ -19,6 +19,8 @@ requirements:
     status: backlog
   R6:
     status: backlog
+  R7:
+    status: backlog
 ---
 
 ## Purpose
@@ -80,3 +82,11 @@ The server SHALL serve HTTPS with a configured certificate and key (rustls) when
 #### Scenario: tls
 - **WHEN** TLS is configured
 - **THEN** clients connect over HTTPS
+
+### ALK-SP-0006.R7 — Endpoint families and CORS
+
+The server SHALL let the administrator enable or disable each endpoint family (Ollama native `/api/*`, OpenAI `/v1/*`, Anthropic `/v1/messages`, decisions `/v1/systemone` and `/v1/decisions`) and configure allowed CORS origins, answering 404 for a disabled family.
+
+#### Scenario: disabled family
+- **WHEN** the Anthropic family is disabled and a client posts to `/v1/messages`
+- **THEN** the server answers 404

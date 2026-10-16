@@ -9,11 +9,12 @@ milestone: ALK-M-0003
 labels: [security]
 estimate: 3
 created: 2026-10-16T22:41:11Z
-updated: 2026-10-16T22:41:17Z
+updated: 2026-10-16T22:52:31Z
 links:
   - { kind: implements, target: ALK-SP-0006.R1 }
   - { kind: implements, target: ALK-SP-0006.R2 }
   - { kind: implements, target: ALK-SP-0006.R4 }
+  - { kind: implements, target: ALK-SP-0006.R7 }
 ---
 
 ## Description

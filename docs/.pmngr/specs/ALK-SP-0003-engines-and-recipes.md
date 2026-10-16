@@ -43,7 +43,7 @@ Each engine SHALL declare its capabilities (chat, completion, embeddings, rerank
 
 ### ALK-SP-0003.R2 — Engine selection
 
-The system SHALL select the engine from the model format and quantization: PQ2_0 and PTQ1_0 GGUF to the PrismML llama.cpp engine, other GGUF to mainline llama.cpp, safetensors on Linux with NVIDIA to vLLM; a per-model `engine` setting SHALL override the rule.
+The system SHALL select the engine from the model format and quantization: PQ2_0 and PTQ1_0 GGUF to the PrismML llama.cpp engine, other GGUF to mainline llama.cpp, safetensors to vLLM on Linux with NVIDIA and on macOS with Apple Silicon (M1 to M4, aarch64) where vLLM supports it; a per-model `engine` setting SHALL override the rule.
 
 #### Scenario: bonsai routing
 - **WHEN** a Ternary-Bonsai-2 PQ2_0 model is requested

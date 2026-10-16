@@ -130,14 +130,21 @@ whisper-server, sd-server). Alkahest proxies and translates; it does not embed i
 | M4 | Desktop | 2027-03-05 | `alkahest desktop` with search, download, config, monitoring, keys |
 | M5 | v1.0 release | 2027-03-26 | installers for Linux/macOS/Windows, docs, hardening, perf |
 
-## 5. Open questions for the product owner
+## 5. Product owner decisions (2026-10-17)
 
-1. "Jev API": assumed to be the decision API (`/v1/systemone`, `/v1/decisions`) served by
-   Ollama >= 0.35 and LocalAI. Confirm.
-2. Milestone dates are proposed, not agreed.
-3. Default port: proposal `127.0.0.1:11435` (Ollama keeps 11434). Native Ollama API paths
-   are kept so Ollama clients work by changing the port.
-4. vLLM support: Linux + NVIDIA only in v1 (Python venv managed by a recipe)?
-5. Ollama models stored with Go TEMPLATE layers: v1 uses the GGUF jinja template when present
-   and a Go-template subset renderer otherwise (spike ALK task). Accept?
-6. Licence of Alkahest itself (Bitacora/Pando use MIT; Digio proprietary?).
+1. Jev was the first commercial decision-model API; Ollama and LocalAI cloned it as
+   `/v1/systemone` so clients move between services transparently. Alkahest implements the
+   same contract plus the LocalAI `/v1/decisions` alias (ALK-SP-0007).
+2. Milestone dates in section 4 are accepted. Implementation runs with subagents.
+3. Default bind `127.0.0.1:11435` (Ollama keeps 11434).
+4. vLLM on Linux + NVIDIA, and on macOS Apple Silicon (M1–M4, aarch64) where vLLM supports
+   it (spike ALK-T-0212).
+5. Licence: MIT.
+6. Desktop design hand-off lives in `design/` (Alembic design system, brand, screens 10–14)
+   with the master canvas at https://claude.ai/artifact/Fv6snHtv63gBKhtrzvZbKv. Engines,
+   Settings and empty/error states are not designed yet (ALK-US-0081).
+
+## 6. Open questions
+
+1. Ollama models stored with Go TEMPLATE layers: v1 uses the GGUF jinja template when present
+   and a Go-template subset renderer otherwise; settled by the spike story in E3.

@@ -25,7 +25,7 @@ Serve decision models that answer structured questions with probabilities in one
 
 ## Scope
 
-Covers request and response shapes, question types, encodings, scoring and model detection. To be confirmed by the product owner as the 'Jev' API.
+Covers request and response shapes, question types, encodings, scoring and model detection. Jev was the first commercial decision-model API; open-source projects (Ollama, LocalAI) cloned its API as `/v1/systemone` so clients can move between services transparently. Alkahest implements the same contract (product owner decision, 2026-10-17).
 
 Plan: [[plan/alkahest-v1-plan]]
 

@@ -9,7 +9,7 @@ milestone: ALK-M-0005
 labels: [desktop, recipes]
 estimate: 3
 created: 2026-10-16T22:43:18Z
-updated: 2026-10-16T22:43:20Z
+updated: 2026-10-16T22:52:14Z
 links:
   - { kind: implements, target: ALK-SP-0003.R4 }
 ---
@@ -26,3 +26,7 @@ As a desktop user, I want to see installed engines and install variants for my h
 ## Notes
 
 Implements [[ALK-SP-0003.R4]]. Plan: [[plan/alkahest-v1-plan]]
+
+## Design
+
+Not designed yet in `design/`. Follow the Alembic system and the Library table patterns; design it in the canvas first (see the design-gaps story). Master canvas: https://claude.ai/artifact/Fv6snHtv63gBKhtrzvZbKv.

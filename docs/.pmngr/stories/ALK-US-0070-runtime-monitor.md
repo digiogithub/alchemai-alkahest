@@ -9,7 +9,7 @@ milestone: ALK-M-0005
 labels: [desktop, observability]
 estimate: 5
 created: 2026-10-16T22:43:10Z
-updated: 2026-10-16T22:43:13Z
+updated: 2026-10-16T22:52:12Z
 links:
   - { kind: implements, target: ALK-SP-0008.R6 }
 ---
@@ -27,3 +27,7 @@ As a desktop user, I want to see loaded models, CPU/GPU placement, RAM/VRAM and 
 ## Notes
 
 Implements [[ALK-SP-0008.R6]]. Plan: [[plan/alkahest-v1-plan]]
+
+## Design
+
+Screen **13 Running**: `design/screens/13-running.html`. Hardware tiles, one row per loaded model (processor pill, memory, slot segments, throughput, keep-alive countdown), Unload idle / Stop all, live requests table (client key prefix, endpoint, tokens, latency). Master canvas: https://claude.ai/artifact/Fv6snHtv63gBKhtrzvZbKv.

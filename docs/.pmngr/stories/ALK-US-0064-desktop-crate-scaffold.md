@@ -9,7 +9,7 @@ milestone: ALK-M-0005
 labels: [desktop]
 estimate: 5
 created: 2026-10-16T22:42:43Z
-updated: 2026-10-16T22:42:48Z
+updated: 2026-10-16T22:52:07Z
 links:
   - { kind: implements, target: ALK-SP-0008.R1 }
 ---
@@ -28,3 +28,7 @@ As a developer, I want the GPUI app skeleton with the gpui-kit facade, design to
 ## Notes
 
 Implements [[ALK-SP-0008.R1]]. Plan: [[plan/alkahest-v1-plan]]
+
+## Design
+
+Shell and foundations: `design/README.md` sections *Design system "Alembic"* and *Shell* (window 1440×900 min 960×640, 232 px left rail with Library/Discover/Running/Engines/API keys and live counters, service card). Tokens from `design/tokens.json`; fonts Schibsted Grotesk + IBM Plex Mono embedded (OFL-1.1); Lucide-compatible 24-unit stroke icons; window icon `design/brand/app-icon.svg`. Screen 01 `design/screens/01-design-system.html` is the component reference. Dark theme first; light tokens optional for v1. Master canvas: https://claude.ai/artifact/Fv6snHtv63gBKhtrzvZbKv.

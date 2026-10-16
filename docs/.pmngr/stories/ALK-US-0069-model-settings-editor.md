@@ -9,7 +9,7 @@ milestone: ALK-M-0005
 labels: [desktop, config]
 estimate: 5
 created: 2026-10-16T22:43:04Z
-updated: 2026-10-16T22:43:09Z
+updated: 2026-10-16T22:52:11Z
 links:
   - { kind: implements, target: ALK-SP-0008.R5 }
   - { kind: implements, target: ALK-SP-0010.R3 }
@@ -29,3 +29,7 @@ As a desktop user, I want to edit context window, KV cache, flash attention, GPU
 ## Notes
 
 Implements [[ALK-SP-0008.R5]], [[ALK-SP-0010.R3]]. Plan: [[plan/alkahest-v1-plan]]
+
+## Design
+
+Screen **12 Model settings**: `design/screens/12-model-settings.html`. Runtime card (log-scale context slider 2k–128k with card value marked, KV K/V types, GPU layers, slots, batch, threads, toggles), chat template card (GGUF jinja / Ollama TEMPLATE / Custom), memory estimate stacked bar, "Model card says" diff, engine launch line, "Save & reload". Master canvas: https://claude.ai/artifact/Fv6snHtv63gBKhtrzvZbKv.
