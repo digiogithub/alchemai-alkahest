@@ -2,14 +2,15 @@
 id: ALK-T-0009
 type: task
 title: Define configuration schema (TOML) in alkahest-core
-status: backlog
+status: done
 priority: critical
 parent: ALK-US-0003
 milestone: ALK-M-0001
 labels: [infra]
 effort: 3
 created: 2026-10-16T22:38:10Z
-updated: 2026-10-16T22:38:10Z
+updated: 2026-10-16T23:12:39Z
+closed: 2026-10-16T23:12:39Z
 ---
 
 ## Description

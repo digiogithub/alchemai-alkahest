@@ -5,7 +5,7 @@ title: Model classification and optimization defaults
 status: backlog
 labels: [gguf, config]
 created: 2026-10-16T22:37:40Z
-updated: 2026-10-16T23:11:29Z
+updated: 2026-10-16T23:12:39Z
 requirements:
   R1:
     status: backlog
@@ -25,6 +25,9 @@ requirements:
     status: backlog
   R4:
     status: backlog
+    trace:
+      code: [crates/alkahest-core/src/config.rs#Config]
+      tests: [crates/alkahest-core/src/config.rs#env_vars_override_file_values]
   R5:
     status: backlog
 ---

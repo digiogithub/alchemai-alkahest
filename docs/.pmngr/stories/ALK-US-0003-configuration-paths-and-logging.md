@@ -2,15 +2,16 @@
 id: ALK-US-0003
 type: story
 title: Configuration, paths and logging
-status: in_progress
+status: done
 priority: critical
 parent: ALK-EP-0001
 milestone: ALK-M-0001
 labels: [infra, config]
 estimate: 3
 created: 2026-10-16T22:38:09Z
-updated: 2026-10-16T23:06:13Z
+updated: 2026-10-16T23:13:33Z
 started: 2026-10-16T23:06:13Z
+closed: 2026-10-16T23:13:33Z
 links:
   - { kind: implements, target: ALK-SP-0010.R4 }
 ---
