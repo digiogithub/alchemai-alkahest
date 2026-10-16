@@ -1,0 +1,18 @@
+[files]
+extend-exclude = [
+    "Cargo.lock",
+    "LICENSE",
+    "docs/.pmngr/**",
+    # Product owner notes and the design hand-off are partly Spanish.
+    "initial_requirements.md",
+    "design/**",
+]
+
+[default.extend-words]
+alkahest = "alkahest"
+Alkahest = "Alkahest"
+gguf = "gguf"
+GGUF = "GGUF"
+gpui = "gpui"
+# "PNGs" is split into "PN" + "Gs"
+PN = "PN"

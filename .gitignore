@@ -1,3 +1,4 @@
 .pando/
 target/
 dist/
+/.claude/worktrees/

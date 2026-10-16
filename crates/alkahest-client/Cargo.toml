@@ -1,0 +1,15 @@
+[package]
+name = "alkahest-client"
+description = "Alkahest: Typed HTTP client for the Alkahest API, shared by the CLI and the desktop app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]

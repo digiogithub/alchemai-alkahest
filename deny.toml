@@ -1,0 +1,48 @@
+# cargo-deny configuration. Licence policy: permissive licences only; no GPL, LGPL or AGPL
+# in any build (AGENTS.md section 5).
+
+[graph]
+all-features = false
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# MPL-2.0 is file-level copyleft and acceptable (option-ext via directories); it is not GPL.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "0BSD",
+    "CDLA-Permissive-2.0",
+    "OpenSSL",
+]
+# The allow list covers licences the pre-pinned dependencies bring in later stories.
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    { crate = "openssl-sys", reason = "rustls only (reqwest without native-tls)" },
+    { crate = "native-tls", reason = "rustls only (reqwest without native-tls)" },
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

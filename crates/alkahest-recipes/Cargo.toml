@@ -1,0 +1,15 @@
+[package]
+name = "alkahest-recipes"
+description = "Alkahest: Engine recipes: download a prebuilt engine or build one from source for a given accelerator, described by TOML files under recipes/."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]

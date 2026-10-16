@@ -1,0 +1,31 @@
+[package]
+name = "alkahest"
+description = "Alkahest: local and on-premise AI model server and manager (CLI, server and desktop launcher)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "alkahest"
+path = "src/main.rs"
+
+[features]
+default = []
+# Links the GPUI desktop app for `alkahest desktop`. A build without it must not
+# link GPUI, X11, Wayland or Vulkan.
+desktop = ["dep:alkahest-desktop"]
+
+[dependencies]
+alkahest-desktop = { workspace = true, optional = true }
+clap.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true

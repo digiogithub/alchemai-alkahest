@@ -1,0 +1,13 @@
+Alkahest
+Copyright (c) 2026 Digio
+Licensed under the MIT License (see LICENSE).
+
+This product includes or adapts third-party material listed below. Each entry
+names the component, its licence and where its licence text is kept. Code
+copied or adapted from another project keeps its original licence header.
+
+Third-party components
+----------------------
+
+(none yet; `cargo xtask notice` will generate the dependency section, and
+embedded fonts and engine binaries are added as their stories land)

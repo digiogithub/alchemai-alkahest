@@ -1,0 +1,25 @@
+# Alkahest
+
+Local and on-premise AI model server and manager: one compact Rust binary with an
+Ollama-style CLI (`pull`, `ls`, `ps`, `rm`, `show`, `cp`, `run`, `stop`, `serve`), model
+downloads from the Ollama registry and Hugging Face, read-only reuse of an existing Ollama
+store, on-demand model loading with several engines (llama.cpp, the PrismML fork, vLLM,
+whisper.cpp, stable-diffusion.cpp), one unified API (Ollama, OpenAI, Anthropic, decisions)
+and a GPUI desktop app (`alkahest desktop`).
+
+Status: early development. Plan: `docs/plan/alkahest-v1-plan.md`. Contributor and agent
+rules: `AGENTS.md`.
+
+## Build
+
+```sh
+cargo build -p alkahest --no-default-features   # headless (server and CLI)
+cargo build -p alkahest --features desktop      # with the desktop app
+```
+
+The toolchain is pinned in `rust-toolchain.toml`. Verification commands are listed in
+`AGENTS.md` section 5.
+
+## Licence
+
+MIT, copyright 2026 Digio. See `LICENSE` and `NOTICE`.

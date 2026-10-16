@@ -1,0 +1,10 @@
+[profile.default]
+fail-fast = false
+
+# CI profile: JUnit report at target/nextest/ci/junit.xml, ingested by `gintrack spec ingest`.
+[profile.ci]
+fail-fast = false
+retries = 0
+
+[profile.ci.junit]
+path = "junit.xml"

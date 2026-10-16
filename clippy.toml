@@ -1,0 +1,4 @@
+# Workspace-wide clippy configuration. Test code may use unwrap/expect/dbg.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-dbg-in-tests = true

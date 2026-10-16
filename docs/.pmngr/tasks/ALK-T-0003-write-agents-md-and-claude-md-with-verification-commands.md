@@ -2,14 +2,15 @@
 id: ALK-T-0003
 type: task
 title: Write AGENTS.md and CLAUDE.md with verification commands and KB rules
-status: backlog
+status: done
 priority: critical
 parent: ALK-US-0001
 milestone: ALK-M-0001
 labels: [infra]
 effort: 2
 created: 2026-10-16T22:38:02Z
-updated: 2026-10-16T22:38:02Z
+updated: 2026-10-16T23:04:59Z
+closed: 2026-10-16T23:04:59Z
 ---
 
 ## Description
