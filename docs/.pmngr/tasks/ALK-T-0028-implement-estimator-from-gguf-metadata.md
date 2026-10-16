@@ -2,14 +2,15 @@
 id: ALK-T-0028
 type: task
 title: Implement estimator from GGUF metadata
-status: backlog
+status: done
 priority: high
 parent: ALK-US-0008
 milestone: ALK-M-0001
 labels: [gguf]
 effort: 3
 created: 2026-10-16T22:38:34Z
-updated: 2026-10-16T22:38:34Z
+updated: 2026-10-16T23:20:23Z
+closed: 2026-10-16T23:20:23Z
 ---
 
 ## Description

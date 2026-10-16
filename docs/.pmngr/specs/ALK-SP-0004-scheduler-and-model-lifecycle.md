@@ -5,7 +5,7 @@ title: Scheduler and model lifecycle
 status: backlog
 labels: [sched]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-16T22:37:34Z
+updated: 2026-10-16T23:19:26Z
 requirements:
   R1:
     status: backlog
@@ -13,6 +13,10 @@ requirements:
     status: backlog
   R3:
     status: backlog
+    trace:
+      code: [crates/alkahest-sched/src/memory.rs#MemoryEstimate]
+      tests:
+        - crates/alkahest-sched/tests/memory.rs#admission_uses_the_fraction_of_free_memory
   R4:
     status: backlog
   R5:

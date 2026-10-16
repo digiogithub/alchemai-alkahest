@@ -2,14 +2,14 @@
 id: ALK-US-0008
 type: story
 title: Memory estimator
-status: in_progress
+status: in_review
 priority: high
 parent: ALK-EP-0002
 milestone: ALK-M-0001
 labels: [gguf, sched]
 estimate: 5
 created: 2026-10-16T22:38:33Z
-updated: 2026-10-16T23:12:24Z
+updated: 2026-10-16T23:20:32Z
 started: 2026-10-16T23:12:24Z
 links:
   - { kind: implements, target: ALK-SP-0010.R5 }

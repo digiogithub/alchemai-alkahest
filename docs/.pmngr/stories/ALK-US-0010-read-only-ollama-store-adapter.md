@@ -2,14 +2,15 @@
 id: ALK-US-0010
 type: story
 title: Read-only Ollama store adapter
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0003
 milestone: ALK-M-0002
 labels: [store, ollama]
 estimate: 5
 created: 2026-10-16T22:38:44Z
-updated: 2026-10-16T22:38:48Z
+updated: 2026-10-16T23:18:00Z
+started: 2026-10-16T23:18:00Z
 links:
   - { kind: implements, target: ALK-SP-0001.R2 }
 ---

@@ -2,14 +2,15 @@
 id: ALK-T-0021
 type: task
 title: NVIDIA detection via dynamically loaded NVML
-status: backlog
+status: done
 priority: critical
 parent: ALK-US-0006
 milestone: ALK-M-0001
 labels: [sysinfo]
 effort: 3
 created: 2026-10-16T22:38:25Z
-updated: 2026-10-16T22:38:25Z
+updated: 2026-10-16T23:20:23Z
+closed: 2026-10-16T23:20:23Z
 ---
 
 ## Description

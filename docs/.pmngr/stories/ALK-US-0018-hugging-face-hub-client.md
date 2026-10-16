@@ -2,14 +2,15 @@
 id: ALK-US-0018
 type: story
 title: Hugging Face Hub client
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0004
 milestone: ALK-M-0002
 labels: [hf]
 estimate: 5
 created: 2026-10-16T22:39:22Z
-updated: 2026-10-16T22:39:25Z
+updated: 2026-10-16T23:20:32Z
+started: 2026-10-16T23:20:32Z
 links:
   - { kind: implements, target: ALK-SP-0002.R3 }
 ---
