@@ -2,15 +2,16 @@
 id: ALK-US-0004
 type: story
 title: CLI command tree skeleton
-status: in_progress
+status: done
 priority: high
 parent: ALK-EP-0001
 milestone: ALK-M-0001
 labels: [cli]
 estimate: 2
 created: 2026-10-16T22:38:14Z
-updated: 2026-10-16T23:07:00Z
+updated: 2026-10-16T23:17:42Z
 started: 2026-10-16T23:07:00Z
+closed: 2026-10-16T23:17:42Z
 ---
 
 ## Description

@@ -2,14 +2,14 @@
 id: ALK-US-0002
 type: story
 title: Set up CI pipeline
-status: in_progress
+status: in_review
 priority: critical
 parent: ALK-EP-0001
 milestone: ALK-M-0001
 labels: [infra, ci]
 estimate: 3
 created: 2026-10-16T22:38:04Z
-updated: 2026-10-16T23:13:33Z
+updated: 2026-10-16T23:17:42Z
 started: 2026-10-16T23:13:33Z
 ---
 
