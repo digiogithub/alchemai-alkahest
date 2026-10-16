@@ -93,6 +93,29 @@ pub struct SearchArgs {
     pub limit: u32,
 }
 
+/// Arguments of `alkahest show`.
+#[derive(Debug, Args)]
+pub struct ShowArgs {
+    /// Model reference: a name, `ollama:<name>`, `hf.co/org/repo:Q4_K_M`, a digest or the
+    /// first characters of the `ID` column.
+    pub model: String,
+    /// Print a Modelfile that recreates the model.
+    #[arg(long)]
+    pub modelfile: bool,
+    /// Print only the prompt template.
+    #[arg(long)]
+    pub template: bool,
+    /// Print only the default parameters.
+    #[arg(long)]
+    pub parameters: bool,
+    /// Print only the licence.
+    #[arg(long)]
+    pub license: bool,
+    /// Print only the system prompt.
+    #[arg(long)]
+    pub system: bool,
+}
+
 /// Every command of the tool. Variants that are not built yet name their owning story in
 /// [`Command::owner`].
 #[derive(Debug, Subcommand)]
@@ -121,10 +144,7 @@ pub enum Command {
         models: Vec<String>,
     },
     /// Show details of a model.
-    Show {
-        /// Model reference.
-        model: String,
-    },
+    Show(ShowArgs),
     /// Copy a model under a new name.
     Cp {
         /// Existing model.
@@ -255,7 +275,7 @@ impl Command {
         Some(match self {
             Self::Pull { .. } => "ALK-US-0017",
             Self::Search(_) => "ALK-US-0021",
-            Self::Ls | Self::Show { .. } => "ALK-US-0012",
+            Self::Ls | Self::Show(_) => "ALK-US-0012",
             Self::Ps | Self::Stop { .. } => "ALK-US-0031",
             Self::Rm { .. } | Self::Cp { .. } => "ALK-US-0013",
             Self::Run { .. } => "ALK-US-0039",
@@ -278,7 +298,7 @@ impl Command {
             Self::Ls => "ls",
             Self::Ps => "ps",
             Self::Rm { .. } => "rm",
-            Self::Show { .. } => "show",
+            Self::Show(_) => "show",
             Self::Cp { .. } => "cp",
             Self::Run { .. } => "run",
             Self::Stop { .. } => "stop",

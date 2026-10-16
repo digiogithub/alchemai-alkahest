@@ -1,0 +1,155 @@
+//! `alkahest ls` and `show` over a synthetic Ollama store (ALK-SP-0001.R2, R5).
+#![allow(clippy::unwrap_used)]
+
+use std::fs;
+use std::path::Path;
+
+use alkahest_store::Digest;
+use assert_cmd::Command;
+use serde_json::Value;
+
+fn put_blob(root: &Path, bytes: &[u8]) -> (String, usize) {
+    let d = Digest::of(bytes);
+    fs::write(root.join("blobs").join(d.filename()), bytes).unwrap();
+    (d.to_string(), bytes.len())
+}
+
+/// Writes `llama3.2:latest` with a template, a system prompt and parameters.
+fn ollama_store(base: &Path) -> std::path::PathBuf {
+    let root = base.join("ollama");
+    fs::create_dir_all(root.join("blobs")).unwrap();
+    let layer = |mt: &str, bytes: &[u8]| {
+        let (d, n) = put_blob(&root, bytes);
+        serde_json::json!({"mediaType": mt, "digest": d, "size": n})
+    };
+    let config = layer(
+        "application/vnd.docker.container.image.v1+json",
+        br#"{"model_format":"gguf","model_family":"llama","model_type":"3.2B","file_type":"Q4_K_M","capabilities":["completion","tools"]}"#,
+    );
+    let manifest = serde_json::json!({
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "config": config,
+        "layers": [
+            layer("application/vnd.ollama.image.model", b"not a real gguf"),
+            layer("application/vnd.ollama.image.template", b"{{ .Prompt }}"),
+            layer("application/vnd.ollama.image.system", b"Be brief."),
+            layer("application/vnd.ollama.image.params", br#"{"stop":["<eot>"]}"#),
+            layer("application/vnd.ollama.image.license", b"MIT"),
+        ],
+    });
+    let p = root.join("manifests/registry.ollama.ai/library/llama3.2/latest");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(p, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    root
+}
+
+fn alkahest(home: &Path, ollama: &Path) -> Command {
+    let mut cmd = Command::cargo_bin("alkahest").unwrap();
+    cmd.env("ALKAHEST_HOME", home.join("alk"))
+        .env("ALKAHEST_OLLAMA_MODELS", ollama)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join("cfg"))
+        .env("XDG_DATA_HOME", home.join("data"))
+        .env_remove("OLLAMA_MODELS");
+    cmd
+}
+
+fn stdout(cmd: &mut Command) -> String {
+    let out = cmd.output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// Scenario "Ollama model is listed" (ALK-SP-0001.R2) with the table of R5.
+#[test]
+fn ollama_model_is_listed() {
+    let home = tempfile::tempdir().unwrap();
+    let ollama = ollama_store(home.path());
+    let text = stdout(alkahest(home.path(), &ollama).arg("ls"));
+    let header = text.lines().next().unwrap();
+    for col in [
+        "NAME", "ID", "SIZE", "MODIFIED", "SOURCE", "KIND", "FORMAT", "QUANT",
+    ] {
+        assert!(header.contains(col), "{header}");
+    }
+    let row = text.lines().nth(1).unwrap();
+    assert!(row.starts_with("llama3.2:latest"), "{row}");
+    assert!(row.contains("ollama") && row.contains("chat") && row.contains("Q4_K_M"));
+}
+
+/// Scenario "json listing" (ALK-SP-0001.R5).
+#[test]
+fn json_listing() {
+    let home = tempfile::tempdir().unwrap();
+    let ollama = ollama_store(home.path());
+    let text = stdout(alkahest(home.path(), &ollama).args(["ls", "--json"]));
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let m = &v[0];
+    for key in [
+        "name",
+        "source",
+        "digest",
+        "size",
+        "format",
+        "quantization",
+        "family",
+        "kind",
+        "modified",
+    ] {
+        assert!(!m[key].is_null(), "missing {key}: {m}");
+    }
+    assert_eq!(m["source"], "ollama");
+    assert_eq!(m["family"], "llama");
+    assert!(m["size"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn show_sections_and_flags() {
+    let home = tempfile::tempdir().unwrap();
+    let ollama = ollama_store(home.path());
+    let full = stdout(alkahest(home.path(), &ollama).args(["show", "llama3.2"]));
+    for needle in [
+        "Model",
+        "architecture",
+        "3.2B",
+        "Capabilities",
+        "tools",
+        "Parameters",
+        "Template",
+        "System",
+        "License",
+        "Path",
+    ] {
+        assert!(full.contains(needle), "{needle} missing in\n{full}");
+    }
+    let t = stdout(alkahest(home.path(), &ollama).args(["show", "llama3.2", "--template"]));
+    assert_eq!(t.trim(), "{{ .Prompt }}");
+    let p = stdout(alkahest(home.path(), &ollama).args(["show", "llama3.2", "--parameters"]));
+    assert!(p.contains("stop") && p.contains("<eot>"));
+    let l = stdout(alkahest(home.path(), &ollama).args(["show", "llama3.2", "--license"]));
+    assert_eq!(l.trim(), "MIT");
+    let m = stdout(alkahest(home.path(), &ollama).args(["show", "llama3.2", "--modelfile"]));
+    assert!(m.contains("FROM ") && m.contains("PARAMETER stop"));
+    let j: Value = serde_json::from_str(&stdout(
+        alkahest(home.path(), &ollama).args(["show", "llama3.2", "--json"]),
+    ))
+    .unwrap();
+    assert_eq!(j["system"], "Be brief.");
+}
+
+#[test]
+fn show_unknown_model_fails_with_message() {
+    let home = tempfile::tempdir().unwrap();
+    let ollama = ollama_store(home.path());
+    let out = alkahest(home.path(), &ollama)
+        .args(["show", "nope"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not found"));
+}

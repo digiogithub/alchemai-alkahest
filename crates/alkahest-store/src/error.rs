@@ -82,6 +82,30 @@ pub enum StoreError {
         /// What to do instead (for Ollama: `ollama rm <name>`).
         hint: String,
     },
+    /// No model matches a reference the user typed.
+    #[error("model {reference:?} not found{hint}")]
+    ModelNotFound {
+        /// The reference as typed.
+        reference: String,
+        /// Empty, or a leading `; ` followed by suggestions.
+        hint: String,
+    },
+    /// A reference (a digest prefix, usually) matches several models.
+    #[error("{reference:?} is ambiguous, it matches: {}", candidates.join(", "))]
+    AmbiguousModel {
+        /// The reference as typed.
+        reference: String,
+        /// Display names of the matching models.
+        candidates: Vec<String>,
+    },
+    /// The model exists but cannot be loaded by an engine (cloud model, missing blobs).
+    #[error("{name} cannot be loaded: {reason}")]
+    NotLoadable {
+        /// The model name.
+        name: String,
+        /// Why it cannot run locally.
+        reason: String,
+    },
     /// A name or reference is invalid.
     #[error(transparent)]
     Reference(#[from] RefError),

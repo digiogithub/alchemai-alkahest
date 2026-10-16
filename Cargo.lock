@@ -30,6 +30,7 @@ dependencies = [
  "alkahest-desktop",
  "alkahest-hf",
  "alkahest-ollama",
+ "alkahest-store",
  "alkahest-sysinfo",
  "anyhow",
  "assert_cmd",
@@ -153,6 +154,7 @@ name = "alkahest-store"
 version = "0.1.0"
 dependencies = [
  "alkahest-core",
+ "alkahest-gguf",
  "hex",
  "proptest",
  "serde",
@@ -160,6 +162,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "time",
  "tracing",
 ]
 
@@ -828,6 +831,9 @@ name = "deranged"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "difflib"

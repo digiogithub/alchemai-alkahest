@@ -27,6 +27,7 @@ alkahest-core.workspace = true
 alkahest-desktop = { workspace = true, optional = true }
 alkahest-hf.workspace = true
 alkahest-ollama.workspace = true
+alkahest-store.workspace = true
 alkahest-sysinfo.workspace = true
 anyhow.workspace = true
 clap.workspace = true

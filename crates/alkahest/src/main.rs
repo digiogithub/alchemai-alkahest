@@ -5,6 +5,7 @@
 
 mod cli;
 mod hf_cmd;
+mod models_cmd;
 mod search_cmd;
 mod sysinfo_cmd;
 // The renderer is consumed by the listing commands (`ls`, `ps`, ...) of ALK-US-0012/0031.
@@ -83,6 +84,8 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Command::Config { action } => config_command(action, &cli.global, &loaded),
         Command::Sysinfo => sysinfo_cmd::run(cli.global.json),
         Command::Hf { action } => hf_cmd::run(action, &loaded.config, cli.global.json),
+        Command::Ls => models_cmd::ls(&loaded, cli.global.json),
+        Command::Show(args) => models_cmd::show(args, &loaded, cli.global.json),
         Command::Search(args) => search_cmd::run(args, &loaded.config, cli.global.json),
         Command::Desktop => desktop(),
         other => Ok(not_implemented(other)),

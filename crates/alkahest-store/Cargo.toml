@@ -14,12 +14,14 @@ workspace = true
 
 [dependencies]
 alkahest-core.workspace = true
+alkahest-gguf.workspace = true
 hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+time.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

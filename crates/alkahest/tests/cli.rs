@@ -35,8 +35,8 @@ fn list_is_an_alias_of_ls() {
     alkahest(tmp.path())
         .arg("list")
         .assert()
-        .code(2)
-        .stderr(contains("not implemented yet (ALK-US-0012)"));
+        .success()
+        .stdout(contains("NAME"));
 }
 
 #[test]
@@ -44,8 +44,6 @@ fn unbuilt_commands_name_their_story_and_exit_2() {
     let tmp = tempfile::tempdir().unwrap();
     let cases: &[(&[&str], &str)] = &[
         (&["pull", "llama3"], "ALK-US-0017"),
-        (&["ls"], "ALK-US-0012"),
-        (&["show", "m"], "ALK-US-0012"),
         (&["ps"], "ALK-US-0031"),
         (&["stop", "m"], "ALK-US-0031"),
         (&["rm", "m"], "ALK-US-0013"),
@@ -150,7 +148,7 @@ fn invalid_config_is_a_runtime_error() {
 #[test]
 fn short_commands_do_not_create_log_files() {
     let tmp = tempfile::tempdir().unwrap();
-    alkahest(tmp.path()).arg("ls").assert().code(2);
+    alkahest(tmp.path()).arg("ls").assert().success();
     assert!(!tmp.path().join("logs").exists());
 }
 
