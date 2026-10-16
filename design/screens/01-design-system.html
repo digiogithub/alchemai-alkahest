@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Alkahest design system</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<script type="text/x-dc-template">
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#E3A63B}a:hover{color:#F2C46E}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1760px; box-sizing: border-box; padding: 64px; background: #0F1214; color: #E8E6E1; font-family: 'Schibsted Grotesk', system-ui, sans-serif; display: flex; flex-direction: column; gap: 40px">
+
+  <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 24px">
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: #A7ADB3">Design system · tokens for cargo xtask tokens</div>
+      <h1 style="margin: 0; font-size: 48px; font-weight: 600; letter-spacing: -0.03em">Alembic</h1>
+    </div>
+    <p style="margin: 0; max-width: 520px; font-size: 15px; line-height: 1.55; color: #A7ADB3">Dark first, dense, instrument-like. Brass marks the one action that matters on a view; verdigris means live and healthy. Numbers are always mono so meters and tables line up.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+    <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600">Surfaces &amp; text — dark</h2>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+        <sc-for list="{{dark}}" as="c" hint-placeholder-count="8">
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <div style="height: 52px; border-radius: 8px; border: 1px solid #343B42; background: {{c.hex}}"></div>
+            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #E8E6E1">{{c.name}}</div>
+            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #A7ADB3">{{c.hex}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+    <section style="background: #F4F5F3; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px; color: #15191C">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600">Surfaces &amp; text — light</h2>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+        <sc-for list="{{light}}" as="c" hint-placeholder-count="8">
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <div style="height: 52px; border-radius: 8px; border: 1px solid #D3D7DA; background: {{c.hex}}"></div>
+            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #15191C">{{c.name}}</div>
+            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #4A5157">{{c.hex}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+  </div>
+
+  <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 24px">
+    <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600">Accent &amp; status</h2>
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <sc-for list="{{status}}" as="s" hint-placeholder-count="5">
+          <div style="display: flex; align-items: center; gap: 14px">
+            <div style="width: 40px; height: 40px; border-radius: 8px; background: {{s.hex}}"></div>
+            <div style="display: flex; flex-direction: column; gap: 2px; flex: 1">
+              <span style="font-size: 14px; font-weight: 600">{{s.label}}</span>
+              <span style="font-size: 13px; color: #A7ADB3">{{s.use}}</span>
+            </div>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #A7ADB3">{{s.token}} · {{s.hex}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+    <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline"><h2 style="margin: 0; font-size: 18px; font-weight: 600">Model kind</h2><span style="font-size: 13px; color: #A7ADB3">always colour + glyph + word, never colour alone</span></div>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px">
+        <sc-for list="{{kinds}}" as="k" hint-placeholder-count="8">
+          <div style="border: 1px solid #2A3036; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+            <span style="align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border-radius: 6px; font-size: 12px; font-weight: 600; color: {{k.hex}}; background: {{k.tint}}"><span style="font-family: 'IBM Plex Mono', monospace">{{k.glyph}}</span>{{k.label}}</span>
+            <span style="font-size: 12px; color: #A7ADB3; line-height: 1.4">{{k.note}}</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #7C848C">{{k.token}}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px">
+        <span style="font-size: 13px; color: #A7ADB3; margin-right: 6px">Format tags</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid #343B42; color: #C9CDD1">GGUF</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid #343B42; color: #C9CDD1">safetensors · vLLM</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid #343B42; color: #C9CDD1">Q4_K_M</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid #6B5320; color: #E3A63B">PQ2_0 · ternary</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid #343B42; color: #C9CDD1">+ mmproj</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px dashed #4A5157; color: #A7ADB3">ollama store · read-only</span>
+      </div>
+    </section>
+  </div>
+
+  <div style="display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 24px">
+    <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline"><h2 style="margin: 0; font-size: 18px; font-weight: 600">Type</h2><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #A7ADB3">Schibsted Grotesk · IBM Plex Mono</span></div>
+      <div style="display: flex; align-items: baseline; gap: 20px; border-bottom: 1px solid #2A3036; padding-bottom: 12px"><span style="width: 120px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #7C848C">display 32/600</span><span style="font-size: 32px; font-weight: 600; letter-spacing: -0.02em">Running models</span></div>
+      <div style="display: flex; align-items: baseline; gap: 20px; border-bottom: 1px solid #2A3036; padding-bottom: 12px"><span style="width: 120px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #7C848C">title 20/600</span><span style="font-size: 20px; font-weight: 600">Qwen3-8B-Instruct</span></div>
+      <div style="display: flex; align-items: baseline; gap: 20px; border-bottom: 1px solid #2A3036; padding-bottom: 12px"><span style="width: 120px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #7C848C">body 14/400</span><span style="font-size: 14px; color: #C9CDD1">Loaded on demand, unloaded after the keep-alive expires.</span></div>
+      <div style="display: flex; align-items: baseline; gap: 20px; border-bottom: 1px solid #2A3036; padding-bottom: 12px"><span style="width: 120px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #7C848C">label 12/600</span><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB3">Context window</span></div>
+      <div style="display: flex; align-items: baseline; gap: 20px"><span style="width: 120px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #7C848C">mono 13/500</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500">17.8 / 24.0 GB · 84 tok/s · 32 768 ctx</span></div>
+    </section>
+    <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+      <h2 style="margin: 0; font-size: 18px; font-weight: 600">Space, radius, elevation</h2>
+      <div style="display: flex; align-items: flex-end; gap: 10px">
+        <sc-for list="{{space}}" as="s" hint-placeholder-count="7">
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
+            <div style="background: #E3A63B; opacity: 0.85; width: {{s.px}}; height: {{s.px}}; border-radius: 2px"></div>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #A7ADB3">{{s.label}}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; gap: 14px">
+        <div style="flex: 1; height: 56px; border: 1px solid #343B42; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #A7ADB3">r.sm 6</div>
+        <div style="flex: 1; height: 56px; border: 1px solid #343B42; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #A7ADB3">r.md 10</div>
+        <div style="flex: 1; height: 56px; border: 1px solid #343B42; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #A7ADB3">r.lg 14</div>
+      </div>
+      <div style="display: flex; gap: 14px">
+        <div style="flex: 1; height: 56px; background: #161A1D; border: 1px solid #2A3036; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #A7ADB3">raised · border only</div>
+        <div style="flex: 1; height: 56px; background: #1D2226; border: 1px solid #343B42; border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; font-size: 12px; color: #A7ADB3">overlay · menus, dialogs</div>
+      </div>
+    </section>
+  </div>
+
+  <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 22px; flex: 1">
+    <h2 style="margin: 0; font-size: 18px; font-weight: 600">Components</h2>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px">
+
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB3">Buttons</span>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px">
+          <button type="button" style="height: 36px; padding: 0 16px; border-radius: 8px; border: none; background: #E3A63B; color: #1A1206; font: 600 14px 'Schibsted Grotesk', sans-serif">Download</button>
+          <button type="button" style="height: 36px; padding: 0 16px; border-radius: 8px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 14px 'Schibsted Grotesk', sans-serif">Load model</button>
+          <button type="button" style="height: 36px; padding: 0 12px; border-radius: 8px; border: none; background: transparent; color: #C9CDD1; font: 500 14px 'Schibsted Grotesk', sans-serif">Cancel</button>
+          <button type="button" style="height: 36px; padding: 0 16px; border-radius: 8px; border: 1px solid #6A2E25; background: #2A1714; color: #F08A75; font: 600 14px 'Schibsted Grotesk', sans-serif">Stop process</button>
+        </div>
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB3; padding-top: 6px">State pills</span>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <span style="display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px; background: #15302B; color: #6FD3BF; font-size: 12px; font-weight: 600"><span style="width: 7px; height: 7px; border-radius: 50%; background: #46B5A0"></span>GPU 100%</span>
+          <span style="display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px; background: #2B2414; color: #F2C46E; font-size: 12px; font-weight: 600"><span style="width: 7px; height: 7px; border-radius: 50%; background: #E3A63B"></span>GPU 38% · CPU 62%</span>
+          <span style="display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px; background: #22272C; color: #C9CDD1; font-size: 12px; font-weight: 600"><span style="width: 7px; height: 7px; border-radius: 50%; background: #A7ADB3"></span>CPU</span>
+          <span style="display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px; border: 1px solid #343B42; color: #A7ADB3; font-size: 12px; font-weight: 600">Not loaded</span>
+          <span style="display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px; background: #17263A; color: #9CC4F0; font-size: 12px; font-weight: 600">Loading…</span>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB3">Inputs</span>
+        <label style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 8px; border: 1px solid #343B42; background: #0F1214; color: #A7ADB3; font-size: 14px">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+          <input type="search" aria-label="Search models" placeholder="Search Hugging Face…" style="flex: 1; background: transparent; border: none; outline: none; color: #E8E6E1; font: 400 14px 'Schibsted Grotesk', sans-serif">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 2px 6px; border: 1px solid #343B42; border-radius: 4px">Ctrl K</span>
+        </label>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; font-size: 13px"><span style="color: #C9CDD1">Context window</span><span style="font-family: 'IBM Plex Mono', monospace; color: #E8E6E1">32 768</span></div>
+          <div style="position: relative; height: 6px; border-radius: 3px; background: #2A3036"><div style="width: 42%; height: 6px; border-radius: 3px; background: #E3A63B"></div><div style="position: absolute; left: calc(42% - 8px); top: -5px; width: 16px; height: 16px; border-radius: 50%; background: #E8E6E1; border: 3px solid #E3A63B; box-sizing: border-box"></div></div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between">
+          <span style="font-size: 14px; color: #C9CDD1">Flash attention</span>
+          <span style="width: 38px; height: 22px; border-radius: 11px; background: #46B5A0; position: relative; display: inline-block"><span style="position: absolute; right: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #0F1214"></span></span>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; height: 38px; padding: 0 12px; border-radius: 8px; border: 1px solid #343B42; background: #1D2226; font-size: 14px">
+          <span>KV cache · <span style="font-family: 'IBM Plex Mono', monospace">q8_0</span></span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A7ADB3" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB3">Meters &amp; progress</span>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; font-size: 13px"><span style="color: #C9CDD1">VRAM · GPU 0</span><span style="font-family: 'IBM Plex Mono', monospace">17.8 / 24.0 GB</span></div>
+          <div style="display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: #2A3036; gap: 2px"><div style="width: 44%; background: #E3A63B"></div><div style="width: 20%; background: #46B5A0"></div><div style="width: 10%; background: #8E9BF0"></div></div>
+          <div style="display: flex; gap: 14px; font-size: 12px; color: #A7ADB3"><span>■ qwen3:8b</span><span style="color: #6FD3BF">■ bonsai-9b</span><span style="color: #AEB7F5">■ nomic-embed</span></div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid #2A3036; border-radius: 10px">
+          <div style="display: flex; justify-content: space-between; font-size: 13px"><span>Qwen3-8B-Q4_K_M.gguf</span><span style="font-family: 'IBM Plex Mono', monospace; color: #A7ADB3">62% · 48 MB/s</span></div>
+          <div style="height: 4px; border-radius: 2px; background: #2A3036"><div style="width: 62%; height: 4px; border-radius: 2px; background: #E3A63B"></div></div>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center; padding: 12px; border-radius: 10px; background: #1D2226; border: 1px solid #343B42; box-shadow: 0 12px 32px rgba(0,0,0,0.45); font-size: 13px">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: #46B5A0"></span>
+          <span style="flex: 1">bonsai-9b unloaded after 30 min idle</span>
+          <span style="color: #A7ADB3">Undo</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</script>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const tint = (h) => h + '26';
+    const kinds = [
+      { label: 'Chat', glyph: '◆', hex: '#E3A63B', token: 'kind.chat', note: 'text generation, tools, thinking' },
+      { label: 'Embeddings', glyph: '⋮', hex: '#8E9BF0', token: 'kind.embed', note: '/v1/embeddings, /api/embed' },
+      { label: 'Rerank', glyph: '⇅', hex: '#6FB3E8', token: 'kind.rerank', note: 'cross-encoders, /v1/rerank' },
+      { label: 'Vision', glyph: '◉', hex: '#46B5A0', token: 'kind.vision', note: 'multimodal, needs mmproj' },
+      { label: 'Audio', glyph: '∿', hex: '#E08FC8', token: 'kind.audio', note: 'whisper STT, TTS' },
+      { label: 'Image', glyph: '▣', hex: '#EB8A5E', token: 'kind.image', note: 'stable-diffusion.cpp, FLUX' },
+      { label: 'Video', glyph: '▶', hex: '#B79CF2', token: 'kind.video', note: 'text/image to video' },
+      { label: 'Decision', glyph: '⊢', hex: '#A9C45A', token: 'kind.decision', note: '/v1/systemone, logit scoring' }
+    ].map((k) => ({ ...k, tint: tint(k.hex) }));
+    return {
+      dark: [
+        { name: 'bg.base', hex: '#0F1214' }, { name: 'bg.raised', hex: '#161A1D' },
+        { name: 'bg.overlay', hex: '#1D2226' }, { name: 'line', hex: '#2A3036' },
+        { name: 'line.strong', hex: '#343B42' }, { name: 'text.3', hex: '#7C848C' },
+        { name: 'text.2', hex: '#A7ADB3' }, { name: 'text.1', hex: '#E8E6E1' }
+      ],
+      light: [
+        { name: 'bg.base', hex: '#F4F5F3' }, { name: 'bg.raised', hex: '#FFFFFF' },
+        { name: 'bg.overlay', hex: '#ECEEEC' }, { name: 'line', hex: '#D3D7DA' },
+        { name: 'line.strong', hex: '#B9BFC4' }, { name: 'text.3', hex: '#5F676E' },
+        { name: 'text.2', hex: '#4A5157' }, { name: 'text.1', hex: '#15191C' }
+      ],
+      status: [
+        { label: 'Brass', token: 'accent', hex: '#E3A63B', use: 'primary action, focus ring, selection' },
+        { label: 'Verdigris', token: 'ok', hex: '#46B5A0', use: 'running, healthy, GPU resident' },
+        { label: 'Signal blue', token: 'info', hex: '#6EA8E6', use: 'loading, downloading, info' },
+        { label: 'Cinnabar', token: 'danger', hex: '#E5664F', use: 'stop, delete, errors' },
+        { label: 'Lead', token: 'muted', hex: '#7C848C', use: 'idle, not loaded, disabled' }
+      ],
+      kinds,
+      space: [
+        { label: '4', px: '4px' }, { label: '8', px: '8px' }, { label: '12', px: '12px' },
+        { label: '16', px: '16px' }, { label: '24', px: '24px' }, { label: '32', px: '32px' }, { label: '48', px: '48px' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

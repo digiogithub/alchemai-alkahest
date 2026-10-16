@@ -1,0 +1,97 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "ApiKeys.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "API keys & network",
+      "w": 1440,
+      "x": 6080,
+      "y": 2140
+    },
+    "DesignSystem.dc.html": {
+      "h": 1760,
+      "title": "Design system",
+      "w": 1440,
+      "x": 1360,
+      "y": 0
+    },
+    "Discover.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "Discover (Hugging Face / Ollama)",
+      "w": 1440,
+      "x": 1520,
+      "y": 2140
+    },
+    "Library.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "Library",
+      "w": 1440,
+      "x": 0,
+      "y": 2140
+    },
+    "Main.dc.html": {
+      "h": 900,
+      "title": "Logo & brand",
+      "w": 1280,
+      "x": 0,
+      "y": 0
+    },
+    "ModelSettings.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "Model settings",
+      "w": 1440,
+      "x": 3040,
+      "y": 2140
+    },
+    "Running.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "Running & monitoring",
+      "w": 1440,
+      "x": 4560,
+      "y": 2140
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-17T10:00:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "app": {
+      "kind": "title1",
+      "maxW": 7520,
+      "text": "alkahest desktop — screens",
+      "w": 240,
+      "x": 0,
+      "y": 1880
+    },
+    "brand": {
+      "kind": "title1",
+      "maxW": 2800,
+      "text": "Brand & design system",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "DesignSystem.dc.html",
+    "Library.dc.html",
+    "Discover.dc.html",
+    "ModelSettings.dc.html",
+    "Running.dc.html",
+    "ApiKeys.dc.html"
+  ],
+  "pages": [],
+  "title": "Alkahest Desktop Design"
+}
