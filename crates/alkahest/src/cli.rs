@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
+use clap_complete::Shell;
 
 /// Top-level command-line arguments.
 #[derive(Debug, Parser)]
@@ -46,6 +47,11 @@ pub struct GlobalArgs {
 /// [`Command::owner`].
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Print a shell completion script to stdout.
+    Completions {
+        /// Target shell.
+        shell: Shell,
+    },
     /// Download a model from the Ollama registry or Hugging Face.
     Pull {
         /// Model reference, for example `llama3.2:3b` or `hf.co/org/repo:Q4_K_M`.
@@ -190,7 +196,7 @@ impl Command {
             Self::Engines { .. } => "ALK-US-0049",
             Self::Service { .. } => "ALK-US-0045",
             Self::Sysinfo => "ALK-US-0006",
-            Self::Config { .. } => return None,
+            Self::Config { .. } | Self::Completions { .. } => return None,
         })
     }
 
@@ -213,6 +219,7 @@ impl Command {
             Self::Service { .. } => "service",
             Self::Sysinfo => "sysinfo",
             Self::Config { .. } => "config",
+            Self::Completions { .. } => "completions",
         }
     }
 }

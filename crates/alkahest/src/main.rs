@@ -4,13 +4,17 @@
 //! with code 2. Exit codes: 0 success, 1 runtime error, 2 not implemented or usage error.
 
 mod cli;
+// The renderer is consumed by the listing commands (`ls`, `ps`, ...) of ALK-US-0012/0031.
+#[allow(dead_code)]
+mod output;
 
 use std::process::ExitCode;
 
 use alkahest_core::config::{self, LoadOptions, Loaded};
 use alkahest_core::logging::{self, LogOptions};
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::Shell;
 use serde_json::json;
 
 use crate::cli::{Cli, Command, ConfigAction, GlobalArgs};
@@ -20,6 +24,11 @@ const EXIT_NOT_IMPLEMENTED: u8 = 2;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // Completions need no configuration or logging.
+    if let Command::Completions { shell } = &cli.command {
+        write_completions(*shell, &mut std::io::stdout());
+        return ExitCode::SUCCESS;
+    }
     match run(&cli) {
         Ok(code) => code,
         Err(err) => {
@@ -27,6 +36,13 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Writes the completion script for `shell` to `out`.
+fn write_completions<W: std::io::Write>(shell: Shell, out: &mut W) {
+    let mut cmd = Cli::command();
+    let name = cmd.get_name().to_string();
+    clap_complete::generate(shell, &mut cmd, name, out);
 }
 
 /// Loads configuration, starts logging and dispatches the command.
@@ -139,4 +155,20 @@ fn config_command(action: &ConfigAction, global: &GlobalArgs, loaded: &Loaded) -
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completions_for_every_shell_mention_the_binary() {
+        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::PowerShell] {
+            let mut buf = Vec::new();
+            write_completions(shell, &mut buf);
+            let text = String::from_utf8(buf).unwrap();
+            assert!(text.contains("alkahest"), "{shell}");
+            assert!(text.contains("completions"), "{shell} lacks subcommand");
+        }
+    }
 }
