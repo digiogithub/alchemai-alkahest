@@ -4,6 +4,8 @@
 //! with code 2. Exit codes: 0 success, 1 runtime error, 2 not implemented or usage error.
 
 mod cli;
+mod hf_cmd;
+mod search_cmd;
 mod sysinfo_cmd;
 // The renderer is consumed by the listing commands (`ls`, `ps`, ...) of ALK-US-0012/0031.
 #[allow(dead_code)]
@@ -80,6 +82,8 @@ fn run(cli: &Cli) -> Result<ExitCode> {
     match &cli.command {
         Command::Config { action } => config_command(action, &cli.global, &loaded),
         Command::Sysinfo => sysinfo_cmd::run(cli.global.json),
+        Command::Hf { action } => hf_cmd::run(action, &loaded.config, cli.global.json),
+        Command::Search(args) => search_cmd::run(args, &loaded.config, cli.global.json),
         Command::Desktop => desktop(),
         other => Ok(not_implemented(other)),
     }

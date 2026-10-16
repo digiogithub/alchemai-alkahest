@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::{FetchError, Result};
 use crate::plan::{FetchConfig, PartialState, partial_path, plan_parts, state_path};
+use crate::ratelimit::RateLimiter;
 
 /// Bytes buffered per part before they are written (and counted as durable progress).
 const FLUSH_BYTES: usize = 1024 * 1024;
@@ -150,6 +151,7 @@ pub struct Downloader {
     client: Client,
     config: FetchConfig,
     progress: Option<ProgressFn>,
+    limiter: Option<Arc<RateLimiter>>,
 }
 
 impl fmt::Debug for Downloader {
@@ -168,6 +170,21 @@ struct Probe {
 }
 
 impl Downloader {
+    /// Waits for the bandwidth budget of `bytes` (no-op without a cap); cancellable.
+    async fn throttle(&self, bytes: usize, cancel: &CancellationToken) -> Result<()> {
+        let Some(limiter) = &self.limiter else {
+            return Ok(());
+        };
+        let wait = limiter.reserve(bytes as u64);
+        if wait.is_zero() {
+            return Ok(());
+        }
+        tokio::select! {
+            () = cancel.cancelled() => Err(FetchError::Cancelled),
+            () = tokio::time::sleep(wait) => Ok(()),
+        }
+    }
+
     /// Builds a rustls client with the connect timeout and user agent of `config`. Compression
     /// is off so byte ranges address the stored bytes.
     pub fn new(config: FetchConfig) -> Result<Self> {
@@ -180,10 +197,14 @@ impl Downloader {
 
     /// Uses an existing client (shared connection pool, proxies, test roots).
     pub fn with_client(client: Client, config: FetchConfig) -> Self {
+        let limiter = config
+            .max_bytes_per_sec
+            .map(|rate| Arc::new(RateLimiter::new(rate)));
         Self {
             client,
             config,
             progress: None,
+            limiter,
         }
     }
 
@@ -406,6 +427,7 @@ impl Downloader {
                 Ok(Some(Err(e))) => return Err(e.into()),
                 Ok(Some(Ok(c))) => c,
             };
+            self.throttle(chunk.len(), cancel).await?;
             hasher.update(&chunk);
             received += chunk.len() as u64;
             buf.extend_from_slice(&chunk);
@@ -759,6 +781,9 @@ impl Ctx {
             };
             // Never accept more than the part asked for, whatever the server sends.
             let take = (chunk.len() as u64).min(want - received) as usize;
+            if let Err(e) = self.dl.throttle(take, &self.cancel).await {
+                break Err(e);
+            }
             buf.extend_from_slice(&chunk[..take]);
             received += take as u64;
             let done = self.downloaded.fetch_add(take as u64, Ordering::AcqRel) + take as u64;

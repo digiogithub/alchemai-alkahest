@@ -12,8 +12,9 @@ use url::Url;
 
 use crate::card::ModelCard;
 use crate::error::{HfError, Result};
+use crate::recommended::RecommendedParams;
 use crate::token::{Token, TokenStore, resolve_endpoint, resolve_token};
-use crate::types::{ModelInfo, ModelSummary, RepoFile, SearchQuery, TreeEntry};
+use crate::types::{ModelInfo, ModelSummary, RepoFile, SearchQuery, TreeEntry, WhoAmI};
 
 /// Revision used when the caller names none.
 pub const DEFAULT_REVISION: &str = "main";
@@ -121,6 +122,9 @@ impl HfClient {
             if let Some(a) = &query.author {
                 q.append_pair("author", a);
             }
+            if let Some(t) = &query.pipeline_tag {
+                q.append_pair("pipeline_tag", t);
+            }
             q.append_pair("sort", query.sort.as_param());
             q.append_pair("direction", "-1");
             q.append_pair("limit", &query.limit.to_string());
@@ -170,6 +174,73 @@ impl HfClient {
     /// The parsed model card of a revision.
     pub async fn model_card(&self, repo: &str, revision: Option<&str>) -> Result<ModelCard> {
         ModelCard::parse(&self.readme(repo, revision).await?)
+    }
+
+    /// Who the configured token belongs to (`GET /api/whoami-v2`). Fails with
+    /// [`HfError::Unauthorized`] when there is no token or it is invalid.
+    pub async fn whoami(&self) -> Result<WhoAmI> {
+        let url = self.api_url(&["whoami-v2"])?;
+        let value: serde_json::Value = self.get_json(url, "whoami").await?;
+        WhoAmI::from_json(&value).ok_or_else(|| {
+            HfError::Parse(<serde_json::Error as serde::de::Error>::custom(
+                "whoami-v2 response has no `name`",
+            ))
+        })
+    }
+
+    /// `generation_config.json` of a revision; `None` when the repository has none (GGUF-only
+    /// repositories usually do not).
+    pub async fn generation_config(
+        &self,
+        repo: &str,
+        revision: Option<&str>,
+    ) -> Result<Option<serde_json::Value>> {
+        let url = Url::parse(&self.resolve_url(repo, revision, "generation_config.json")?)
+            .map_err(|e| HfError::InvalidUrl(e.to_string()))?;
+        match self.send(url, repo).await {
+            Ok(resp) => Ok(Some(serde_json::from_slice(&resp.bytes().await?)?)),
+            Err(HfError::NotFound(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Recommended defaults of a repository (ALK-SP-0010.R3): its `generation_config.json`
+    /// and model card, the trained context length from the Hub metadata, and, when the
+    /// repository itself has neither (a GGUF conversion), the same files of its `base_model`.
+    /// A missing README is not an error.
+    pub async fn recommended_params(
+        &self,
+        repo: &str,
+        revision: Option<&str>,
+    ) -> Result<RecommendedParams> {
+        let trained = self
+            .model_info(repo, revision)
+            .await
+            .ok()
+            .and_then(|i| i.gguf.and_then(|g| g.context_length));
+        let mut params = self.params_of(repo, revision).await?;
+        if params.is_empty() {
+            let base = match self.model_card(repo, revision).await {
+                Ok(card) => card.base_model(),
+                Err(HfError::NotFound(_)) => None,
+                Err(e) => return Err(e),
+            };
+            if let Some(base) = base.filter(|b| b != repo) {
+                params = self.params_of(&base, None).await?;
+            }
+        }
+        Ok(params.with_trained_context(trained))
+    }
+
+    /// Params from one repository's own files.
+    async fn params_of(&self, repo: &str, revision: Option<&str>) -> Result<RecommendedParams> {
+        let gen_cfg = self.generation_config(repo, revision).await?;
+        let card = match self.model_card(repo, revision).await {
+            Ok(card) => Some(card),
+            Err(HfError::NotFound(_)) => None,
+            Err(e) => return Err(e),
+        };
+        Ok(RecommendedParams::combine(gen_cfg.as_ref(), card.as_ref()))
     }
 
     fn api_url(&self, segments: &[&str]) -> Result<Url> {

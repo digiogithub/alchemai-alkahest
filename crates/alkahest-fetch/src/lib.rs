@@ -9,7 +9,7 @@
 //!    JSON sidecar `<dest>-partial.json` recording the bytes done per part, flushed every
 //!    [`FetchConfig::checkpoint_interval`], so a killed process resumes where it stopped;
 //! 3. parts download in parallel with retries (backoff, jitter, `Retry-After`) and stall
-//!    detection;
+//!    detection, under an optional shared bandwidth cap ([`FetchConfig::max_bytes_per_sec`]);
 //! 4. the SHA-256 is verified (while streaming for single-part files, by re-reading the file
 //!    otherwise) and the file is renamed to the destination atomically.
 //!
@@ -20,6 +20,7 @@
 mod download;
 mod error;
 mod plan;
+mod ratelimit;
 
 pub use download::{DownloadOutcome, DownloadRequest, Downloader, ProgressEvent, ProgressFn};
 pub use error::{FetchError, Result};
