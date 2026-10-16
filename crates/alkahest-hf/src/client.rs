@@ -121,6 +121,9 @@ impl HfClient {
             if let Some(a) = &query.author {
                 q.append_pair("author", a);
             }
+            if let Some(t) = &query.pipeline_tag {
+                q.append_pair("pipeline_tag", t);
+            }
             q.append_pair("sort", query.sort.as_param());
             q.append_pair("direction", "-1");
             q.append_pair("limit", &query.limit.to_string());

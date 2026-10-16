@@ -244,6 +244,8 @@ pub struct SearchQuery {
     pub limit: u32,
     /// Restrict to an author or organisation.
     pub author: Option<String>,
+    /// Restrict to a task (`pipeline_tag`), for example `text-generation`.
+    pub pipeline_tag: Option<String>,
 }
 
 impl SearchQuery {
@@ -255,6 +257,7 @@ impl SearchQuery {
             sort: SortKey::Downloads,
             limit: 20,
             author: None,
+            pipeline_tag: None,
         }
     }
 }

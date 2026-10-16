@@ -13,3 +13,13 @@ publish = false
 workspace = true
 
 [dependencies]
+alkahest-core.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+wiremock.workspace = true

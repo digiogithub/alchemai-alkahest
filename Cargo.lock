@@ -28,6 +28,8 @@ version = "0.1.0"
 dependencies = [
  "alkahest-core",
  "alkahest-desktop",
+ "alkahest-hf",
+ "alkahest-ollama",
  "alkahest-sysinfo",
  "anyhow",
  "assert_cmd",
@@ -36,7 +38,9 @@ dependencies = [
  "predicates",
  "serde_json",
  "tempfile",
+ "tokio",
  "tracing",
+ "wiremock",
 ]
 
 [[package]]
@@ -120,6 +124,16 @@ dependencies = [
 [[package]]
 name = "alkahest-ollama"
 version = "0.1.0"
+dependencies = [
+ "alkahest-core",
+ "regex",
+ "reqwest",
+ "serde",
+ "thiserror",
+ "tokio",
+ "url",
+ "wiremock",
+]
 
 [[package]]
 name = "alkahest-recipes"

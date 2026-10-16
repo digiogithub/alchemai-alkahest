@@ -43,6 +43,56 @@ pub struct GlobalArgs {
     pub json: bool,
 }
 
+/// Where `alkahest search` looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SearchSource {
+    /// Hugging Face and the Ollama library.
+    All,
+    /// Hugging Face only.
+    Hf,
+    /// The Ollama library only.
+    Ollama,
+}
+
+/// Sort order of Hugging Face results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SearchSort {
+    /// Most downloaded first.
+    Downloads,
+    /// Most liked first.
+    Likes,
+    /// Recently updated first.
+    Recent,
+}
+
+/// Arguments of `alkahest search`.
+#[derive(Debug, Args)]
+pub struct SearchArgs {
+    /// Search terms.
+    pub query: Vec<String>,
+    /// Where to search.
+    #[arg(long, value_enum, default_value = "all")]
+    pub source: SearchSource,
+    /// Hugging Face: only GGUF repositories (the default).
+    #[arg(long, conflicts_with_all = ["safetensors", "all_formats"])]
+    pub gguf: bool,
+    /// Hugging Face: only safetensors repositories.
+    #[arg(long, conflicts_with = "all_formats")]
+    pub safetensors: bool,
+    /// Hugging Face: do not filter by file format.
+    #[arg(long = "all", id = "all_formats")]
+    pub all_formats: bool,
+    /// Hugging Face: restrict to a task (pipeline tag), for example `text-generation`.
+    #[arg(long, value_name = "TASK")]
+    pub task: Option<String>,
+    /// Hugging Face: sort order.
+    #[arg(long, value_enum, default_value = "downloads")]
+    pub sort: SearchSort,
+    /// Maximum results per source.
+    #[arg(long, default_value_t = 20, value_name = "N")]
+    pub limit: u32,
+}
+
 /// Every command of the tool. Variants that are not built yet name their owning story in
 /// [`Command::owner`].
 #[derive(Debug, Subcommand)]
@@ -58,10 +108,7 @@ pub enum Command {
         model: String,
     },
     /// Search the Ollama library and Hugging Face for models.
-    Search {
-        /// Search terms.
-        query: Vec<String>,
-    },
+    Search(SearchArgs),
     /// List local models.
     #[command(visible_alias = "list")]
     Ls,
@@ -185,7 +232,7 @@ impl Command {
     pub fn owner(&self) -> Option<&'static str> {
         Some(match self {
             Self::Pull { .. } => "ALK-US-0017",
-            Self::Search { .. } => "ALK-US-0021",
+            Self::Search(_) => "ALK-US-0021",
             Self::Ls | Self::Show { .. } => "ALK-US-0012",
             Self::Ps | Self::Stop { .. } => "ALK-US-0031",
             Self::Rm { .. } | Self::Cp { .. } => "ALK-US-0013",
@@ -203,7 +250,7 @@ impl Command {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Pull { .. } => "pull",
-            Self::Search { .. } => "search",
+            Self::Search(_) => "search",
             Self::Ls => "ls",
             Self::Ps => "ps",
             Self::Rm { .. } => "rm",
