@@ -148,6 +148,12 @@ pub enum Command {
     Serve,
     /// Open the desktop app (needs a build with the `desktop` feature).
     Desktop,
+    /// Manage the Hugging Face token (`login`, `logout`, `whoami`).
+    Hf {
+        /// Hugging Face action.
+        #[command(subcommand)]
+        action: HfAction,
+    },
     /// Manage API keys.
     Keys {
         /// Key action.
@@ -174,6 +180,22 @@ pub enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
+}
+
+/// `alkahest hf ...`
+#[derive(Debug, Subcommand)]
+pub enum HfAction {
+    /// Store a Hugging Face token in the OS keyring. The token is read from stdin (a prompt
+    /// without echo on a terminal, one line when piped) and never printed.
+    Login {
+        /// Store the token without checking it against the Hub first.
+        #[arg(long)]
+        no_verify: bool,
+    },
+    /// Remove the stored token from the OS keyring.
+    Logout,
+    /// Show the account the current token belongs to.
+    Whoami,
 }
 
 /// `alkahest keys ...`
@@ -242,7 +264,9 @@ impl Command {
             Self::Keys { .. } => "ALK-US-0041",
             Self::Engines { .. } => "ALK-US-0049",
             Self::Service { .. } => "ALK-US-0045",
-            Self::Config { .. } | Self::Completions { .. } | Self::Sysinfo => return None,
+            Self::Config { .. } | Self::Completions { .. } | Self::Sysinfo | Self::Hf { .. } => {
+                return None;
+            }
         })
     }
 
@@ -260,6 +284,7 @@ impl Command {
             Self::Stop { .. } => "stop",
             Self::Serve => "serve",
             Self::Desktop => "desktop",
+            Self::Hf { .. } => "hf",
             Self::Keys { .. } => "keys",
             Self::Engines { .. } => "engines",
             Self::Service { .. } => "service",

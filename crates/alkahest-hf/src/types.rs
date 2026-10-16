@@ -261,3 +261,40 @@ impl SearchQuery {
         }
     }
 }
+
+/// The identity behind a token (`GET /api/whoami-v2`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WhoAmI {
+    /// Account name.
+    pub name: String,
+    /// Display name, when set.
+    pub fullname: Option<String>,
+    /// `user`, `org` or `app`.
+    pub kind: Option<String>,
+    /// Organisations the account belongs to.
+    pub orgs: Vec<String>,
+    /// Name of the access token that made the call.
+    pub token_name: Option<String>,
+    /// Role of that token (`read`, `write`, `fineGrained`...).
+    pub token_role: Option<String>,
+}
+
+impl WhoAmI {
+    /// Extracts the fields Alkahest shows from the `whoami-v2` document.
+    pub fn from_json(v: &serde_json::Value) -> Option<Self> {
+        let s = |x: Option<&serde_json::Value>| x.and_then(|x| x.as_str()).map(str::to_string);
+        let token = v.get("auth").and_then(|a| a.get("accessToken"));
+        Some(Self {
+            name: s(v.get("name"))?,
+            fullname: s(v.get("fullname")),
+            kind: s(v.get("type")),
+            orgs: v
+                .get("orgs")
+                .and_then(|o| o.as_array())
+                .map(|a| a.iter().filter_map(|o| s(o.get("name"))).collect())
+                .unwrap_or_default(),
+            token_name: s(token.and_then(|t| t.get("displayName"))),
+            token_role: s(token.and_then(|t| t.get("role"))),
+        })
+    }
+}

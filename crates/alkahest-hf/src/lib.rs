@@ -36,5 +36,5 @@ pub use token::{
 };
 pub use types::{
     EntryKind, Gated, GgufSummary, LfsInfo, ModelInfo, ModelSummary, RepoFile, SearchQuery,
-    Sibling, SortKey, TreeEntry,
+    Sibling, SortKey, TreeEntry, WhoAmI,
 };

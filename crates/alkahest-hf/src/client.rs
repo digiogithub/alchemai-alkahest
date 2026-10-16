@@ -14,7 +14,7 @@ use crate::card::ModelCard;
 use crate::error::{HfError, Result};
 use crate::recommended::RecommendedParams;
 use crate::token::{Token, TokenStore, resolve_endpoint, resolve_token};
-use crate::types::{ModelInfo, ModelSummary, RepoFile, SearchQuery, TreeEntry};
+use crate::types::{ModelInfo, ModelSummary, RepoFile, SearchQuery, TreeEntry, WhoAmI};
 
 /// Revision used when the caller names none.
 pub const DEFAULT_REVISION: &str = "main";
@@ -174,6 +174,18 @@ impl HfClient {
     /// The parsed model card of a revision.
     pub async fn model_card(&self, repo: &str, revision: Option<&str>) -> Result<ModelCard> {
         ModelCard::parse(&self.readme(repo, revision).await?)
+    }
+
+    /// Who the configured token belongs to (`GET /api/whoami-v2`). Fails with
+    /// [`HfError::Unauthorized`] when there is no token or it is invalid.
+    pub async fn whoami(&self) -> Result<WhoAmI> {
+        let url = self.api_url(&["whoami-v2"])?;
+        let value: serde_json::Value = self.get_json(url, "whoami").await?;
+        WhoAmI::from_json(&value).ok_or_else(|| {
+            HfError::Parse(<serde_json::Error as serde::de::Error>::custom(
+                "whoami-v2 response has no `name`",
+            ))
+        })
     }
 
     /// `generation_config.json` of a revision; `None` when the repository has none (GGUF-only

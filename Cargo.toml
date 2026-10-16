@@ -94,6 +94,7 @@ bytesize = "=2.7.0"
 
 # Security
 keyring = "=4.2.0"
+rpassword = "=7.4.0"
 argon2 = "=0.6.0"
 rand = "=0.10.3"
 
