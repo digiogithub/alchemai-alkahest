@@ -10,12 +10,16 @@
 //! - [`gguf`] picks GGUF files by quantisation (default preference `Q4_K_M` first), groups
 //!   split models and finds `mmproj` projectors.
 //!
+//! - [`RecommendedParams`] derives the recommended sampling, context and template settings from
+//!   `generation_config.json`, the model card and GGUF metadata ([`HfClient::recommended_params`]).
+//!
 //! The crate only resolves metadata and URLs; the bytes are fetched by `alkahest-fetch`.
 
 mod card;
 mod client;
 mod error;
 pub mod gguf;
+mod recommended;
 mod token;
 mod types;
 
@@ -26,6 +30,7 @@ pub use gguf::{
     DEFAULT_QUANT_PREFERENCE, GgufVariant, detect_quant, gguf_variants, is_mmproj, mmproj_files,
     pick_mmproj, pick_variant,
 };
+pub use recommended::{ParamSource, RecommendedParams, SamplingParams};
 pub use token::{
     KEYRING_SERVICE, KEYRING_USER, KeyringStore, Token, TokenStore, resolve_endpoint, resolve_token,
 };
