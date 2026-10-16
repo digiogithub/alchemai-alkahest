@@ -19,6 +19,7 @@ mod card;
 mod client;
 mod error;
 pub mod gguf;
+pub mod pull;
 mod recommended;
 mod token;
 mod types;
