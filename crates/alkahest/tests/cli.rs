@@ -43,7 +43,6 @@ fn list_is_an_alias_of_ls() {
 fn unbuilt_commands_name_their_story_and_exit_2() {
     let tmp = tempfile::tempdir().unwrap();
     let cases: &[(&[&str], &str)] = &[
-        (&["pull", "llama3"], "ALK-US-0017"),
         (&["ls"], "ALK-US-0012"),
         (&["show", "m"], "ALK-US-0012"),
         (&["ps"], "ALK-US-0031"),

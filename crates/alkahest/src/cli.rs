@@ -106,6 +106,12 @@ pub enum Command {
     Pull {
         /// Model reference, for example `llama3.2:3b` or `hf.co/org/repo:Q4_K_M`.
         model: String,
+        /// Talk to the registry over plain HTTP (private registries without TLS).
+        #[arg(long)]
+        insecure: bool,
+        /// Download into the Alkahest store even when the Ollama store already has the model.
+        #[arg(long, visible_alias = "copy")]
+        force: bool,
     },
     /// Search the Ollama library and Hugging Face for models.
     Search(SearchArgs),
@@ -253,7 +259,6 @@ impl Command {
     /// The story that implements this command, or `None` when it already works.
     pub fn owner(&self) -> Option<&'static str> {
         Some(match self {
-            Self::Pull { .. } => "ALK-US-0017",
             Self::Search(_) => "ALK-US-0021",
             Self::Ls | Self::Show { .. } => "ALK-US-0012",
             Self::Ps | Self::Stop { .. } => "ALK-US-0031",
@@ -264,7 +269,11 @@ impl Command {
             Self::Keys { .. } => "ALK-US-0041",
             Self::Engines { .. } => "ALK-US-0049",
             Self::Service { .. } => "ALK-US-0045",
-            Self::Config { .. } | Self::Completions { .. } | Self::Sysinfo | Self::Hf { .. } => {
+            Self::Pull { .. }
+            | Self::Config { .. }
+            | Self::Completions { .. }
+            | Self::Sysinfo
+            | Self::Hf { .. } => {
                 return None;
             }
         })
