@@ -5,12 +5,22 @@ title: Model classification and optimization defaults
 status: backlog
 labels: [gguf, config]
 created: 2026-10-16T22:37:40Z
-updated: 2026-10-16T22:37:40Z
+updated: 2026-10-16T23:11:29Z
 requirements:
   R1:
     status: backlog
+    trace:
+      code: [crates/alkahest-gguf/src/classify.rs#classify]
+      tests: [crates/alkahest-gguf/tests/classify.rs#known_models_table]
   R2:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-gguf/src/accessors.rs#Gguf
+        - crates/alkahest-gguf/src/reader.rs#Gguf
+      tests:
+        - crates/alkahest-gguf/tests/gguf_reader.rs#template_gives_tools_and_thinking
+        - crates/alkahest-gguf/tests/gguf_reader.rs#reads_v3_header_metadata_and_tensors
   R3:
     status: backlog
   R4:

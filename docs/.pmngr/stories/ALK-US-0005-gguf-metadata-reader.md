@@ -2,14 +2,16 @@
 id: ALK-US-0005
 type: story
 title: GGUF metadata reader
-status: backlog
+status: done
 priority: critical
 parent: ALK-EP-0002
 milestone: ALK-M-0001
 labels: [gguf]
 estimate: 5
 created: 2026-10-16T22:38:18Z
-updated: 2026-10-16T22:38:22Z
+updated: 2026-10-16T23:12:24Z
+started: 2026-10-16T23:06:13Z
+closed: 2026-10-16T23:12:24Z
 links:
   - { kind: implements, target: ALK-SP-0010.R2 }
 ---

@@ -2,14 +2,15 @@
 id: ALK-T-0027
 type: task
 title: Test table with known models (nomic-embed, llava, whisper, bonsai, qwen3, sd)
-status: backlog
+status: done
 priority: high
 parent: ALK-US-0007
 milestone: ALK-M-0001
 labels: [gguf]
 effort: 2
 created: 2026-10-16T22:38:32Z
-updated: 2026-10-16T22:38:32Z
+updated: 2026-10-16T23:11:35Z
+closed: 2026-10-16T23:11:35Z
 ---
 
 ## Description

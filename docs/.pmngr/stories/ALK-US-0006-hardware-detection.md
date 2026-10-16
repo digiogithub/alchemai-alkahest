@@ -2,14 +2,15 @@
 id: ALK-US-0006
 type: story
 title: Hardware detection
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0002
 milestone: ALK-M-0001
 labels: [sysinfo]
 estimate: 5
 created: 2026-10-16T22:38:23Z
-updated: 2026-10-16T22:38:23Z
+updated: 2026-10-16T23:12:24Z
+started: 2026-10-16T23:12:24Z
 ---
 
 ## Description

@@ -2,14 +2,16 @@
 id: ALK-US-0007
 type: story
 title: Model kind classifier
-status: backlog
+status: done
 priority: high
 parent: ALK-EP-0002
 milestone: ALK-M-0001
 labels: [gguf]
 estimate: 3
 created: 2026-10-16T22:38:29Z
-updated: 2026-10-16T22:38:32Z
+updated: 2026-10-16T23:12:24Z
+started: 2026-10-16T23:07:00Z
+closed: 2026-10-16T23:12:24Z
 links:
   - { kind: implements, target: ALK-SP-0010.R1 }
 ---
