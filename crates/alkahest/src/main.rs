@@ -1,19 +1,142 @@
 //! `alkahest`: command-line entry point of the Alkahest model server and manager.
 //!
-//! Only `--version` and `--help` exist for now; the full command tree (`pull`, `ls`, `ps`,
-//! `serve`, `desktop`, ...) arrives with ALK-US-0004.
+//! Commands whose story is not built yet print `not implemented yet (ALK-US-xxxx)` and exit
+//! with code 2. Exit codes: 0 success, 1 runtime error, 2 not implemented or usage error.
 
+mod cli;
+
+use std::process::ExitCode;
+
+use alkahest_core::config::{self, LoadOptions, Loaded};
+use alkahest_core::logging::{self, LogOptions};
+use anyhow::{Context, Result};
 use clap::Parser;
+use serde_json::json;
 
-/// Top-level command-line arguments.
-#[derive(Debug, Parser)]
-#[command(
-    name = "alkahest",
-    version,
-    about = "Local AI model server and manager"
-)]
-struct Cli {}
+use crate::cli::{Cli, Command, ConfigAction, GlobalArgs};
 
-fn main() {
-    let _cli = Cli::parse();
+/// Exit code for commands that exist in the tree but are not built yet.
+const EXIT_NOT_IMPLEMENTED: u8 = 2;
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match run(&cli) {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("error: {err:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Loads configuration, starts logging and dispatches the command.
+fn run(cli: &Cli) -> Result<ExitCode> {
+    let mut loaded = config::load(&LoadOptions {
+        config_file: cli.global.config.clone(),
+        paths: None,
+    })
+    .context("loading configuration")?;
+    // The flag beats the file and the environment.
+    if let Some(host) = &cli.global.host {
+        loaded
+            .config
+            .server
+            .apply_host_spec(host)
+            .context("--host")?;
+    }
+
+    // Only the long-running server writes log files; short commands stay on stderr.
+    let is_serve = matches!(cli.command, Command::Serve);
+    let _log_guard = logging::init(
+        &loaded.config.logging,
+        &loaded.config.resolve_paths(&loaded.paths).log_dir,
+        &LogOptions {
+            verbosity: cli.global.verbose,
+            level: cli.global.log_level.clone(),
+            stderr: true,
+            file: Some(is_serve),
+        },
+    )
+    .context("starting logging")?;
+    tracing::debug!(command = cli.command.name(), "dispatching");
+
+    match &cli.command {
+        Command::Config { action } => config_command(action, &cli.global, &loaded),
+        Command::Desktop => desktop(),
+        other => Ok(not_implemented(other)),
+    }
+}
+
+/// Reports an unbuilt command and names the story that owns it.
+fn not_implemented(command: &Command) -> ExitCode {
+    let story = command.owner().unwrap_or("unassigned");
+    eprintln!("alkahest {}: not implemented yet ({story})", command.name());
+    ExitCode::from(EXIT_NOT_IMPLEMENTED)
+}
+
+/// `alkahest desktop`: launches the GPUI app, or explains how to get it.
+#[cfg(feature = "desktop")]
+fn desktop() -> Result<ExitCode> {
+    // The GPUI app lands with ALK-US-0064; until then the feature only links the crate.
+    eprintln!("alkahest desktop: not implemented yet (ALK-US-0064)");
+    Ok(ExitCode::from(EXIT_NOT_IMPLEMENTED))
+}
+
+/// `alkahest desktop` in a build without the `desktop` feature.
+#[cfg(not(feature = "desktop"))]
+fn desktop() -> Result<ExitCode> {
+    eprintln!(
+        "alkahest desktop: this build has no desktop app; \
+         rebuild with `cargo build --features desktop` or install the desktop package"
+    );
+    Ok(ExitCode::FAILURE)
+}
+
+/// `alkahest config show|path`.
+fn config_command(action: &ConfigAction, global: &GlobalArgs, loaded: &Loaded) -> Result<ExitCode> {
+    match action {
+        ConfigAction::Show => {
+            let resolved = loaded.config.resolve_paths(&loaded.paths);
+            if global.json {
+                let doc = json!({
+                    "config": loaded.config,
+                    "sources": loaded.sources,
+                    "paths": resolved,
+                });
+                println!("{}", serde_json::to_string_pretty(&doc)?);
+            } else {
+                for source in &loaded.sources {
+                    println!("# source: {source}");
+                }
+                print!("{}", loaded.config.to_toml()?);
+                println!("\n# resolved paths");
+                println!("# models_dir   = {}", resolved.models_dir.display());
+                match &resolved.ollama_store {
+                    Some(p) => println!("# ollama_store = {} (read-only)", p.display()),
+                    None => println!("# ollama_store = (none)"),
+                }
+                println!("# engines_dir  = {}", resolved.engines_dir.display());
+                println!("# log_dir      = {}", resolved.log_dir.display());
+            }
+        }
+        ConfigAction::Path => {
+            if global.json {
+                let files: Vec<_> = loaded
+                    .searched_files
+                    .iter()
+                    .map(|p| json!({ "path": p, "exists": p.is_file() }))
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({ "files": files }))?
+                );
+            } else {
+                for p in &loaded.searched_files {
+                    let mark = if p.is_file() { "found  " } else { "missing" };
+                    println!("{mark} {}", p.display());
+                }
+            }
+        }
+    }
+    Ok(ExitCode::SUCCESS)
 }
