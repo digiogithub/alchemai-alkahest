@@ -16,7 +16,10 @@ use crate::recipe::{
 };
 
 /// The recipe TOML files shipped in the binary.
-const BUILTIN: &[&str] = &[include_str!("../../../recipes/llama-cpp.toml")];
+const BUILTIN: &[&str] = &[
+    include_str!("../../../recipes/llama-cpp.toml"),
+    include_str!("../../../recipes/prism-llama-cpp.toml"),
+];
 
 /// A recipe file that was found but could not be used.
 #[derive(Debug, Clone)]

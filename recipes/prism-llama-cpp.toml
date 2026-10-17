@@ -1,0 +1,264 @@
+# Engine recipe: PrismML llama.cpp fork for Bonsai ternary models (PQ2_0, PTQ1_0)
+# (ALK-SP-0003.R2/R4, ALK-US-0051).
+#
+# Pinned to the fork release prism-b10777-e3de715 (commit e3de715222b2667c54a267441159a5729f11155e of
+# github.com/PrismML-Eng/llama.cpp, the `prism` branch). Every sha256 is the digest GitHub reports
+# for the release asset. Asset names follow /www/Pips/llm/Bonsai-demo/scripts/download_binaries.sh.
+#
+# Engine selection ([[ALK-SP-0003]] R2) sends PQ2_0/PTQ1_0 GGUF files here; mainline llama.cpp
+# cannot read them. The archives are laid out like mainline ones: one wrapper directory
+# (stripped), `llama-server` next to its `libggml-*.so` / `libllama*.so`, with RUNPATH=$ORIGIN on
+# Linux, so no `library_dirs` is needed.
+#
+# Variants (CUDA builds need the CUDA runtime libraries installed on the host; the upstream
+# cudart-* archives are 150-390 MB and are not installed by this recipe):
+#   cpu, cuda12.4 / cuda12.8 / cuda13.3, vulkan, rocm (Linux ROCm 7.2, Windows HIP Radeon),
+#   metal (macOS arm64), sycl (never picked automatically).
+
+id = "prism-llama-cpp"
+version = "prism-b10777-e3de715"
+description = "llama.cpp, PrismML fork (Bonsai ternary PQ2_0 / PTQ1_0 models)"
+license = "MIT"
+homepage = "https://github.com/PrismML-Eng/llama.cpp"
+executable = "llama-server"
+
+
+[variants."cpu"]
+accelerator = "cpu"
+[[variants."cpu".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-ubuntu-x64.tar.gz"
+sha256 = "3f97b6fbec0065fede2be92f05df531c1050636fc2613e1ba0d975249df19713"
+size = 17882710
+format = "tar.gz"
+strip_components = 1
+[[variants."cpu".assets]]
+os = "linux"
+arch = "aarch64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-ubuntu-arm64.tar.gz"
+sha256 = "48a38627651fea3e4e93e8ef114d056b53f26da7549da0db01c63df7cc09a09c"
+size = 13882762
+format = "tar.gz"
+strip_components = 1
+[[variants."cpu".assets]]
+os = "macos"
+arch = "aarch64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-macos-arm64.tar.gz"
+sha256 = "bd22ade1ece9dbcd7140a171044a50d5de37c1eb6d020ab83f61c86dfc0323a8"
+size = 11567567
+format = "tar.gz"
+strip_components = 1
+[[variants."cpu".assets]]
+os = "macos"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-macos-x64.tar.gz"
+sha256 = "cf53102e491e0db5cf1d4678777b46b75774b02cacc3018d04bf1597cbd0ad56"
+size = 11609754
+format = "tar.gz"
+strip_components = 1
+[[variants."cpu".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-win-cpu-x64.zip"
+sha256 = "cff7eeff19163e6263720618cf98023715b8dac14d0873f5be0918765de323c4"
+size = 19530958
+format = "zip"
+strip_components = 0
+[[variants."cpu".assets]]
+os = "windows"
+arch = "aarch64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-win-cpu-arm64.zip"
+sha256 = "b63c740d4fad53db482b70022d7574884751277f4569e3be20908df081bbde95"
+size = 12412127
+format = "zip"
+strip_components = 0
+[variants."cpu".source]
+git = "https://github.com/PrismML-Eng/llama.cpp.git"
+rev = "prism-b10777-e3de715"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_NATIVE=OFF", "-DGGML_CPU_ALL_VARIANTS=ON", "-DGGML_BACKEND_DL=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."cuda12.4"]
+accelerator = "cuda"
+cuda = "12.4"
+notes = "Needs the CUDA 12 runtime libraries (libcudart, libcublas) on the host."
+[[variants."cuda12.4".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-linux-cuda-12.4-x64.tar.gz"
+sha256 = "380eaf66b2140e8022532626041e7bd71600eb4fa434edca1d499b7fc878d46e"
+size = 326799565
+format = "tar.gz"
+strip_components = 1
+[[variants."cuda12.4".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-win-cuda-12.4-x64.zip"
+sha256 = "fa5874a1412e251a6efb13f289e97bacbbb4e7fc6714c1836b4fc6c1dc863462"
+size = 313951324
+format = "zip"
+strip_components = 0
+[variants."cuda12.4".source]
+git = "https://github.com/PrismML-Eng/llama.cpp.git"
+rev = "prism-b10777-e3de715"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."cuda12.8"]
+accelerator = "cuda"
+cuda = "12.8"
+notes = "Needs the CUDA 12 runtime libraries (libcudart, libcublas) on the host."
+[[variants."cuda12.8".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-linux-cuda-12.8-x64.tar.gz"
+sha256 = "aa53e2256276e683386effdc8be34b3bd1cdf64ef9dc5d492da69227ac52531b"
+size = 208198074
+format = "tar.gz"
+strip_components = 1
+[variants."cuda12.8".source]
+git = "https://github.com/PrismML-Eng/llama.cpp.git"
+rev = "prism-b10777-e3de715"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."cuda13.3"]
+accelerator = "cuda"
+cuda = "13.3"
+notes = "Needs the CUDA 13 runtime libraries (libcudart, libcublas) on the host."
+[[variants."cuda13.3".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-linux-cuda-13.3-x64.tar.gz"
+sha256 = "916b1f0beb9adde3c31e8cc01dbcd11713ee7fa1daa600de9fdac725506dbebf"
+size = 183998027
+format = "tar.gz"
+strip_components = 1
+[[variants."cuda13.3".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-win-cuda-13.3-x64.zip"
+sha256 = "071088ef64f2e62dfb488f4d73cc368df945f9c0e8c7019bc94daf9abd0eb4aa"
+size = 179212635
+format = "zip"
+strip_components = 0
+[variants."cuda13.3".source]
+git = "https://github.com/PrismML-Eng/llama.cpp.git"
+rev = "prism-b10777-e3de715"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."vulkan"]
+accelerator = "vulkan"
+[[variants."vulkan".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-ubuntu-vulkan-x64.tar.gz"
+sha256 = "b53d24c9fcf704656045fa62d2d1500d290da49800aa6ec0066f05f3367af498"
+size = 35937247
+format = "tar.gz"
+strip_components = 1
+[[variants."vulkan".assets]]
+os = "linux"
+arch = "aarch64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-ubuntu-vulkan-arm64.tar.gz"
+sha256 = "5df90f4c5009285b0b45a4760967be83e3da6206b6bb119fc9db1d1c4ad66d1d"
+size = 28369514
+format = "tar.gz"
+strip_components = 1
+[[variants."vulkan".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-win-vulkan-x64.zip"
+sha256 = "6bf30d60dd35ae1129ae221593d79bed053c775c6ce8554f75cfe171f3028f10"
+size = 31298865
+format = "zip"
+strip_components = 0
+[variants."vulkan".source]
+git = "https://github.com/PrismML-Eng/llama.cpp.git"
+rev = "prism-b10777-e3de715"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_VULKAN=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."rocm"]
+accelerator = "rocm"
+notes = "Linux: ROCm 7.2 build; Windows: HIP (Radeon) build. Needs the ROCm runtime."
+[[variants."rocm".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-ubuntu-rocm-7.2-x64.tar.gz"
+sha256 = "228d484650073036bab3cedfe57374d6ad4237c86562c5f5ee7c638b654caf35"
+size = 155948256
+format = "tar.gz"
+strip_components = 1
+[[variants."rocm".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-win-hip-radeon-x64.zip"
+sha256 = "371921702ccc41ff235836ea78e575b0a054fbfaf4711d1976a79577e982d846"
+size = 342522145
+format = "zip"
+strip_components = 0
+[variants."rocm".source]
+git = "https://github.com/PrismML-Eng/llama.cpp.git"
+rev = "prism-b10777-e3de715"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_HIP=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."metal"]
+accelerator = "metal"
+notes = "The macOS arm64 archive has Metal built in."
+[[variants."metal".assets]]
+os = "macos"
+arch = "aarch64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-macos-arm64.tar.gz"
+sha256 = "bd22ade1ece9dbcd7140a171044a50d5de37c1eb6d020ab83f61c86dfc0323a8"
+size = 11567567
+format = "tar.gz"
+strip_components = 1
+[variants."metal".source]
+git = "https://github.com/PrismML-Eng/llama.cpp.git"
+rev = "prism-b10777-e3de715"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."sycl"]
+accelerator = "sycl"
+notes = "Intel oneAPI SYCL (fp16); never picked automatically."
+[[variants."sycl".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-ubuntu-sycl-fp16-x64.tar.gz"
+sha256 = "5d3c78c2965b1f623abaabccf26743e8edde200d68d810bc2b89c40c7b4bcbb0"
+size = 45150765
+format = "tar.gz"
+strip_components = 1
+[[variants."sycl".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-win-sycl-x64.zip"
+sha256 = "96b99f18a9ad70c5d50feb4d07b7d4cabf901ad6364e22710b837e848c1183bd"
+size = 103156751
+format = "zip"
+strip_components = 0
+[variants."sycl".source]
+git = "https://github.com/PrismML-Eng/llama.cpp.git"
+rev = "prism-b10777-e3de715"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DGGML_SYCL=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]

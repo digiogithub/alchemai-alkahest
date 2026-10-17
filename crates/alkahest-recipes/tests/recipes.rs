@@ -155,6 +155,53 @@ fn llama_cpp_recipe_covers_the_published_gpu_builds_with_pinned_digests() {
 }
 
 #[test]
+fn prism_recipe_pins_the_tested_fork_build_for_every_accelerator() {
+    let catalog = Catalog::builtin();
+    assert_eq!(
+        catalog.versions("prism-llama-cpp"),
+        vec!["prism-b10777-e3de715"]
+    );
+    let variants = catalog.variants("prism-llama-cpp", "prism-b10777-e3de715");
+    let names: Vec<&str> = variants.iter().map(|r| r.variant.as_str()).collect();
+    for want in [
+        "cpu", "cuda12.4", "cuda12.8", "cuda13.3", "vulkan", "rocm", "metal",
+    ] {
+        assert!(names.contains(&want), "{want} missing from {names:?}");
+    }
+    for r in &variants {
+        for a in &r.assets {
+            assert!(a.sha256.is_some() && !a.tofu);
+            assert!(
+                a.url
+                    .contains("PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/")
+            );
+        }
+    }
+    // A driver for CUDA 12.8 gets the 12.8 build, one for 13.3 the 13.3 build.
+    let rs: Vec<_> = variants.clone();
+    let sys = system(
+        vec![gpu(GpuVendor::Nvidia, Some((12, 8)))],
+        true,
+        false,
+        false,
+    );
+    assert_eq!(
+        select_variant(&rs, &sys, &linux()).map(|r| r.variant.as_str()),
+        Some("cuda12.8")
+    );
+    let sys = system(
+        vec![gpu(GpuVendor::Nvidia, Some((13, 3)))],
+        true,
+        false,
+        false,
+    );
+    assert_eq!(
+        select_variant(&rs, &sys, &linux()).map(|r| r.variant.as_str()),
+        Some("cuda13.3")
+    );
+}
+
+#[test]
 fn builtin_recipes_all_parse_and_have_a_cpu_variant() {
     let all = builtin_recipes();
     assert!(!all.is_empty());
