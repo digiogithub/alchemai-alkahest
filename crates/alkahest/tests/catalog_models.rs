@@ -92,7 +92,7 @@ filename = "assistant-q4_k_m.gguf"
         &cfg,
         format!(
             "[[catalogs]]\nname = \"local\"\nurl = \"file://{}\"\n",
-            repo.display()
+            repo.display().to_string().replace('\\', "/")
         ),
     )
     .unwrap();

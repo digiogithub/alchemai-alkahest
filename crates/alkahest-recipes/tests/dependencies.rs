@@ -157,7 +157,14 @@ fn dep_recipe(dep_extra: &str) -> String {
 
 #[test]
 fn dest_escaping_the_install_directory_refused() {
-    for dest in ["../../bin", "/etc", "a/../../b"] {
+    for dest in [
+        "../../bin",
+        "/etc",
+        "a/../../b",
+        "C:/Windows",
+        "\\\\x",
+        "a\\\\..\\\\..\\\\b",
+    ] {
         let err = parse_recipes(&dep_recipe(&format!("dest = \"{dest}\"")))
             .unwrap_err()
             .to_string();

@@ -291,7 +291,7 @@ fn engines_show_the_catalog_origin() {
         &cfg,
         format!(
             "[[catalogs]]\nname = \"local\"\nurl = \"file://{}\"\n",
-            repo.path().display()
+            repo.path().display().to_string().replace('\\', "/")
         ),
     )
     .unwrap();

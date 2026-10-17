@@ -695,13 +695,23 @@ fn check_venv(v: &VenvBuild) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// A relative path that stays inside its base directory.
+/// A relative path that stays inside its base directory, judged the same way on every host: a
+/// recipe is data written on one platform and installed on another, and `Path::is_absolute`
+/// alone would accept `/etc` on Windows and `C:\x` on Unix.
 fn check_relative(p: &str) -> std::result::Result<(), String> {
     let path = Path::new(p);
     let escapes = path.is_absolute()
-        || path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir));
+        || p.starts_with(['/', '\\'])
+        || p.contains(':')
+        || p.split(['/', '\\']).any(|c| c == "..")
+        || path.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        });
     if escapes {
         Err(format!("`{p}` must be a relative path without `..`"))
     } else {
