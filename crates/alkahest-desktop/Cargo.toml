@@ -29,6 +29,7 @@ futures.workspace = true
 gpui-kit = { workspace = true, optional = true }
 keyring.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true

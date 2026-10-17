@@ -271,3 +271,145 @@ pub fn confirm_dialog(
                 .child(actions),
         )
 }
+
+/// One segment of a segmented control (`Hugging Face | Ollama library`, template source).
+/// The active segment is raised on the track; the caller adds the click handler.
+pub fn segment(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    active: bool,
+    p: &Palette,
+) -> Stateful<Div> {
+    let mut el = h_flex()
+        .id(id)
+        .h(px(size::CONTROL_SMALL - 6.0))
+        .px(px(space::S3))
+        .items_center()
+        .rounded(px(radius::SM))
+        .type_style(text::SMALL)
+        .font_weight(FontWeight::MEDIUM)
+        .whitespace_nowrap()
+        .cursor_pointer()
+        .child(label.into());
+    if active {
+        el = el.bg(c(p.text_primary)).text_color(c(p.bg_base));
+    } else {
+        let hover = c(p.text_primary);
+        el = el
+            .text_color(c(p.text_secondary))
+            .hover(move |s| s.text_color(hover));
+    }
+    el
+}
+
+/// The track of a segmented control holding `segments`.
+pub fn segmented(segments: Vec<Stateful<Div>>, p: &Palette) -> Div {
+    let mut track = h_flex()
+        .flex_shrink_0()
+        .p(px(3.0))
+        .gap(px(2.0))
+        .items_center()
+        .rounded(px(radius::MD))
+        .border_1()
+        .border_color(c(p.line_strong))
+        .bg(c(p.bg_raised));
+    for s in segments {
+        track = track.child(s);
+    }
+    track
+}
+
+/// A selectable chip (choice lists: KV cache types, keep-alive presets, quant tags). The
+/// selected chip carries the brass border and text; the caller adds the click handler.
+pub fn choice_chip(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    selected: bool,
+    mono: bool,
+    p: &Palette,
+) -> Stateful<Div> {
+    let (border, fg, bg) = if selected {
+        (p.accent_default, p.accent_text, p.accent_subtle)
+    } else {
+        (p.line_strong, p.text_secondary, p.bg_raised)
+    };
+    let hover = c(p.accent_border);
+    let el = h_flex()
+        .id(id)
+        .flex_shrink_0()
+        .h(px(size::CONTROL_SMALL - 4.0))
+        .px(px(10.0))
+        .items_center()
+        .rounded(px(radius::SM))
+        .border_1()
+        .border_color(c(border))
+        .bg(c(bg))
+        .text_color(c(fg))
+        .whitespace_nowrap()
+        .cursor_pointer()
+        .hover(move |s| s.border_color(hover));
+    let el = if mono {
+        el.type_style(text::MONO).text_size(px(text::CAPTION.size))
+    } else {
+        el.type_style(text::SMALL)
+    };
+    el.child(label.into())
+}
+
+/// A raised card (1 px border, no shadow) with the standard padding.
+/// Cards never shrink inside a scrolling column; a caller that wants it to flex (a side
+/// panel) sets `flex_1()` after this.
+pub fn card(p: &Palette) -> Div {
+    v_flex()
+        .flex_shrink_0()
+        .p(px(size::CARD_PADDING))
+        .gap(px(space::S3))
+        .rounded(px(radius::XL))
+        .border_1()
+        .border_color(c(p.line_default))
+        .bg(c(p.bg_raised))
+}
+
+/// A one-line notice: neutral (signal blue) or a failure (cinnabar).
+pub fn notice_line(message: impl Into<SharedString>, danger: bool, p: &Palette) -> Div {
+    let (fg, bg, border) = if danger {
+        (p.danger_text, p.danger_subtle, p.danger_border)
+    } else {
+        (p.info_text, p.info_subtle, p.info_subtle)
+    };
+    h_flex()
+        .px(px(14.0))
+        .py(px(space::S2))
+        .rounded(px(radius::LG))
+        .bg(c(bg))
+        .border_1()
+        .border_color(c(border))
+        .text_color(c(fg))
+        .type_style(text::SMALL)
+        .child(div().flex_1().min_w_0().child(message.into()))
+}
+
+/// The frame around a kit text input (`size::CONTROL` high); cinnabar border on an error.
+pub fn field_frame(error: bool, p: &Palette) -> Div {
+    h_flex()
+        .h(px(size::CONTROL))
+        .px(px(space::S3))
+        .gap(px(space::S2))
+        .items_center()
+        .rounded(px(radius::MD))
+        .border_1()
+        .border_color(c(if error {
+            p.danger_border
+        } else {
+            p.line_strong
+        }))
+        .bg(c(p.bg_sidebar))
+}
+
+/// A small muted label above a field.
+pub fn field_label(label: impl Into<SharedString>, p: &Palette) -> Div {
+    div()
+        .type_style(text::SMALL)
+        .text_color(c(p.text_secondary))
+        .child(label.into())
+}
