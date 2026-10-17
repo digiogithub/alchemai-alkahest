@@ -2,14 +2,15 @@
 id: ALK-US-0042
 type: story
 title: Authentication middleware and exposure policy
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0008
 milestone: ALK-M-0003
 labels: [security]
 estimate: 3
 created: 2026-10-16T22:41:11Z
-updated: 2026-10-16T22:52:31Z
+updated: 2026-10-17T00:11:33Z
+started: 2026-10-17T00:11:33Z
 links:
   - { kind: implements, target: ALK-SP-0006.R1 }
   - { kind: implements, target: ALK-SP-0006.R2 }

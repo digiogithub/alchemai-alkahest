@@ -2,14 +2,15 @@
 id: ALK-US-0043
 type: story
 title: Key usage audit
-status: backlog
+status: in_progress
 priority: medium
 parent: ALK-EP-0008
 milestone: ALK-M-0003
 labels: [security]
 estimate: 2
 created: 2026-10-16T22:41:18Z
-updated: 2026-10-16T22:41:20Z
+updated: 2026-10-17T00:11:33Z
+started: 2026-10-17T00:11:33Z
 links:
   - { kind: implements, target: ALK-SP-0006.R5 }
 ---

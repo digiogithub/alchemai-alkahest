@@ -2,14 +2,15 @@
 id: ALK-US-0033
 type: story
 title: API server skeleton and `alkahest serve`
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0007
 milestone: ALK-M-0003
 labels: [api]
 estimate: 3
 created: 2026-10-16T22:40:32Z
-updated: 2026-10-16T22:40:36Z
+updated: 2026-10-17T00:11:33Z
+started: 2026-10-17T00:11:33Z
 links:
   - { kind: implements, target: ALK-SP-0006.R1 }
 ---

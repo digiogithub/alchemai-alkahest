@@ -5,7 +5,7 @@ title: Engines and recipes
 status: backlog
 labels: [engine, recipes]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-16T22:37:34Z
+updated: 2026-10-17T00:09:41Z
 requirements:
   R1:
     status: backlog
@@ -19,6 +19,18 @@ requirements:
     status: backlog
   R6:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-recipes/src/install.rs#install
+        - crates/alkahest-recipes/src/install.rs#locate
+        - crates/alkahest-recipes/src/recipe.rs#Recipe
+        - recipes/llama-cpp-cpu.toml
+        - crates/alkahest/src/engines_cmd.rs#run
+      tests:
+        - crates/alkahest-recipes/tests/install.rs#install_unpacks_strips_the_wrapper_and_keeps_the_executable_bit
+        - crates/alkahest-recipes/tests/install.rs#real_cpu_llama_server_runs
+        - crates/alkahest-recipes/tests/install.rs#locate_prefers_the_newest_tag_and_the_data_dir_on_a_tie
+        - crates/alkahest/tests/engines.rs#ls_shows_an_installed_engine_once_with_its_path
 ---
 
 ## Purpose

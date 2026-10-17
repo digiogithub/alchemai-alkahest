@@ -2,14 +2,15 @@
 id: ALK-US-0046
 type: story
 title: Graceful shutdown and signal handling
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0009
 milestone: ALK-M-0003
 labels: [service]
 estimate: 2
 created: 2026-10-16T22:41:30Z
-updated: 2026-10-16T22:41:32Z
+updated: 2026-10-17T00:11:33Z
+started: 2026-10-17T00:11:33Z
 links:
   - { kind: implements, target: ALK-SP-0009.R4 }
 ---

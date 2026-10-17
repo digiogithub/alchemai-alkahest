@@ -2,15 +2,16 @@
 id: ALK-US-0019
 type: story
 title: Pull GGUF models from Hugging Face
-status: in_review
+status: done
 priority: critical
 parent: ALK-EP-0004
 milestone: ALK-M-0002
 labels: [hf, pull]
 estimate: 3
 created: 2026-10-16T22:39:26Z
-updated: 2026-10-16T23:56:42Z
+updated: 2026-10-17T00:11:24Z
 started: 2026-10-16T23:43:32Z
+closed: 2026-10-17T00:11:24Z
 links:
   - { kind: implements, target: ALK-SP-0002.R2 }
 ---

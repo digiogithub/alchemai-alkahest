@@ -2,15 +2,16 @@
 id: ALK-US-0015
 type: story
 title: "Spike: Ollama Go templates vs GGUF jinja"
-status: in_progress
+status: done
 priority: high
 parent: ALK-EP-0003
 milestone: ALK-M-0002
 labels: [spike, ollama]
 estimate: 3
 created: 2026-10-16T22:39:08Z
-updated: 2026-10-16T23:56:55Z
+updated: 2026-10-17T00:11:18Z
 started: 2026-10-16T23:56:55Z
+closed: 2026-10-17T00:11:18Z
 ---
 
 ## Description

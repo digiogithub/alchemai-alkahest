@@ -2,15 +2,16 @@
 id: ALK-US-0026
 type: story
 title: Bundled CPU llama.cpp
-status: in_progress
+status: done
 priority: critical
 parent: ALK-EP-0005
 milestone: ALK-M-0003
 labels: [engine, llamacpp]
 estimate: 3
 created: 2026-10-16T22:40:02Z
-updated: 2026-10-16T23:56:55Z
+updated: 2026-10-17T00:11:24Z
 started: 2026-10-16T23:56:55Z
+closed: 2026-10-17T00:11:24Z
 links:
   - { kind: implements, target: ALK-SP-0003.R6 }
 ---
