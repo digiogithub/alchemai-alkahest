@@ -8,6 +8,8 @@
 //!   and `PATH`; ALK-SP-0003.R5).
 //! * [`builtin`]: baseline engines for llama.cpp (mainline and PrismML), vLLM, whisper.cpp and
 //!   stable-diffusion.cpp.
+//! * [`supervisor`]: spawning, health polling, log capture, crash detection and stopping of
+//!   engine processes ([`launch`], [`EngineHandle`]; ALK-SP-0004.R6).
 
 pub mod builtin;
 pub mod capability;
@@ -17,6 +19,7 @@ pub mod id;
 pub mod launch;
 pub mod locator;
 pub mod registry;
+pub mod supervisor;
 
 pub use capability::{Capabilities, Capability, CapabilityError, kind_capabilities};
 pub use engine::Engine;
@@ -25,3 +28,9 @@ pub use id::{ApiDialect, EngineId};
 pub use launch::{HealthCheck, LaunchRequest, LaunchSpec, ReadyPredicate};
 pub use locator::{EngineInstall, EngineLocator, FsLocator, InstallSource, LocateQuery};
 pub use registry::{EngineRegistry, PreparedLaunch};
+pub use supervisor::logs::{LogBuffer, LogLine, Stream};
+pub use supervisor::restart::{RestartDecision, RestartPolicy, RestartTracker};
+pub use supervisor::usage::{ResourceSampler, ResourceUsage};
+pub use supervisor::{
+    EngineHandle, EngineState, EphemeralPorts, ExitInfo, PortPicker, SpawnOptions, launch, spawn,
+};

@@ -97,10 +97,14 @@ dependencies = [
  "alkahest-gguf",
  "alkahest-store",
  "alkahest-sysinfo",
+ "parking_lot",
+ "rustix",
  "serde",
  "serde_json",
+ "sysinfo",
  "tempfile",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 
