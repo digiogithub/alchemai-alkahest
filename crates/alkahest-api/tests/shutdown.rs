@@ -1,5 +1,5 @@
 //! Graceful shutdown (ALK-US-0046, ALK-SP-0009.R4): drain, timeout, hooks.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use alkahest_api::{
-    ApiRouter, ApiSettings, AppState, HookOutcome, ServeOptions, ServerInfo, ShutdownReport, bind,
-    serve_with,
+    ApiRouter, ApiSettings, AppState, HookOutcome, ServeOptions, Server, ServerInfo,
+    ShutdownReport, bind, serve_with,
 };
 use axum::Router;
 use axum::routing::get;
@@ -100,7 +100,7 @@ async fn drain_timeout_bounds_the_wait_and_hooks_still_run() {
     )
     .await;
     let url = format!("http://{}/slow", server.addr);
-    let _hanging = tokio::spawn(async move { reqwest::get(url).await });
+    let hanging = tokio::spawn(async move { reqwest::get(url).await });
     started.notified().await;
     let t0 = Instant::now();
     server.stop.send(()).unwrap();
@@ -108,6 +108,72 @@ async fn drain_timeout_bounds_the_wait_and_hooks_still_run() {
     assert!(!report.drained);
     assert!(t0.elapsed() < Duration::from_secs(5), "{:?}", t0.elapsed());
     assert_eq!(report.hooks[0].1, HookOutcome::Completed);
+    // ALK-US-0084: the connection was aborted inside the library, so the client sees it close
+    // instead of hanging until the process exits.
+    assert_eq!(report.aborted, 1);
+    let outcome = tokio::time::timeout(Duration::from_secs(5), hanging)
+        .await
+        .expect("the aborted connection must close")
+        .unwrap();
+    assert!(outcome.is_err(), "{outcome:?}");
+}
+
+#[tokio::test]
+async fn forced_stop_aborts_connections_at_once() {
+    let started = Arc::new(Notify::new());
+    let notify = started.clone();
+    let routes = Router::new().route(
+        "/slow",
+        get(move || {
+            let started = notify.clone();
+            async move {
+                started.notify_one();
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                "done"
+            }
+        }),
+    );
+    let state = AppState::builder(ServerInfo::default()).build();
+    state.shutdown_hooks().register("teardown", || async {});
+    let hooks = state.shutdown_hooks();
+    let app = ApiRouter::new(state, ApiSettings::default())
+        .merge(routes)
+        .into_router();
+    let listener = bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (stop, stop_rx) = oneshot::channel::<()>();
+    let (force, force_rx) = oneshot::channel::<()>();
+    let options = ServeOptions {
+        drain_timeout: Duration::from_secs(60),
+        hook_timeout: Duration::from_secs(60),
+    };
+    let task = tokio::spawn(
+        Server::new(listener, app)
+            .options(options)
+            .hooks(hooks)
+            .force_stop(async move {
+                let _ = force_rx.await;
+            })
+            .run(async move {
+                let _ = stop_rx.await;
+            }),
+    );
+    let hanging = tokio::spawn(reqwest::get(format!("http://{addr}/slow")));
+    started.notified().await;
+    stop.send(()).unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!task.is_finished(), "the drain must wait for the request");
+    let t0 = Instant::now();
+    force.send(()).unwrap();
+    let report = task.await.unwrap().unwrap();
+    assert!(t0.elapsed() < Duration::from_secs(5), "{:?}", t0.elapsed());
+    assert!(report.forced && !report.drained);
+    assert_eq!(report.aborted, 1);
+    assert_eq!(
+        report.hooks,
+        vec![("teardown".into(), HookOutcome::Completed)]
+    );
+    assert!(hanging.await.unwrap().is_err());
 }
 
 #[cfg(unix)]

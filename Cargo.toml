@@ -67,6 +67,12 @@ axum = { version = "=0.8.9", features = ["macros", "multipart"] }
 tower = { version = "=0.5.3", features = ["util", "timeout", "limit"] }
 tower-http = { version = "=0.7.1", features = ["trace", "cors", "limit", "timeout", "request-id", "sensitive-headers", "catch-panic"] }
 hyper = { version = "=1.12.0", features = ["full"] }
+# Custom accept loop (TLS, connection tracking); already in the lock through axum and reqwest.
+hyper-util = { version = "=0.1.21", features = ["server-auto", "server-graceful", "tokio", "service"] }
+# HTTPS listener (ALK-SP-0006.R6); aws-lc-rs is the provider reqwest already uses.
+rustls = { version = "=0.23.46", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
+rcgen = { version = "=0.14.10", default-features = false, features = ["aws_lc_rs", "pem"] }
 # rustls only, never native-tls / OpenSSL.
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "json", "stream", "http2", "query", "multipart"] }
 url = { version = "=2.5.8", features = ["serde"] }
@@ -108,6 +114,8 @@ keyring = "=4.2.0"
 rpassword = "=7.4.0"
 argon2 = "=0.6.0"
 rand = "=0.10.3"
+# Wipes secrets (TLS keys, API key secrets, HF token) from memory on drop.
+zeroize = "=1.9.1"
 
 # System, files, binary formats
 sysinfo = "=0.39.6"
@@ -115,6 +123,10 @@ libloading = "=0.9.0"
 # Process groups and signals for engine subprocesses (unix only; safe API, no local unsafe).
 rustix = { version = "=1.1.5", default-features = false, features = ["std", "process"] }
 memmap2 = "=0.9.11"
+# Windows: job objects for engines, event log, service entry, key store ACLs. 0.61 is the
+# line windows-service and tokio already use.
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_EventLog", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-service = "=0.8.1"
 byteorder = "=1.5.0"
 walkdir = "=2.5.0"
 # Engine archives (pure Rust, no C): gzip, tar and zip.

@@ -72,3 +72,49 @@ system service after installing the `.deb` or the archive, ask for it explicitly
 `alkahest service install --user`. The bundled engine in `/usr/lib/alkahest/engines` (or
 `engines/` next to the binary) is found automatically; `alkahest engines install` still adds GPU
 builds into the data directory, which win over the bundled copy.
+
+## HTTPS
+
+The server speaks plain HTTP on loopback by default. To expose it on a network with TLS
+(ALK-SP-0006.R6):
+
+```sh
+alkahest certs generate --name myhost.lan   # CA + server certificate in <data_dir>/tls/
+```
+
+```toml
+[server]
+host = "0.0.0.0"
+
+[server.tls]
+enabled = true
+# cert = "/etc/alkahest/tls/cert.pem"    # defaults: <data_dir>/tls/cert.pem and key.pem
+# key = "/etc/alkahest/tls/key.pem"
+# reload_interval_secs = 60             # 0 = reload on SIGHUP only
+```
+
+A renewed certificate (for example from an ACME client) is picked up on `SIGHUP` or when the
+files change; open connections keep the old one. The CLI switches to `https://` by itself and
+trusts the generated `ca.pem` when it shares the data directory; elsewhere set
+`ALKAHEST_CA_CERT=/path/to/ca.pem`. The key file is written with mode 0600.
+
+## Running as a service
+
+`alkahest service install|uninstall|start|stop|status` (ALK-SP-0009.R1) targets the platform's
+service manager; `--dry-run` prints the files and commands without changing anything, and
+`--manager systemd|launchd|windows` with `--dry-run` or `--root <dir>` shows what another
+platform would get.
+
+| Platform | System service | `--user` |
+|---|---|---|
+| Linux | systemd unit, user `alkahest`, data `/var/lib/alkahest` | `~/.config/systemd/user/alkahest.service` |
+| macOS | LaunchDaemon `/Library/LaunchDaemons/es.digio.alkahest.plist`, hidden user `_alkahest`, data `/Library/Application Support/Alkahest`, output `/Library/Logs/Alkahest/` | LaunchAgent `~/Library/LaunchAgents/es.digio.alkahest.plist`, output `~/Library/Logs/Alkahest/` |
+| Windows | service `alkahest` (`sc.exe`, delayed auto start, `NT AUTHORITY\LocalService`, restart on failure), data `%ProgramData%\Alkahest`, events in the Application log (source `Alkahest`) | not available (services are machine-wide) |
+
+On macOS `service stop` unloads the job (`launchctl bootout`), so `KeepAlive` does not restart it;
+it loads again at the next boot or login, or with `service start`.
+
+Engines never outlive a killed server: Linux uses the parent-death signal, Windows a job object
+per engine (closing it kills the engine's process tree), macOS a small watchdog per engine that
+stops the engine within about a second of the server's death. Each start also sweeps engines a
+previous server left behind.

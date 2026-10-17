@@ -7,7 +7,7 @@
 
 use std::process::ExitCode;
 
-use alkahest_client::{API_KEY_ENV, Client, RunningModel};
+use alkahest_client::{API_KEY_ENV, CA_CERT_ENV, Client, RunningModel};
 use alkahest_core::config::Loaded;
 use anyhow::{Context, Result, bail};
 use time::OffsetDateTime;
@@ -16,11 +16,22 @@ use time::format_description::well_known::Rfc3339;
 use crate::models_cmd::human_size;
 use crate::output::{Format, Listing};
 
-/// The client for the configured server.
+/// The client for the configured server: HTTPS when `[server.tls]` is enabled, trusting the
+/// CA in `ALKAHEST_CA_CERT`, or else the `ca.pem` `alkahest certs generate` wrote next to the
+/// configured certificate (when this user can read it).
 pub(crate) fn client(loaded: &Loaded) -> Result<Client> {
     let server = &loaded.config.server;
     let key = std::env::var(API_KEY_ENV).ok();
-    Ok(Client::for_bind(&server.host, server.port)?.with_api_key(key))
+    let mut client = Client::for_server(&server.host, server.port, server.tls.enabled)?;
+    if let Some(ca) = std::env::var_os(CA_CERT_ENV).filter(|v| !v.is_empty()) {
+        client = client.with_ca_cert_file(std::path::Path::new(&ca))?;
+    } else if server.tls.enabled {
+        let ca = server.tls.ca_path(&loaded.paths.data_dir);
+        if ca.is_file() {
+            client = client.with_ca_cert_file(&ca)?;
+        }
+    }
+    Ok(client.with_api_key(key))
 }
 
 /// A current-thread runtime for one client command.

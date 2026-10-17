@@ -11,6 +11,8 @@
 //! instead, Linux engines get SIGTERM from the kernel (parent-death signal) and every engine
 //! is in the runtime ledger (`<data_dir>/run/engines.json`) that the next start sweeps.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +23,8 @@ use alkahest_api::audit::{AuditLog, UsageTracker, usage_path};
 use alkahest_api::keys::{FileKeyVerifier, KeyStore, KeyVerifier};
 use alkahest_api::pull::PullService;
 use alkahest_api::{
-    ApiRouter, ApiSettings, AppState, Exposure, ServeOptions, ServerInfo, check_exposure,
+    ApiRouter, ApiSettings, AppState, Exposure, ServeOptions, Server, ServerInfo, TlsAcceptor,
+    check_exposure,
 };
 use alkahest_core::Source;
 use alkahest_core::config::Loaded;
@@ -40,17 +43,80 @@ const AUDIT_KEEP: usize = 5;
 /// Time an orphaned engine gets to exit after SIGTERM before the startup sweep kills it.
 const ORPHAN_GRACE: Duration = Duration::from_secs(5);
 
-/// Runs `alkahest serve`.
-pub fn run(loaded: &Loaded, allow_unauthenticated: bool) -> Result<ExitCode> {
+/// How a server run is told to stop and reports that it listens: OS signals for a foreground
+/// `alkahest serve`, service control events for the Windows service.
+pub(crate) struct ServeControl {
+    /// Resolves with a reason when the server should stop (drain, then hooks).
+    pub stop: Pin<Box<dyn Future<Output = &'static str> + Send>>,
+    /// Resolves when the stop must not wait any longer ([`Server::force_stop`]).
+    pub force: Pin<Box<dyn Future<Output = ()> + Send>>,
+    /// Called once with the base URL when the listener is bound.
+    pub on_listening: Box<dyn FnOnce(&str) + Send>,
+}
+
+/// Runs `alkahest serve`, or the Windows service entry with `--service`.
+pub fn run(loaded: &Loaded, allow_unauthenticated: bool, service: bool) -> Result<ExitCode> {
+    if service {
+        return crate::service_windows::run_service(loaded, allow_unauthenticated);
+    }
+    run_with(loaded, allow_unauthenticated, signal_control)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Runs the server on a new runtime until `control` (built inside the runtime, before the
+/// listener is bound, so an early stop request is not lost) says stop.
+pub(crate) fn run_with(
+    loaded: &Loaded,
+    allow_unauthenticated: bool,
+    control: impl FnOnce() -> Result<ServeControl>,
+) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("starting the async runtime")?;
-    runtime.block_on(serve(loaded, allow_unauthenticated))?;
-    Ok(ExitCode::SUCCESS)
+    runtime.block_on(serve(loaded, allow_unauthenticated, control))
 }
 
-async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
+/// The foreground control: the first SIGINT/SIGTERM (Windows console event) stops the server
+/// gracefully, a second one skips the rest of the drain (open connections are aborted, hooks
+/// get a short budget), a third one exits at once with code 130.
+fn signal_control() -> Result<ServeControl> {
+    let mut signals =
+        alkahest_api::StopSignals::install().context("installing stop-signal handlers")?;
+    let (first_tx, first_rx) = tokio::sync::oneshot::channel::<&'static str>();
+    let (second_tx, second_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let first = signals.recv().await;
+        let _ = first_tx.send(first);
+        eprintln!("alkahest serve: {first}: stopping (send it again to stop now)");
+        let second = signals.recv().await;
+        tracing::warn!(signal = second, "second stop signal: forcing the stop");
+        eprintln!("alkahest serve: {second} again: forcing the stop");
+        let _ = second_tx.send(());
+        let third = signals.recv().await;
+        tracing::warn!(signal = third, "third stop signal: exiting immediately");
+        eprintln!("alkahest serve: {third} a third time: exiting now");
+        std::process::exit(EXIT_FORCED);
+    });
+    Ok(ServeControl {
+        stop: Box::pin(async move { first_rx.await.unwrap_or("stop") }),
+        force: Box::pin(async move {
+            if second_rx.await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }),
+        on_listening: Box::new(|_| {}),
+    })
+}
+
+/// Exit code after a third stop signal (128 + SIGINT, as shells report an interrupted job).
+const EXIT_FORCED: i32 = 130;
+
+async fn serve(
+    loaded: &Loaded,
+    allow_unauthenticated: bool,
+    control: impl FnOnce() -> Result<ServeControl>,
+) -> Result<()> {
     let config = &loaded.config;
     let paths = config.resolve_paths(&loaded.paths);
     let settings = ApiSettings::from_config(config);
@@ -66,6 +132,21 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         Some(verifier.as_ref()),
         allow_unauthenticated,
     )?;
+
+    // HTTPS (ALK-SP-0006.R6): a missing or broken certificate stops the start here, before
+    // anything else is opened, rather than leaving a server nobody can reach.
+    let tls = if config.server.tls.enabled {
+        let cert = config.server.tls.cert_path(&paths.data_dir);
+        let key = config.server.tls.key_path(&paths.data_dir);
+        let acceptor = TlsAcceptor::from_files(&cert, &key)
+            .context("loading the TLS certificate (`alkahest certs generate` writes one)")?
+            .with_reload_interval(Some(Duration::from_secs(
+                config.server.tls.reload_interval_secs,
+            )));
+        Some(acceptor)
+    } else {
+        None
+    };
 
     // Models, engines and the scheduler. Hardware detection may probe GPU libraries, so it
     // runs on the blocking pool.
@@ -182,7 +263,11 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         scheduler.shutdown().await;
     });
     // Installed before binding so an early stop signal is not lost.
-    let stop = alkahest_api::stop_signal().context("installing stop-signal handlers")?;
+    let ServeControl {
+        stop,
+        force,
+        on_listening,
+    } = control()?;
     let options = ServeOptions::from_config(config);
     let app = ApiRouter::new(state, settings)
         .merge(alkahest_api::inference_routes())
@@ -197,21 +282,31 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         Exposure::KeyProtected => "network, API key required",
         Exposure::Unprotected => "network, NO AUTHENTICATION",
     };
-    eprintln!("alkahest serve: listening on http://{addr} ({note})");
-    tracing::info!(%addr, ?exposure, "server started");
-    let report = alkahest_api::serve_with(
-        listener,
-        app,
-        async move {
+    let scheme = if tls.is_some() { "https" } else { "http" };
+    eprintln!("alkahest serve: listening on {scheme}://{addr} ({note})");
+    if exposure != Exposure::LoopbackOnly && tls.is_none() {
+        eprintln!(
+            "alkahest serve: warning: plain HTTP on a network address; API keys and prompts \
+             cross the network unencrypted (enable [server.tls] or use a TLS reverse proxy)"
+        );
+        tracing::warn!("plain HTTP on a network address");
+    }
+    tracing::info!(%addr, ?exposure, tls = tls.is_some(), "server started");
+    on_listening(&format!("{scheme}://{addr}"));
+    let report = Server::new(listener, app)
+        .tls(tls)
+        .options(options)
+        .hooks(hooks)
+        .force_stop(force)
+        .run(async move {
             let signal = stop.await;
             tracing::info!(signal, "stop signal received");
-        },
-        options,
-        hooks,
-    )
-    .await?;
+        })
+        .await?;
     tracing::info!(
         drained = report.drained,
+        forced = report.forced,
+        aborted = report.aborted,
         hooks = report.hooks.len(),
         "server stopped"
     );

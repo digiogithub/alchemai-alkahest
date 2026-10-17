@@ -90,61 +90,113 @@ impl ShutdownHooks {
 /// shutdown. Handlers are installed eagerly so a signal that arrives while the server is
 /// still starting is not lost.
 pub fn stop_signal() -> io::Result<impl Future<Output = &'static str> + Send + 'static> {
-    imp::stop_signal()
+    let mut signals = StopSignals::install()?;
+    Ok(async move { signals.recv().await })
+}
+
+/// Repeated stop signals: the first asks for a graceful stop, a second one can force it
+/// ([`crate::server::Server::force_stop`]).
+#[derive(Debug)]
+pub struct StopSignals {
+    inner: imp::Signals,
+}
+
+impl StopSignals {
+    /// Installs the handlers (see [`stop_signal`] for the signal set).
+    pub fn install() -> io::Result<Self> {
+        Ok(Self {
+            inner: imp::Signals::install()?,
+        })
+    }
+
+    /// Waits for the next stop signal and returns its name.
+    pub async fn recv(&mut self) -> &'static str {
+        self.inner.recv().await
+    }
 }
 
 #[cfg(unix)]
 mod imp {
-    use std::future::Future;
     use std::io;
 
-    use tokio::signal::unix::{SignalKind, signal};
+    use tokio::signal::unix::{Signal, SignalKind, signal};
 
-    pub(super) fn stop_signal() -> io::Result<impl Future<Output = &'static str> + Send + 'static> {
-        let mut term = signal(SignalKind::terminate())?;
-        let mut int = signal(SignalKind::interrupt())?;
-        Ok(async move {
+    #[derive(Debug)]
+    pub(super) struct Signals {
+        term: Signal,
+        int: Signal,
+    }
+
+    impl Signals {
+        pub(super) fn install() -> io::Result<Self> {
+            Ok(Self {
+                term: signal(SignalKind::terminate())?,
+                int: signal(SignalKind::interrupt())?,
+            })
+        }
+
+        pub(super) async fn recv(&mut self) -> &'static str {
             tokio::select! {
-                _ = term.recv() => "SIGTERM",
-                _ = int.recv() => "SIGINT",
+                _ = self.term.recv() => "SIGTERM",
+                _ = self.int.recv() => "SIGINT",
             }
-        })
+        }
     }
 }
 
 #[cfg(windows)]
 mod imp {
-    use std::future::Future;
     use std::io;
 
-    use tokio::signal::windows::{ctrl_break, ctrl_c, ctrl_close, ctrl_shutdown};
+    use tokio::signal::windows::{
+        CtrlBreak, CtrlC, CtrlClose, CtrlShutdown, ctrl_break, ctrl_c, ctrl_close, ctrl_shutdown,
+    };
 
-    pub(super) fn stop_signal() -> io::Result<impl Future<Output = &'static str> + Send + 'static> {
-        let mut c = ctrl_c()?;
-        let mut brk = ctrl_break()?;
-        let mut close = ctrl_close()?;
-        let mut shutdown = ctrl_shutdown()?;
-        Ok(async move {
+    #[derive(Debug)]
+    pub(super) struct Signals {
+        c: CtrlC,
+        brk: CtrlBreak,
+        close: CtrlClose,
+        shutdown: CtrlShutdown,
+    }
+
+    impl Signals {
+        pub(super) fn install() -> io::Result<Self> {
+            Ok(Self {
+                c: ctrl_c()?,
+                brk: ctrl_break()?,
+                close: ctrl_close()?,
+                shutdown: ctrl_shutdown()?,
+            })
+        }
+
+        pub(super) async fn recv(&mut self) -> &'static str {
             tokio::select! {
-                _ = c.recv() => "ctrl-c",
-                _ = brk.recv() => "ctrl-break",
-                _ = close.recv() => "console close",
-                _ = shutdown.recv() => "system shutdown",
+                _ = self.c.recv() => "ctrl-c",
+                _ = self.brk.recv() => "ctrl-break",
+                _ = self.close.recv() => "console close",
+                _ = self.shutdown.recv() => "system shutdown",
             }
-        })
+        }
     }
 }
 
 #[cfg(not(any(unix, windows)))]
 mod imp {
-    use std::future::Future;
     use std::io;
 
-    pub(super) fn stop_signal() -> io::Result<impl Future<Output = &'static str> + Send + 'static> {
-        Ok(async {
+    #[derive(Debug)]
+    pub(super) struct Signals;
+
+    impl Signals {
+        pub(super) fn install() -> io::Result<Self> {
+            Ok(Self)
+        }
+
+        pub(super) async fn recv(&mut self) -> &'static str {
             let _ = tokio::signal::ctrl_c().await;
             "ctrl-c"
-        })
+        }
     }
 }
 

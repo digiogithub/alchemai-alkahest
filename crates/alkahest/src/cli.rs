@@ -220,6 +220,10 @@ pub enum Command {
         /// (`auth.require_key_for_remote = false`) or no API key exists yet.
         #[arg(long)]
         allow_unauthenticated: bool,
+        /// Run under the Windows service control manager (what `alkahest service install`
+        /// registers); not for interactive use.
+        #[arg(long, hide = true)]
+        service: bool,
     },
     /// Open the desktop app (needs a build with the `desktop` feature).
     Desktop(DesktopArgs),
@@ -240,6 +244,12 @@ pub enum Command {
         /// Engine action.
         #[command(subcommand)]
         action: EnginesAction,
+    },
+    /// Manage TLS certificates for HTTPS (`[server.tls]`).
+    Certs {
+        /// Certificate action.
+        #[command(subcommand)]
+        action: CertsAction,
     },
     /// Install or control the background service.
     Service {
@@ -297,6 +307,25 @@ pub enum KeysAction {
     Revoke {
         /// Key id (`abcd1234` or `alk_abcd1234`) or active key name.
         id: String,
+    },
+}
+
+/// `alkahest certs ...`
+#[derive(Debug, Subcommand)]
+pub enum CertsAction {
+    /// Write a self-signed server certificate, its key (owner only) and the CA clients trust
+    /// to the `[server.tls]` paths (default `<data_dir>/tls/`).
+    Generate {
+        /// Extra DNS name or IP address the certificate must cover (localhost, the loopback
+        /// addresses and this host's name are always included). Repeatable.
+        #[arg(long = "name", value_name = "NAME")]
+        hosts: Vec<String>,
+        /// Validity in days (at most 825, the limit Apple platforms accept).
+        #[arg(long, default_value_t = 397)]
+        days: u32,
+        /// Replace existing files.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -365,10 +394,37 @@ pub enum ServiceAction {
     Status(ServiceArgs),
 }
 
+/// Service managers `alkahest service` can target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ServiceManager {
+    /// systemd (Linux).
+    Systemd,
+    /// launchd (macOS).
+    Launchd,
+    /// The Windows service control manager.
+    Windows,
+}
+
+impl ServiceManager {
+    /// The manager of the platform this binary was built for.
+    pub fn native() -> Option<Self> {
+        if cfg!(target_os = "linux") {
+            Some(Self::Systemd)
+        } else if cfg!(target_os = "macos") {
+            Some(Self::Launchd)
+        } else if cfg!(windows) {
+            Some(Self::Windows)
+        } else {
+            None
+        }
+    }
+}
+
 /// Options shared by the `service` actions.
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct ServiceArgs {
-    /// Manage a per-user service (`systemctl --user`) instead of the system service.
+    /// Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the
+    /// system service.
     #[arg(long)]
     pub user: bool,
     /// Print the unit and the commands without writing or running anything.
@@ -380,6 +436,10 @@ pub struct ServiceArgs {
     /// Binary the unit starts; defaults to the running executable.
     #[arg(long, value_name = "PATH")]
     pub bin: Option<std::path::PathBuf>,
+    /// Service manager to target; defaults to this platform's. Another platform's manager
+    /// only works with `--dry-run` or `--root` (packaging, review).
+    #[arg(long, value_enum)]
+    pub manager: Option<ServiceManager>,
 }
 
 /// `alkahest config ...`
@@ -438,6 +498,7 @@ impl Command {
             | Self::Serve { .. }
             | Self::Keys { .. }
             | Self::Engines { .. }
+            | Self::Certs { .. }
             | Self::Hf { .. }
             | Self::Desktop(_) => {
                 return None;
@@ -463,6 +524,7 @@ impl Command {
             Self::Hf { .. } => "hf",
             Self::Keys { .. } => "keys",
             Self::Engines { .. } => "engines",
+            Self::Certs { .. } => "certs",
             Self::Service { .. } => "service",
             Self::Sysinfo => "sysinfo",
             Self::Config { .. } => "config",

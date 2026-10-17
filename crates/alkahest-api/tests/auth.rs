@@ -369,3 +369,46 @@ async fn cors_is_off_by_default_and_follows_configured_origins() {
         .await;
     assert!(headers.get("access-control-allow-origin").is_none());
 }
+
+/// ALK-US-0084: every route of the admin API (ALK-US-0040's final table, `admin::ROUTES`)
+/// needs the admin scope, and the model management routes of the other families too.
+#[test]
+fn every_admin_route_requires_the_admin_scope() {
+    use alkahest_api::admin::ROUTES;
+    use alkahest_api::dialect::requires_admin;
+    use axum::http::Method;
+    assert!(!ROUTES.is_empty());
+    for r in ROUTES {
+        let method = Method::from_bytes(r.method.as_bytes()).unwrap();
+        let path = r.path.replace(['{', '}'], "");
+        assert!(
+            requires_admin(&method, &path),
+            "{} {} is reachable with an inference key",
+            r.method,
+            r.path
+        );
+    }
+    for (method, path) in [
+        (Method::POST, "/api/pull"),
+        (Method::POST, "/api/push"),
+        (Method::POST, "/api/create"),
+        (Method::POST, "/api/copy"),
+        (Method::DELETE, "/api/delete"),
+        (Method::POST, "/api/blobs/sha256:00"),
+        // Part of the `ollama create` upload workflow (existence check before the POST).
+        (Method::HEAD, "/api/blobs/sha256:00"),
+        (Method::DELETE, "/v1/models/x"),
+        (Method::GET, "/metrics"),
+    ] {
+        assert!(requires_admin(&method, path), "{method} {path}");
+    }
+    for (method, path) in [
+        (Method::GET, "/api/tags"),
+        (Method::POST, "/api/chat"),
+        (Method::GET, "/v1/models/x"),
+        (Method::POST, "/v1/chat/completions"),
+        (Method::POST, "/v1/messages"),
+    ] {
+        assert!(!requires_admin(&method, path), "{method} {path}");
+    }
+}

@@ -583,6 +583,8 @@ pub struct NetworkSettings {
     pub cors_origins: Vec<String>,
     /// Families.
     pub endpoints: Endpoints,
+    /// HTTPS enabled (`server.tls.enabled`).
+    pub tls: bool,
 }
 
 /// `GET|PUT /alkahest/v1/settings/network`.
@@ -624,6 +626,9 @@ pub struct NetworkPatch {
     /// Family switches (`{"anthropic": false}`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoints: Option<Map<String, Value>>,
+    /// Serve HTTPS (applies on the next start).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls: Option<bool>,
     /// Needed to save a network bind without key checks.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub confirm_unauthenticated: bool,
