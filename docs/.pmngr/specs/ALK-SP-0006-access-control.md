@@ -5,7 +5,7 @@ title: Access control
 status: backlog
 labels: [security]
 created: 2026-10-16T22:37:36Z
-updated: 2026-10-17T05:39:57Z
+updated: 2026-10-17T20:56:11Z
 requirements:
   R1:
     status: backlog
@@ -59,10 +59,13 @@ requirements:
         - crates/alkahest-api/src/dialect.rs#requires_admin
         - crates/alkahest-api/src/keys/verify.rs#Principal
         - crates/alkahest-api/src/auth.rs#authenticate
+        - crates/alkahest-api/src/auth.rs#AuthPolicy::browser_guard
       tests:
         - crates/alkahest-api/tests/auth.rs#inference_key
         - crates/alkahest-api/tests/auth.rs#opted_out_remote_access_is_anonymous_but_never_admin
         - crates/alkahest-api/src/dialect.rs#admin_routes
+        - crates/alkahest-api/tests/catalogs.rs#csrf_and_dns_rebinding_on_loopback_are_refused
+        - crates/alkahest-api/tests/catalogs.rs#configured_cors_origin_may_call_admin_routes
   R5:
     status: backlog
     trace:
@@ -143,9 +146,16 @@ Keys SHALL be generated with a CSPRNG, shown once, stored only as salted hashes 
 
 Admin API routes and model pull/delete SHALL require the `admin` scope for non-loopback callers.
 
+Loopback trust SHALL NOT extend to browsers: a caller of these routes that presents no verified key SHALL be refused (403) when the request carries an `Origin` that is neither the server's own origin nor an explicit `server.cors_origins` entry (`*` does not count), when `Sec-Fetch-Site` is `cross-site` or `same-site`, or, for a loopback caller, when `Host` is not a loopback name or address or the configured bind host (DNS rebinding). Admin API requests (`/alkahest/...`) with a body SHALL use `Content-Type: application/json` (400 otherwise).
+
 #### Scenario: inference key
 - **WHEN** an inference-only key calls `/api/pull` from the LAN
 - **THEN** 403
+
+#### Scenario: cross-site request on loopback
+- **GIVEN** a browser page on another origin
+- **WHEN** it posts `text/plain` to `/alkahest/v1/catalogs`, or a JSON request with its own `Origin`, or a request whose `Host` is a rebound domain
+- **THEN** the request is refused (400 or 403) and nothing changes
 
 ### ALK-SP-0006.R5 — Audit
 
