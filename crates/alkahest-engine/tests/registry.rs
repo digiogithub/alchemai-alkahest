@@ -404,3 +404,21 @@ fn vllm_spec() {
         ]
     );
 }
+
+#[test]
+fn bundled_roots_are_searched_after_the_engines_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().join("data/engines");
+    let bundled = tmp.path().join("pkg/engines");
+    let shipped = install(&bundled, EngineId::LlamaCpp, "b11669-cpu");
+    let loc = FsLocator::new(&data, BTreeMap::new())
+        .with_search_path(None)
+        .with_extra_roots(vec![bundled.clone()]);
+    let got = loc.locate(EngineId::LlamaCpp, &cpu()).unwrap();
+    assert_eq!(got.root.as_deref(), Some(shipped.as_path()));
+
+    // Same version in the data dir: the user's copy shadows the shipped one.
+    let user = install(&data, EngineId::LlamaCpp, "b11669-cpu");
+    let got = loc.locate(EngineId::LlamaCpp, &cpu()).unwrap();
+    assert_eq!(got.root.as_deref(), Some(user.as_path()));
+}

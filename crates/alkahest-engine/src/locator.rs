@@ -95,6 +95,7 @@ pub trait EngineLocator: Send + Sync + fmt::Debug {
 #[derive(Debug, Clone)]
 pub struct FsLocator {
     engines_dir: PathBuf,
+    extra_roots: Vec<PathBuf>,
     overrides: BTreeMap<String, EngineOverride>,
     search_path: Option<OsString>,
 }
@@ -107,6 +108,7 @@ impl FsLocator {
     ) -> Self {
         Self {
             engines_dir: engines_dir.into(),
+            extra_roots: Vec::new(),
             overrides,
             search_path: std::env::var_os("PATH"),
         }
@@ -121,6 +123,15 @@ impl FsLocator {
     /// for services whose `PATH` differs from the user's.
     pub fn with_search_path(mut self, path: Option<OsString>) -> Self {
         self.search_path = path;
+        self
+    }
+
+    /// Also searches these engine roots after the engines directory, with the same
+    /// `<id>/<version>-<variant>/` layout: engines bundled with the package
+    /// (`alkahest_recipes::bundled_roots`). On equal versions the engines directory wins, so
+    /// a user-updated engine shadows the shipped one.
+    pub fn with_extra_roots(mut self, roots: Vec<PathBuf>) -> Self {
+        self.extra_roots = roots;
         self
     }
 
@@ -141,11 +152,18 @@ impl FsLocator {
 
     /// Managed installs of `engine`, unsorted.
     fn managed(&self, engine: EngineId) -> Vec<EngineInstall> {
-        let dir = self.engines_dir.join(engine.as_str());
-        let Ok(read) = std::fs::read_dir(&dir) else {
-            return Vec::new();
-        };
         let mut out = Vec::new();
+        for root in std::iter::once(&self.engines_dir).chain(&self.extra_roots) {
+            self.managed_in(&root.join(engine.as_str()), engine, &mut out);
+        }
+        out
+    }
+
+    /// Installs of `engine` directly below `dir`, appended to `out`.
+    fn managed_in(&self, dir: &Path, engine: EngineId, out: &mut Vec<EngineInstall>) {
+        let Ok(read) = std::fs::read_dir(dir) else {
+            return;
+        };
         for item in read.flatten() {
             let root = item.path();
             if !root.is_dir() {
@@ -182,7 +200,6 @@ impl FsLocator {
                 extra_args: self.extra_args(engine),
             });
         }
-        out
     }
 
     fn on_path(&self, engine: EngineId) -> Option<EngineInstall> {
@@ -254,7 +271,10 @@ impl EngineLocator for FsLocator {
             return Ok(found);
         }
 
-        let mut searched = vec![self.engines_dir.join(engine.as_str())];
+        let mut searched: Vec<PathBuf> = std::iter::once(&self.engines_dir)
+            .chain(&self.extra_roots)
+            .map(|r| r.join(engine.as_str()))
+            .collect();
         if engine.path_lookup_allowed()
             && query.pin.is_none()
             && let Some(p) = &self.search_path

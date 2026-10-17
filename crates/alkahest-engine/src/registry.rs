@@ -9,6 +9,7 @@ use crate::error::{EngineError, Result};
 use crate::id::EngineId;
 use crate::launch::{LaunchRequest, LaunchSpec};
 use crate::locator::{EngineInstall, EngineLocator, LocateQuery};
+use crate::select::{EngineChoice, Platform, select_engine};
 
 /// An engine, the binary it will run and the spec for one launch.
 #[derive(Debug, Clone)]
@@ -19,6 +20,25 @@ pub struct PreparedLaunch {
     pub install: EngineInstall,
     /// The process to spawn.
     pub spec: LaunchSpec,
+}
+
+/// The engine chosen for a model and the binary that will run it; built once per model load,
+/// then [`EnginePlan::prepare`] is called for each port the supervisor tries.
+#[derive(Debug, Clone)]
+pub struct EnginePlan {
+    /// The selection and why.
+    pub choice: EngineChoice,
+    /// The engine implementation.
+    pub engine: Arc<dyn Engine>,
+    /// The installed binary.
+    pub install: EngineInstall,
+}
+
+impl EnginePlan {
+    /// The spec for `req` with this plan's engine and binary.
+    pub fn prepare(&self, req: &LaunchRequest) -> Result<LaunchSpec> {
+        self.engine.prepare(req, &self.install)
+    }
 }
 
 /// Maps engine ids to their implementation and finds their installed binaries through an
@@ -99,6 +119,50 @@ impl EngineRegistry {
             engine,
             install,
             spec,
+        })
+    }
+
+    /// Applies the selection rule (ALK-SP-0003.R2) to `req`; see [`select_engine`].
+    pub fn select(&self, req: &LaunchRequest, platform: &Platform) -> Result<EngineChoice> {
+        select_engine(req, platform)
+    }
+
+    /// Selects the engine for `req`, checks it can load the model and finds its binary.
+    ///
+    /// A missing binary is [`EngineError::NotInstalled`] naming why the engine was needed and
+    /// the `alkahest engines install <id>` command.
+    pub fn plan(&self, req: &LaunchRequest, platform: &Platform) -> Result<EnginePlan> {
+        let choice = self.select(req, platform)?;
+        let engine = self.get(choice.engine)?;
+        engine.check(req)?;
+        let install = match self.locate(choice.engine, &choice.locate_query(req.accelerator)) {
+            Ok(i) => i,
+            Err(EngineError::NotInstalled {
+                engine,
+                pin,
+                searched,
+                ..
+            }) => {
+                return Err(EngineError::NotInstalled {
+                    engine,
+                    pin,
+                    needed_for: Some(choice.reason.to_string()),
+                    searched,
+                });
+            }
+            Err(e) => return Err(e),
+        };
+        tracing::debug!(
+            engine = %choice.engine,
+            model = %req.model,
+            reason = %choice.reason,
+            binary = %install.binary.display(),
+            "engine selected"
+        );
+        Ok(EnginePlan {
+            choice,
+            engine,
+            install,
         })
     }
 }
