@@ -10,6 +10,7 @@
 //! - [`gguf`] picks GGUF files by quantisation (default preference `Q4_K_M` first), groups
 //!   split models and finds `mmproj` projectors.
 //!
+//! - [`ggml`] lists the whisper.cpp models (`ggml-*.bin`) of a repository.
 //! - [`RecommendedParams`] derives the recommended sampling, context and template settings from
 //!   `generation_config.json`, the model card and GGUF metadata ([`HfClient::recommended_params`]).
 //!
@@ -18,6 +19,7 @@
 mod card;
 mod client;
 mod error;
+pub mod ggml;
 pub mod gguf;
 pub mod pull;
 mod recommended;

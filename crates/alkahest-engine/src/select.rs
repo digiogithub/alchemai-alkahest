@@ -205,23 +205,24 @@ fn default_preferred(engine: EngineId, pin: Option<&str>) -> Option<String> {
 }
 
 fn automatic(req: &LaunchRequest) -> (EngineId, SelectionReason) {
+    // Generation kinds come before the format rule: a single-file safetensors diffusion
+    // checkpoint is stable-diffusion.cpp's, not vLLM's.
+    match req.kind {
+        ModelKind::SpeechToText => return (EngineId::WhisperCpp, SelectionReason::SpeechToText),
+        ModelKind::Image | ModelKind::Video => {
+            return (EngineId::StableDiffusionCpp, SelectionReason::Image);
+        }
+        _ => {}
+    }
     if req.format == ModelFormat::Safetensors {
         return (EngineId::Vllm, SelectionReason::Safetensors);
     }
-    match req.kind {
-        ModelKind::SpeechToText => (EngineId::WhisperCpp, SelectionReason::SpeechToText),
-        ModelKind::Image | ModelKind::Video => {
-            (EngineId::StableDiffusionCpp, SelectionReason::Image)
-        }
-        _ => {
-            let prism_quant = req.quantization.as_deref().filter(|q| is_prism_quant(q));
-            if req.needs_prism || prism_quant.is_some() {
-                let label = prism_quant.unwrap_or("PQ2_0/PTQ1_0").to_ascii_uppercase();
-                (EngineId::PrismLlamaCpp, SelectionReason::PrismQuant(label))
-            } else {
-                (EngineId::LlamaCpp, SelectionReason::Gguf)
-            }
-        }
+    let prism_quant = req.quantization.as_deref().filter(|q| is_prism_quant(q));
+    if req.needs_prism || prism_quant.is_some() {
+        let label = prism_quant.unwrap_or("PQ2_0/PTQ1_0").to_ascii_uppercase();
+        (EngineId::PrismLlamaCpp, SelectionReason::PrismQuant(label))
+    } else {
+        (EngineId::LlamaCpp, SelectionReason::Gguf)
     }
 }
 

@@ -6,7 +6,7 @@
 //! * [`EngineRegistry`]: [`EngineId`] to implementation, plus an [`EngineLocator`] that finds
 //!   installed binaries ([`FsLocator`] over the engines directory, configuration overrides
 //!   and `PATH`; ALK-SP-0003.R5).
-//! * [`builtin`]: baseline engines for llama.cpp (mainline and PrismML), vLLM, whisper.cpp and
+//! * [`builtin`]: the built-in adapters for llama.cpp (mainline and PrismML), vLLM, whisper.cpp and
 //!   stable-diffusion.cpp.
 //! * [`select`]: which engine runs a model (ALK-SP-0003.R2), [`EngineRegistry::plan`].
 //! * [`supervisor`]: spawning, health polling, log capture, crash detection and stopping of
@@ -22,9 +22,11 @@ pub mod launch;
 pub mod llama_cpp;
 pub mod locator;
 pub mod registry;
+pub mod sd_cpp;
 pub mod select;
 pub mod supervisor;
 pub mod vllm;
+pub mod whisper_cpp;
 
 pub use capability::{Capabilities, Capability, CapabilityError, kind_capabilities};
 pub use engine::Engine;
@@ -38,6 +40,7 @@ pub use llama_cpp::{
 };
 pub use locator::{EngineInstall, EngineLocator, FsLocator, InstallSource, LocateQuery};
 pub use registry::{EnginePlan, EngineRegistry, PreparedLaunch};
+pub use sd_cpp::StableDiffusionCppEngine;
 pub use select::{
     EngineChoice, Os, PRISM_PIN, Platform, SelectionReason, parse_engine_setting, select_engine,
 };
@@ -49,3 +52,4 @@ pub use supervisor::{
     EngineHandle, EngineState, EphemeralPorts, ExitInfo, PortPicker, SpawnOptions, launch, spawn,
 };
 pub use vllm::{VllmEngine, tool_call_parser};
+pub use whisper_cpp::WhisperCppEngine;
