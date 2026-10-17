@@ -1,0 +1,44 @@
+# Nightly end-to-end run (ALK-US-0079): the CPU leg of scripts/e2e.sh on a hosted runner with
+# the tiny models (about 1 minute of work plus downloads). The conformance leg runs too, it
+# only needs python and pip. The ollama, decision and gpu legs need an Ollama store or a GPU
+# and run on the reference host (see docs/testing.md). Network access happens only here.
+name: E2E nightly
+
+on:
+  schedule:
+    - cron: "37 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache the CPU llama.cpp engine
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.e2e-engines
+          key: e2e-engines-${{ hashFiles('recipes/*.toml') }}
+      - name: Build the headless binary
+        run: cargo build -p alkahest --no-default-features --locked
+      - name: E2E (cpu and conformance legs)
+        env:
+          ALKAHEST_E2E_ENGINES_CACHE: ${{ github.workspace }}/.e2e-engines
+        run: scripts/e2e.sh --legs cpu,conformance
+      - name: Upload JUnit report and step logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: target/e2e/
+          if-no-files-found: warn
