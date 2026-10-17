@@ -240,8 +240,20 @@ dependencies = [
 name = "alkahest-sched"
 version = "0.1.0"
 dependencies = [
+ "alkahest-core",
+ "alkahest-engine",
  "alkahest-gguf",
+ "alkahest-store",
+ "alkahest-sysinfo",
+ "futures",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror",
+ "time",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
