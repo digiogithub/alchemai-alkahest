@@ -20,7 +20,7 @@ use std::time::Duration;
 use alkahest_api::UpstreamClient;
 use alkahest_api::admin::{AdminContext, RecipeEngineManager};
 use alkahest_api::audit::{AuditLog, UsageTracker, usage_path};
-use alkahest_api::keys::{FileKeyVerifier, KeyStore, KeyVerifier};
+use alkahest_api::keys::{EnvKey, EnvKeyVerifier, FileKeyVerifier, KeyStore, KeyVerifier};
 use alkahest_api::pull::PullService;
 use alkahest_api::{
     ApiRouter, ApiSettings, AppState, Exposure, ServeOptions, Server, ServerInfo, TlsAcceptor,
@@ -120,8 +120,18 @@ async fn serve(
     let config = &loaded.config;
     let paths = config.resolve_paths(&loaded.paths);
     let settings = ApiSettings::from_config(config);
-    let verifier: Arc<dyn KeyVerifier> =
+    let store_verifier: Arc<dyn KeyVerifier> =
         Arc::new(FileKeyVerifier::new(KeyStore::new(&paths.key_store)));
+    // An operator key from the environment (containers) is checked before the store; a set
+    // but unusable one stops the start rather than leaving the server unprotected.
+    let verifier: Arc<dyn KeyVerifier> =
+        match EnvKey::from_env().context("reading the API key from the environment")? {
+            Some(key) => {
+                tracing::info!("API key from the environment enabled");
+                Arc::new(EnvKeyVerifier::new(key, store_verifier))
+            }
+            None => store_verifier,
+        };
 
     // Decide before binding: a refused exposure never opens the socket.
     let bind = config.server.bind();

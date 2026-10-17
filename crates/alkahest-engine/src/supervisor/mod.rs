@@ -391,6 +391,9 @@ impl EngineHandle {
 pub fn spawn(spec: LaunchSpec, opts: &SpawnOptions) -> Result<EngineHandle> {
     let mut cmd = Command::new(&spec.program);
     cmd.args(&spec.args)
+        // The server's API key never reaches an engine (see `alkahest_api::keys::env`).
+        .env_remove("ALKAHEST_API_KEY")
+        .env_remove("ALKAHEST_API_KEY_FILE")
         .envs(&spec.env)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

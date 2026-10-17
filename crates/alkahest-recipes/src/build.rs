@@ -318,6 +318,9 @@ async fn run(step: &Step, log: &Path, cancel: &CancellationToken) -> Result<()> 
     let mut child = tokio::process::Command::new(&step.program)
         .args(&step.args)
         .current_dir(&step.cwd)
+        // Build scripts are third-party code; the server's API key stays out of their reach.
+        .env_remove("ALKAHEST_API_KEY")
+        .env_remove("ALKAHEST_API_KEY_FILE")
         .stdin(Stdio::null())
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err))

@@ -4,7 +4,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use alkahest_api::keys::{FileKeyVerifier, KeyStore, NewKey, Scope};
+use alkahest_api::keys::{EnvKey, EnvKeyVerifier, FileKeyVerifier, KeyStore, NewKey, Scope};
 use alkahest_api::{ApiRouter, ApiSettings, AppState, Caller, RequestContext, ServerInfo};
 use alkahest_core::Config;
 use axum::body::{Body, to_bytes};
@@ -411,4 +411,76 @@ fn every_admin_route_requires_the_admin_scope() {
     ] {
         assert!(!requires_admin(&method, path), "{method} {path}");
     }
+}
+
+/// Environment key (`ALKAHEST_API_KEY`) in front of the store: what a container runs with.
+#[tokio::test]
+async fn env_key_authenticates_remote_clients() {
+    const ENV_KEY: &str = "4f1c2b0e9d8a7f6e5d4c3b2a19087f6e";
+    let tmp = tempfile::tempdir().unwrap();
+    let store = KeyStore::new(tmp.path().join("keys.db"));
+    let verifier = EnvKeyVerifier::new(
+        EnvKey::new(ENV_KEY, vec![Scope::Inference]).unwrap(),
+        Arc::new(FileKeyVerifier::new(store.clone())),
+    );
+    let state = AppState::builder(ServerInfo::default())
+        .key_verifier(Arc::new(verifier))
+        .build();
+    let routes = Router::new()
+        .route("/v1/models", get(whoami))
+        .route("/alkahest/v1/settings", get(whoami));
+    let app = ApiRouter::new(state, ApiSettings::from_config(&Config::default()))
+        .merge(routes)
+        .into_router();
+    let f = Fixture {
+        _tmp: tmp,
+        store,
+        app,
+    };
+
+    let bearer = format!("Bearer {ENV_KEY}");
+    let (status, _, body) = f
+        .call("GET", "/v1/models", LAN, &[("authorization", &bearer)])
+        .await;
+    assert_eq!(
+        (status.as_u16(), body.as_str()),
+        (200, "key:ALKAHEST_API_KEY")
+    );
+    let (status, _, body) = f
+        .call("GET", "/v1/models", LAN, &[("x-api-key", ENV_KEY)])
+        .await;
+    assert_eq!(
+        (status.as_u16(), body.as_str()),
+        (200, "key:ALKAHEST_API_KEY")
+    );
+    // Inference scope by default: no admin routes.
+    let (status, _, _) = f
+        .call(
+            "GET",
+            "/alkahest/v1/settings",
+            LAN,
+            &[("authorization", &bearer)],
+        )
+        .await;
+    assert_eq!(status, 403);
+    // A wrong key is still a 401, and store keys keep working.
+    let (status, _, _) = f
+        .call(
+            "GET",
+            "/v1/models",
+            LAN,
+            &[("authorization", "Bearer 4f1c2b0e9d8a7f6e5d4c3b2a19087f6X")],
+        )
+        .await;
+    assert_eq!(status, 401);
+    let stored = f.key("ci", vec![Scope::Inference]);
+    let (status, _, body) = f
+        .call(
+            "GET",
+            "/v1/models",
+            LAN,
+            &[("authorization", &format!("Bearer {stored}"))],
+        )
+        .await;
+    assert_eq!((status.as_u16(), body.as_str()), (200, "key:ci"));
 }

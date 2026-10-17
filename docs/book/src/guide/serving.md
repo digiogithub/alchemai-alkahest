@@ -58,6 +58,25 @@ server; the desktop app and the admin API (`/alkahest/v1/keys`) manage the same 
 Failed attempts get one generic 401 (no hint whether the key was unknown or wrong), and the key
 comparison is constant time.
 
+### A key from the environment
+
+Containers and orchestrated servers usually receive their secrets as environment variables or
+mounted files rather than running `alkahest keys create`. `alkahest serve` reads one extra key
+from:
+
+| Variable | Meaning |
+|---|---|
+| `ALKAHEST_API_KEY` | the key itself |
+| `ALKAHEST_API_KEY_FILE` | a file holding the key (Docker and Kubernetes secrets); one trailing newline is ignored |
+| `ALKAHEST_API_KEY_SCOPES` | `inference` (default) or `inference,admin` |
+
+The value is any string of at least 32 characters without whitespace, for example
+`openssl rand -hex 32`; it does not need the `alk_` form. It counts as an active key for the
+startup check, works next to the keys in the store, and appears as key id `env` in the audit log
+and usage counters. Setting both variables, a shorter value or an unreadable file stops the start.
+Only its SHA-256 digest is kept in memory, and engine processes are started without these
+variables. To rotate it, restart the server with the new value.
+
 ### Usage and audit
 
 `alkahest keys ls` shows when each key was last used and its request and token counters. With

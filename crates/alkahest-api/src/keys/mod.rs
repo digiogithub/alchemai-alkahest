@@ -4,7 +4,10 @@
 //! * [`store`]: the key store file (atomic, owner-only writes) and its records.
 //! * [`verify`]: [`KeyVerifier`], the trait the auth middleware calls, and the
 //!   file-backed [`FileKeyVerifier`].
+//! * [`env`]: the operator key from `ALKAHEST_API_KEY` / `ALKAHEST_API_KEY_FILE`
+//!   ([`EnvKeyVerifier`], in front of the store).
 
+pub mod env;
 pub mod store;
 pub mod token;
 pub mod verify;
@@ -15,6 +18,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+pub use env::{EnvKey, EnvKeyError, EnvKeyVerifier};
 pub use store::{KeyRecord, KeyStore, NewKey};
 pub use token::{ApiKeySecret, parse_key};
 pub use verify::{FileKeyVerifier, KeyRejection, KeyVerifier, Principal};

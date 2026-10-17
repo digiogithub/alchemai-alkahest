@@ -381,8 +381,8 @@ pub enum ExposureError {
     /// Non-loopback bind but no usable key exists, so no remote client could ever connect.
     #[error(
         "refusing to serve {bind}: no active API keys exist, so remote clients could never \
-         authenticate; create one with `alkahest keys create <name>` (or pass \
-         --allow-unauthenticated to start anyway)"
+         authenticate; create one with `alkahest keys create <name>`, set ALKAHEST_API_KEY (or \
+         ALKAHEST_API_KEY_FILE), or pass --allow-unauthenticated to start anyway"
     )]
     NoKeys {
         /// Bind address.
