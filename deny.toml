@@ -2,7 +2,9 @@
 # in any build (AGENTS.md section 5).
 
 [graph]
-all-features = false
+# All features, so the desktop build (`alkahest --features desktop`, which turns on
+# `alkahest-desktop/gui` and with it gpui-kit) is checked too, not only the server build.
+all-features = true
 
 [licenses]
 version = 2
@@ -23,7 +25,12 @@ allow = [
     "0BSD",
     "CDLA-Permissive-2.0",
     "OpenSSL",
+    # libbz2-rs-sys (Rust port of bzip2), reached through gpui-kit's zip support; permissive.
+    "bzip2-1.0.6",
 ]
+# Embedded fonts (crates/alkahest-desktop/assets/fonts) are SIL OFL 1.1 data files, not crates,
+# so cargo-deny does not scan them and "OFL-1.1" is intentionally not in this list. Their
+# licence texts ship next to them and are listed in NOTICE.
 # The allow list covers licences the pre-pinned dependencies bring in later stories.
 unused-allowed-license = "allow"
 
@@ -34,12 +41,22 @@ allow-wildcard-paths = true
 deny = [
     { crate = "openssl-sys", reason = "rustls only (reqwest without native-tls)" },
     { crate = "native-tls", reason = "rustls only (reqwest without native-tls)" },
+    { crate = "gpui", reason = "use gpui-kit, which pins gpui-pre (same rule as Bitacora)" },
 ]
 
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+# Only "unmaintained" notices, all transitive through gpui-kit / gpui-pre (desktop build only;
+# we cannot patch them). Same list as the reference app Bitacora. Re-evaluate when gpui-kit is
+# bumped. No vulnerability is ignored.
+ignore = [
+    { id = "RUSTSEC-2024-0384", reason = "instant unmaintained; transitive via gpui-kit" },
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; transitive via gpui-kit" },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained; transitive via gpui-kit" },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz unmaintained; transitive via gpui-pre" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained; transitive via gpui-pre" },
+]
 
 [sources]
 unknown-registry = "deny"

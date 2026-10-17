@@ -33,6 +33,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: check-deps (crate graph rules)
         run: cargo xtask check-deps
+      - name: design tokens (generated theme current, WCAG contrast)
+        run: cargo xtask tokens --check --contrast
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
@@ -109,11 +111,13 @@ jobs:
           tool: cargo-machete
       - run: cargo machete
 
-  # The desktop build links GPUI (X11/Wayland/Vulkan). Skipped until ALK-US-0064 provides
-  # the app; set the repository variable DESKTOP_CI to "true" to enable it.
+  # The desktop build links GPUI (X11/Wayland/Vulkan): tokens are current and pass WCAG
+  # contrast, the app builds, its GUI unit tests run, and `alkahest desktop --smoke-test`
+  # renders a first frame under Xvfb (software Vulkan through Mesa lavapipe). On by default
+  # since ALK-US-0064; set the repository variable DESKTOP_CI to "false" to skip it.
   desktop:
-    name: desktop build (feature desktop)
-    if: ${{ vars.DESKTOP_CI == 'true' }}
+    name: desktop (tokens, build, GUI tests, smoke test)
+    if: ${{ vars.DESKTOP_CI != 'false' }}
     needs: lint
     runs-on: ubuntu-latest
     steps:
@@ -121,8 +125,20 @@ jobs:
       - name: Install toolchain from rust-toolchain.toml
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - name: System libraries for GPUI
+      - name: System libraries for GPUI, Xvfb and a software Vulkan driver
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxcb1-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libasound2-dev libfontconfig-dev
-      - run: cargo build -p alkahest --features desktop --locked
+          sudo apt-get install -y libxcb1-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
+            libasound2-dev libfontconfig-dev mesa-vulkan-drivers xvfb
+      - name: Design tokens are current and pass the contrast check
+        run: cargo xtask tokens --check --contrast
+      - name: clippy (desktop feature)
+        run: cargo clippy -p alkahest-desktop -p alkahest --features alkahest-desktop/gui-test,alkahest/desktop --all-targets --locked -- -D warnings
+      - name: GUI unit tests
+        run: cargo test -p alkahest-desktop --features gui-test --locked
+      - name: Build
+        run: cargo build -p alkahest --features desktop --locked
+      - name: Smoke test (first frame under Xvfb)
+        env:
+          ALKAHEST_HOME: ${{ runner.temp }}/alkahest-home
+        run: xvfb-run -a -s "-screen 0 1440x900x24" target/debug/alkahest desktop --smoke-test

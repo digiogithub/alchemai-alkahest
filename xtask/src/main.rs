@@ -3,42 +3,61 @@
 //! Commands:
 //! - `check-deps`: only `alkahest-desktop` may depend on GPUI, and only its `src/ui/` module
 //!   may name the gpui-kit facade (AGENTS.md section 4).
-//! - `tokens`, `icons`, `notice`, `bundle`: placeholders filled by later stories.
+//! - `tokens [--check] [--contrast]`: generate the desktop theme from `design/tokens.json`,
+//!   check it is current, check WCAG contrast.
+//! - `icons`: render the platform icon sets from `design/brand/` into `packaging/icons/`.
+//! - `notice`, `bundle`: placeholders filled by later stories.
 
 mod deps;
+mod icons;
+mod tokens;
 
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use anyhow::{Result, anyhow};
+
 /// Subcommands that exist but are implemented by later stories.
-const PLANNED: &[&str] = &["tokens", "icons", "notice", "bundle"];
+const PLANNED: &[&str] = &["notice", "bundle"];
 
 fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    match args.next().as_deref() {
-        Some("check-deps") => match deps::run() {
-            Ok(true) => ExitCode::SUCCESS,
-            Ok(false) => ExitCode::FAILURE,
-            Err(err) => {
-                eprintln!("xtask: {err:#}");
-                ExitCode::FAILURE
-            }
-        },
-        Some(cmd) if PLANNED.contains(&cmd) => {
-            println!("xtask {cmd}: not implemented yet");
-            ExitCode::SUCCESS
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let Some((cmd, rest)) = args.split_first() else {
+        usage();
+        return ExitCode::FAILURE;
+    };
+    let result = match cmd.as_str() {
+        "check-deps" => deps::run(),
+        "tokens" => workspace_root().and_then(|root| tokens::run(&root, rest)),
+        "icons" => workspace_root().and_then(|root| icons::run(&root, rest)),
+        c if PLANNED.contains(&c) => {
+            println!("xtask {c}: not implemented yet");
+            Ok(true)
         }
-        Some(other) => {
+        other => {
             eprintln!("xtask: unknown command `{other}`");
             usage();
-            ExitCode::FAILURE
+            return ExitCode::FAILURE;
         }
-        None => {
-            usage();
+    };
+    match result {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
+        Err(err) => {
+            eprintln!("xtask: {err:#}");
             ExitCode::FAILURE
         }
     }
 }
 
+/// The workspace root: the parent of the xtask manifest directory.
+fn workspace_root() -> Result<PathBuf> {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| anyhow!("xtask manifest has no parent directory"))
+}
+
 fn usage() {
-    eprintln!("usage: cargo xtask <check-deps|tokens|icons|notice|bundle>");
+    eprintln!("usage: cargo xtask <check-deps|tokens [--check] [--contrast]|icons|notice|bundle>");
 }

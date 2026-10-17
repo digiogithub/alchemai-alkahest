@@ -9,5 +9,23 @@ copied or adapted from another project keeps its original licence header.
 Third-party components
 ----------------------
 
-(none yet; `cargo xtask notice` will generate the dependency section, and
-embedded fonts and engine binaries are added as their stories land)
+Embedded fonts (desktop app, `crates/alkahest-desktop/assets/fonts/`)
+
+- Schibsted Grotesk (Regular, Medium, SemiBold, Bold), copyright 2023 The
+  Schibsted-Grotesk Project Authors, https://github.com/schibsted/schibsted-grotesk
+  (commit d485f61). SIL Open Font License 1.1; text in
+  crates/alkahest-desktop/assets/fonts/OFL-SchibstedGrotesk.txt.
+- IBM Plex Mono (Regular, Medium, SemiBold), copyright 2017 IBM Corp., with
+  Reserved Font Name "Plex", https://github.com/google/fonts (ofl/ibmplexmono).
+  SIL Open Font License 1.1; text in
+  crates/alkahest-desktop/assets/fonts/OFL-IBMPlexMono.txt.
+
+The fonts are embedded unmodified in the desktop binary; the licence texts ship
+with every desktop package.
+
+GPUI and gpui-kit (desktop app): Apache-2.0, pulled from crates.io as
+dependencies (no code copied). The tokio bridge of the desktop app follows the
+pattern of Zed's Apache-2.0 `gpui_tokio` crate as an original implementation.
+
+(`cargo xtask notice` will generate the full dependency section; engine
+binaries are added as their stories land.)

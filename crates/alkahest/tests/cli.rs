@@ -39,14 +39,16 @@ fn list_is_an_alias_of_ls() {
         .stdout(contains("NAME"));
 }
 
+/// ALK-SP-0008.R1 scenario "headless build": a server-only build prints a clear message and
+/// exits 2.
 #[cfg(not(feature = "desktop"))]
 #[test]
-fn desktop_without_the_feature_explains_and_fails() {
+fn headless_build() {
     let tmp = tempfile::tempdir().unwrap();
     alkahest(tmp.path())
         .arg("desktop")
         .assert()
-        .failure()
+        .code(2)
         .stderr(contains("--features desktop"));
 }
 
