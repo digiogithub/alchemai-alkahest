@@ -310,3 +310,42 @@ async fn models_list_and_get() {
     assert_eq!(v["id"], "llama3.2");
     assert_eq!(v["owned_by"], "ollama");
 }
+
+/// ALK-US-0096: a forced tool choice on a Hermes-style template prefills the assistant turn
+/// with `<tool_call>` so llama-server's grammar starts inside the call; `auto` is untouched.
+#[tokio::test]
+async fn forced_tool_choice_prefills_hermes_marker() {
+    let mut hermes = chat_model();
+    hermes.settings.template = Some("{{ messages }}{{- '\\n<tool_call>\\n' }}".into());
+    let h = Harness::start(&[("qwen-hermes", hermes)]).await;
+    let tools = json!([{"type": "function", "function": {"name": "get_weather"}},
+                       {"type": "function", "function": {"name": "get_time"}}]);
+    let resp = h
+        .post(
+            "/v1/chat/completions",
+            json!({"model": "qwen-hermes", "messages": [{"role": "user", "content": "hi"}],
+                   "tools": tools, "tool_choice": {"type": "function", "function": {"name": "get_weather"}}}),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+    let sent = h.llama.last("/v1/chat/completions");
+    let last = sent["messages"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(
+        last,
+        json!({"role": "assistant", "content": "<tool_call>\n"})
+    );
+    assert_eq!(sent["tool_choice"], "required");
+    assert_eq!(sent["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(sent["parallel_tool_calls"], json!(false));
+
+    let resp = h
+        .post(
+            "/v1/chat/completions",
+            json!({"model": "qwen-hermes", "messages": [{"role": "user", "content": "hi"}],
+                   "tools": tools, "tool_choice": "auto"}),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+    let sent = h.llama.last("/v1/chat/completions");
+    assert_eq!(sent["messages"].as_array().unwrap().len(), 1);
+}

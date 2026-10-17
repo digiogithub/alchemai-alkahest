@@ -46,6 +46,7 @@ pub mod service;
 pub mod shutdown;
 pub mod state;
 pub mod tls;
+pub mod tool_prefill;
 pub mod upstream;
 
 pub use service::{HttpError, UpstreamClient};
