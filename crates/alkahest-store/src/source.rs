@@ -1,8 +1,10 @@
 //! The [`ModelSource`] trait both stores implement, so the catalog (ALK-US-0012) can merge
 //! them without knowing which store a model lives in.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
 use crate::digest::Digest;
@@ -47,12 +49,19 @@ pub struct ModelEntry {
     pub config: Option<ModelConfig>,
     /// Layers in manifest order.
     pub layers: Vec<LayerInfo>,
+    /// Whether this is an Ollama cloud model (see [`ModelEntry::is_remote`]).
+    pub remote: bool,
 }
 
 impl ModelEntry {
     /// Builds an entry from a resolved manifest, reading the config blob from `blobs_dir`.
     /// A config that cannot be read is logged and left `None`: listing must not fail because
     /// one blob is damaged.
+    ///
+    /// Ollama cloud models are recognised before, and independently of, the strict config
+    /// parse (ALK-US-0126): by their name ([`ModelName::is_ollama_cloud`]) or by a
+    /// `remote_host` / `remote_model` key in the raw config JSON. They are logged once per
+    /// process at debug level instead of warning on every listing.
     pub(crate) fn build(
         origin: Origin,
         name: ModelName,
@@ -64,17 +73,21 @@ impl ModelEntry {
     ) -> Self {
         let blob = |d: &Digest| blobs_dir.join(d.filename());
         let config_path = blob(&manifest.config.digest);
-        let config = match fsutil::read_bounded(&config_path, MAX_DOCUMENT)
-            .ok()
-            .map(|b| serde_json::from_slice::<ModelConfig>(&b))
-        {
+        let raw = fsutil::read_bounded(&config_path, MAX_DOCUMENT).ok();
+        let remote = name.is_ollama_cloud() || raw.as_deref().is_some_and(config_names_remote_host);
+        let config = match raw.map(|b| serde_json::from_slice::<ModelConfig>(&b)) {
             Some(Ok(c)) => Some(c),
+            // A cloud model is ignored anyway; its config shape is not worth a warning.
+            Some(Err(_)) if remote => None,
             Some(Err(e)) => {
                 tracing::warn!(model = %name, error = %e, "unreadable model config blob");
                 None
             }
             None => None,
         };
+        if remote {
+            log_cloud_model_once(&name);
+        }
         let layers = manifest
             .layers
             .iter()
@@ -98,6 +111,7 @@ impl ModelEntry {
             manifest,
             config,
             layers,
+            remote,
         }
     }
 
@@ -170,17 +184,42 @@ impl ModelEntry {
         out
     }
 
-    /// Whether this is an Ollama cloud model (`remote_host` in its config): listed by Ollama
-    /// but without local weights, so it cannot be served by Alkahest.
+    /// Whether this is an Ollama cloud model (a `:cloud` / `-cloud` tag, or `remote_host` /
+    /// `remote_model` in its config): listed by Ollama but without local weights. Alkahest
+    /// does not support them; the catalog skips them (ALK-US-0126).
     pub fn is_remote(&self) -> bool {
-        self.config
-            .as_ref()
-            .is_some_and(|c| c.remote_host.is_some())
+        self.remote
     }
 
     /// Whether every blob the manifest references is on disk.
     pub fn is_complete(&self) -> bool {
         self.layers.iter().all(|l| l.present)
+    }
+}
+
+/// Whether a config blob names a remote host or model (Ollama cloud models), read
+/// tolerantly: only the two keys matter, whatever else the document holds.
+fn config_names_remote_host(bytes: &[u8]) -> bool {
+    let Ok(serde_json::Value::Object(doc)) = serde_json::from_slice(bytes) else {
+        return false;
+    };
+    ["remote_host", "remote_model"]
+        .iter()
+        .any(|k| doc.get(*k).is_some_and(|v| !v.is_null()))
+}
+
+/// Logs that an Ollama cloud model is ignored, once per model and process: the store is
+/// listed on every request, a line per listing would flood the log.
+fn log_cloud_model_once(name: &ModelName) {
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let key = name.to_string().to_ascii_lowercase();
+    let first = SEEN
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .map(|mut seen| seen.insert(key))
+        .unwrap_or(false);
+    if first {
+        tracing::debug!(model = %name, "ignoring Ollama cloud model: not supported by Alkahest");
     }
 }
 

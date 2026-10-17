@@ -231,6 +231,15 @@ impl ModelName {
         self.host == DEFAULT_HOST
     }
 
+    /// Whether the name is an Ollama cloud model (ALK-US-0126): a tag `cloud` or ending in
+    /// `-cloud` (`glm-5.1:cloud`, `gpt-oss:120b-cloud`) on the Ollama registry. Ollama serves
+    /// those remotely; they have no local weights and Alkahest does not support them.
+    pub fn is_ollama_cloud(&self) -> bool {
+        let ollama_host = self.host == DEFAULT_HOST || self.host == OLLAMA_COM_HOST;
+        let tag = self.tag.to_ascii_lowercase();
+        ollama_host && (tag == "cloud" || tag.ends_with("-cloud"))
+    }
+
     /// Same name with another tag (validated).
     pub fn with_tag(&self, tag: impl AsRef<str>) -> Result<Self, RefError> {
         Self::new(&self.host, &self.namespace, &self.model, tag)

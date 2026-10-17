@@ -506,6 +506,17 @@ impl ManifestDocument {
     }
 }
 
+/// Reads `null` as the type's default. Ollama writes `null` for empty lists in some configs
+/// (`"model_families": null` in cloud model configs, ALK-US-0126), where Alkahest expects a
+/// list.
+fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
 /// The image config blob (Ollama's `ConfigV2`). Unknown fields are kept in `extra`, so a
 /// config read from Ollama and written back is unchanged in content.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -517,7 +528,11 @@ pub struct ModelConfig {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub model_family: String,
     /// All families (vision models list two).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "null_as_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub model_families: Vec<String>,
     /// Parameter size as shown (`8.2B`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -526,7 +541,11 @@ pub struct ModelConfig {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub file_type: String,
     /// Capabilities (`completion`, `tools`, `vision`, `thinking`, `embedding`).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "null_as_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub capabilities: Vec<String>,
     /// Trained context length, when recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]

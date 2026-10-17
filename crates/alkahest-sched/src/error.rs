@@ -157,7 +157,9 @@ impl SchedError {
     /// unloaded / timeout, 502 engine failures, 500 otherwise.
     pub fn status_code(&self) -> u16 {
         match self.root() {
-            SchedError::Store(StoreError::ModelNotFound { .. }) => 404,
+            SchedError::Store(StoreError::ModelNotFound { .. } | StoreError::CloudModel { .. }) => {
+                404
+            }
             SchedError::Store(
                 StoreError::AmbiguousModel { .. }
                 | StoreError::NotLoadable { .. }
