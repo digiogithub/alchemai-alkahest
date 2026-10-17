@@ -5,10 +5,22 @@ title: Decision API
 status: backlog
 labels: [decision, api]
 created: 2026-10-16T22:37:37Z
-updated: 2026-10-17T01:45:50Z
+updated: 2026-10-17T02:26:31Z
 requirements:
   R1:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/decisions/mod.rs#decide
+        - crates/alkahest-api/src/decisions/mod.rs#metadata
+        - crates/alkahest-api/src/decisions/mod.rs#routes
+      tests:
+        - crates/alkahest-api/tests/decisions.rs#ollama_parity
+        - crates/alkahest-api/tests/decisions.rs#systemone_template_models_are_forwarded_natively
+        - crates/alkahest-api/tests/decisions.rs#non_decision_and_unknown_models_fail_in_ollama_shape_without_loading
+        - crates/alkahest-api/tests/decisions.rs#too_many_questions_are_refused_before_loading
+        - crates/alkahest-api/tests/decisions.rs#keep_alive_zero_unloads_after_the_decision
+        - crates/alkahest/tests/serve_decisions.rs#real_engine_answers_systemone_and_decisions
   R2:
     status: backlog
     trace:
@@ -53,6 +65,15 @@ requirements:
         - crates/alkahest-decision/tests/compile_golden.rs#strands_pointer_rows
   R5:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/decisions/alias.rs#from_decisions_request
+        - crates/alkahest-api/src/decisions/alias.rs#to_decisions_response
+      tests:
+        - crates/alkahest-api/tests/decisions.rs#alias
+        - crates/alkahest-api/tests/decisions.rs#decisions_errors_use_the_openai_error_object
+        - crates/alkahest-api/src/decisions/alias.rs#converts_questions_with_names_and_values_as_ids
+        - crates/alkahest-api/src/decisions/alias.rs#converts_answers_back_in_question_order
 ---
 
 ## Purpose

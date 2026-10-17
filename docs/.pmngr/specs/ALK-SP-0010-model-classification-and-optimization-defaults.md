@@ -5,13 +5,21 @@ title: Model classification and optimization defaults
 status: backlog
 labels: [gguf, config]
 created: 2026-10-16T22:37:40Z
-updated: 2026-10-17T00:54:11Z
+updated: 2026-10-17T02:26:31Z
 requirements:
   R1:
     status: backlog
     trace:
-      code: [crates/alkahest-gguf/src/classify.rs#classify]
-      tests: [crates/alkahest-gguf/tests/classify.rs#known_models_table]
+      code:
+        - crates/alkahest-gguf/src/classify.rs#classify
+        - crates/alkahest-gguf/src/accessors.rs#is_decision_model
+        - crates/alkahest-store/src/meta.rs#DecisionInfo
+      tests:
+        - crates/alkahest-gguf/tests/classify.rs#known_models_table
+        - crates/alkahest-gguf/tests/classify.rs#ollama_decision_capability_is_decision
+        - crates/alkahest-gguf/tests/classify.rs#systemone_template_is_decision
+        - crates/alkahest-gguf/tests/classify.rs#decision_model_tag_is_decision
+        - crates/alkahest-store/tests/catalog.rs#ollama_decision_models_are_classified_decision
   R2:
     status: backlog
     trace:
