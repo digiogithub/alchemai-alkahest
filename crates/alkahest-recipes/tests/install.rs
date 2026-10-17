@@ -66,6 +66,7 @@ fn test_recipe(url: &str, bytes: &[u8], format: ArchiveFormat, strip: usize) -> 
         license: None,
         homepage: None,
         tag: "b1".into(),
+        companions: vec![],
         executable: "llama-server".into(),
         assets: vec![Asset {
             os: host.os,

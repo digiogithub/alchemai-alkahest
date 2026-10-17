@@ -104,6 +104,7 @@ impl Engine for StableDiffusionCppEngine {
 
     fn prepare(&self, req: &LaunchRequest, install: &EngineInstall) -> Result<LaunchSpec> {
         self.check(req)?;
+        install.check_runtime()?;
         let mut spec = LaunchSpec::new(
             EngineId::StableDiffusionCpp,
             &install.binary,

@@ -90,13 +90,22 @@ tools = ["git", "cmake", "ninja"]
 [variants."cuda12.8"]
 accelerator = "cuda"
 cuda = "12.8"
-notes = "Needs the CUDA 12 runtime libraries (libcudart, libcublas) installed on the host."
+notes = "Needs the CUDA 12 runtime libraries (libcudart, libcublas) installed on the host, or `--with-runtime` to unpack upstream's cudart archive (594 MB) next to the engine."
 [[variants."cuda12.8".assets]]
 os = "linux"
 arch = "x86_64"
 url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-cuda-12.8-x64.tar.gz"
 sha256 = "4703ed1a3cd6e8504affb6cb9866f501e96d634d68a002dc9a8251c9e2819b49"
 size = 172525113
+format = "tar.gz"
+strip_components = 1
+[[variants."cuda12.8".companions]]
+name = "cuda-runtime"
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/cudart-llama-b11669-bin-ubuntu-cuda-12.8-x64.tar.gz"
+sha256 = "ab3eda89a82096bcba00b6448218c3c11eec2016b0f38d64884dc29736549f26"
+size = 594377811
 format = "tar.gz"
 strip_components = 1
 [variants."cuda12.8".source]
@@ -110,13 +119,22 @@ tools = ["git", "cmake", "ninja"]
 [variants."cuda12.4"]
 accelerator = "cuda"
 cuda = "12.4"
-notes = "Windows: CUDA DLLs come from cudart-llama-bin-win-cuda-12.4-x64.zip or a CUDA toolkit on PATH."
+notes = "Windows: CUDA DLLs come from a CUDA toolkit on PATH, or `--with-runtime` (cudart-llama-bin-win-cuda-12.4-x64.zip, 391 MB)."
 [[variants."cuda12.4".assets]]
 os = "windows"
 arch = "x86_64"
 url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-cuda-12.4-x64.zip"
 sha256 = "c2da1f73ed176ae093ac5aceb978a7b167a16113f6d74c6789eeaee2135cb8dc"
 size = 266582698
+format = "zip"
+strip_components = 0
+[[variants."cuda12.4".companions]]
+name = "cuda-runtime"
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/cudart-llama-bin-win-cuda-12.4-x64.zip"
+sha256 = "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
+size = 391443627
 format = "zip"
 strip_components = 0
 [variants."cuda12.4".source]
@@ -130,7 +148,7 @@ tools = ["git", "cmake", "ninja"]
 [variants."cuda13.4"]
 accelerator = "cuda"
 cuda = "13.4"
-notes = "Needs the CUDA 13 runtime libraries on the host (Windows: cudart-llama-bin-win-cuda-13.4-x64.zip)."
+notes = "Needs the CUDA 13 runtime libraries on the host, or `--with-runtime` to unpack upstream's cudart archive (440 to 552 MB on Linux, 423 MB on Windows)."
 [[variants."cuda13.4".assets]]
 os = "linux"
 arch = "x86_64"
@@ -153,6 +171,33 @@ arch = "x86_64"
 url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-cuda-13.4-x64.zip"
 sha256 = "3b92d5c064f5032e603e531d3ec8961f3bd6613e5dfad047399a92dec8e95dbc"
 size = 154582227
+format = "zip"
+strip_components = 0
+[[variants."cuda13.4".companions]]
+name = "cuda-runtime"
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/cudart-llama-b11669-bin-ubuntu-cuda-13.4-x64.tar.gz"
+sha256 = "1108bd9300a281e8eabb18d3fa028d4240ecd983f9f90dbbbc3297671016d697"
+size = 440236547
+format = "tar.gz"
+strip_components = 1
+[[variants."cuda13.4".companions]]
+name = "cuda-runtime"
+os = "linux"
+arch = "aarch64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/cudart-llama-b11669-bin-ubuntu-cuda-13.4-arm64.tar.gz"
+sha256 = "6c81453d16a574eef3273662a7a8ceafa3537699a5b2ffec3fc853eb1a08f67c"
+size = 552521396
+format = "tar.gz"
+strip_components = 1
+[[variants."cuda13.4".companions]]
+name = "cuda-runtime"
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/cudart-llama-bin-win-cuda-13.4-x64.zip"
+sha256 = "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668"
+size = 423535356
 format = "zip"
 strip_components = 0
 [variants."cuda13.4".source]

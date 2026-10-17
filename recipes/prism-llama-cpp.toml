@@ -101,6 +101,15 @@ sha256 = "fa5874a1412e251a6efb13f289e97bacbbb4e7fc6714c1836b4fc6c1dc863462"
 size = 313951324
 format = "zip"
 strip_components = 0
+[[variants."cuda12.4".companions]]
+name = "cuda-runtime"
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/cudart-llama-bin-win-cuda-12.4-x64.zip"
+sha256 = "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
+size = 391443627
+format = "zip"
+strip_components = 0
 [variants."cuda12.4".source]
 git = "https://github.com/PrismML-Eng/llama.cpp.git"
 rev = "prism-b10777-e3de715"
@@ -147,6 +156,15 @@ arch = "x86_64"
 url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/llama-prism-b10777-e3de715-bin-win-cuda-13.3-x64.zip"
 sha256 = "071088ef64f2e62dfb488f4d73cc368df945f9c0e8c7019bc94daf9abd0eb4aa"
 size = 179212635
+format = "zip"
+strip_components = 0
+[[variants."cuda13.3".companions]]
+name = "cuda-runtime"
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b10777-e3de715/cudart-llama-bin-win-cuda-13.3-x64.zip"
+sha256 = "1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e"
+size = 390970417
 format = "zip"
 strip_components = 0
 [variants."cuda13.3".source]

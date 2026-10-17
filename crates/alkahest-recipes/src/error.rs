@@ -108,6 +108,22 @@ pub enum RecipeError {
     /// The unpacked tree has no executable at the recipe's path.
     #[error("the unpacked engine has no `{0}`")]
     MissingExecutable(PathBuf),
+    /// A CUDA build is installed but the CUDA runtime libraries it loads are not on the machine.
+    #[error(
+        "the `{variant}` engine build needs the CUDA {major} runtime ({}), which was not found; \
+         install the CUDA {major} runtime for your system, or run \
+         `alkahest engines install <engine> --variant {variant} --with-runtime` to unpack the \
+         runtime next to the engine, or use a `cpu` or `vulkan` build",
+        missing.join(", ")
+    )]
+    CudaRuntimeMissing {
+        /// The installed variant.
+        variant: String,
+        /// CUDA major version it needs.
+        major: u32,
+        /// Libraries that were not found.
+        missing: Vec<String>,
+    },
     /// A filesystem operation failed.
     #[error("{path}: {source}")]
     Io {
