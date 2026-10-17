@@ -228,12 +228,10 @@ async fn launch_request_has_explicit_context_and_slots() {
     let s = sched_with(&b, opts);
     let _l = s.acquire("m", &none(), None).await.unwrap();
     let req = b.last_request();
-    // llama-server splits its context over the slots.
-    assert_eq!(req.settings.context_length, Some(8192));
-    assert_eq!(
-        req.settings.extra_args.as_deref(),
-        Some(&["--parallel".to_string(), "2".to_string()][..])
-    );
+    // Per-slot context and the granted slots; the engine adapter multiplies them.
+    assert_eq!(req.settings.context_length, Some(4096));
+    assert_eq!(req.num_parallel, Some(2));
+    assert_eq!(req.settings.extra_args, None);
 }
 
 #[tokio::test(start_paused = true)]

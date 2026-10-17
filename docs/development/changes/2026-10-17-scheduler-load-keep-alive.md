@@ -32,7 +32,7 @@ Crate `alkahest-sched`:
 - `error::SchedError` with `status_code()` (404/400/502/503/500) and `root()` for the shared
   `LoadFailed` error every waiter of one load receives.
 - `launch_request` / `context_length`: explicit context (settings, else 4096 capped by the
-  trained context); for llama-server, context x slots and a leading `--parallel <slots>`.
+  trained context) and `num_parallel` slots for the engine.
 
 Behaviour:
 
@@ -56,9 +56,10 @@ Behaviour:
 - The scheduler talks to engines through `ModelBackend` / `EngineInstance` so timing tests
   run on tokio's paused clock with in-process fakes; one end-to-end test uses the real
   catalog, registry and supervisor with `alkahest-fake-engine`.
-- `num_parallel` reaches llama-server as a leading `--parallel` extra argument because
-  `LaunchRequest` has no slots field yet; the llama-server adapter (ALK-US-0025) should take
-  it over (inbox item filed).
+- `num_parallel` reaches the engine through `LaunchRequest::num_parallel` (added by the
+  llama-server adapter, [[ALK-US-0025]]), which turns it into `-c <ctx * slots> -np <slots>`.
+  The first version of this story passed a leading `--parallel` extra argument; it was
+  replaced after merging the adapter.
 - The default context (4096, Ollama's) is always passed explicitly so the engine never
   allocates the trained context the memory estimate did not count.
 

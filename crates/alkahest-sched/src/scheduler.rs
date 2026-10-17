@@ -115,23 +115,14 @@ pub fn context_length(model: &ResolvedModel, opts: &SchedulerOptions) -> u64 {
 
 /// The launch request the scheduler hands to the backend.
 ///
-/// The context is always explicit, so the engine never falls back to the (possibly huge)
-/// trained context the estimate did not account for. For llama-server engines the context
-/// becomes `per-slot context * slots` and `--parallel <slots>` goes first in the extra
-/// arguments (a user `--parallel` later on the line still wins), because llama-server splits
-/// its context across slots.
+/// The per-slot context is always explicit, so the engine never falls back to the (possibly
+/// huge) trained context the estimate did not account for, and `num_parallel` carries the
+/// slots the scheduler grants; the llama-server adapter turns them into `-c <ctx * slots>
+/// -np <slots>`.
 pub fn launch_request(model: &ResolvedModel, opts: &SchedulerOptions) -> LaunchRequest {
     let mut req = model.request.clone();
-    let ctx = context_length(model, opts);
-    if model.dialect == ApiDialect::LlamaServer {
-        let np = opts.parallel();
-        req.settings.context_length = Some(ctx.saturating_mul(u64::from(np)));
-        let mut args = vec!["--parallel".to_string(), np.to_string()];
-        args.extend(req.settings.extra_args.take().unwrap_or_default());
-        req.settings.extra_args = Some(args);
-    } else {
-        req.settings.context_length = Some(ctx);
-    }
+    req.settings.context_length = Some(context_length(model, opts));
+    req.num_parallel = Some(opts.parallel());
     req
 }
 
