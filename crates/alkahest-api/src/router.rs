@@ -25,6 +25,7 @@ use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::auth::{AuthPolicy, AuthState, authenticate};
+use crate::dialect::dialect_errors;
 use crate::state::AppState;
 
 /// Header carrying the request id; generated when the client sends none.
@@ -122,7 +123,11 @@ impl ApiRouter {
         };
         router = router
             .layer(middleware::from_fn_with_state(auth, authenticate))
-            .layer(CatchPanicLayer::new());
+            .layer(CatchPanicLayer::new())
+            .layer(middleware::from_fn_with_state(
+                self.state.errors(),
+                dialect_errors,
+            ));
         if let Some(cors) = cors_layer(&self.settings.cors_origins) {
             // Outside authentication so browser preflights (which carry no credentials)
             // are answered.
@@ -223,6 +228,8 @@ async fn healthz() -> impl IntoResponse {
     Json(json!({ "status": "ok" }))
 }
 
-async fn not_found() -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" })))
+/// Unknown routes: an empty 404 that [`dialect_errors`] renders in the path's dialect
+/// (Ollama answers `404 page not found`, OpenAI clients expect an error object).
+async fn not_found() -> StatusCode {
+    StatusCode::NOT_FOUND
 }

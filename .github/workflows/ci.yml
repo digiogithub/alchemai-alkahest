@@ -81,6 +81,23 @@ jobs:
       - name: Build and report size
         run: scripts/binary-size.sh
 
+  # SDK conformance (ALK-US-0038): the official ollama and openai Python clients against
+  # the API server over a fake llama-server (no model download).
+  conformance:
+    name: SDK conformance (ollama-python, openai-python)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Conformance suite
+        run: scripts/conformance.sh
+
   # Unused dependencies.
   machete:
     name: cargo machete

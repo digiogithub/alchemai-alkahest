@@ -70,12 +70,20 @@ impl HttpError {
         Self::new(ErrorKind::Internal, message)
     }
 
-    /// 404 for a model name.
+    /// 404 for a model name, in Ollama's wording (`model 'x' not found, try pulling it
+    /// first`): the Ollama CLI and several clients match on "not found" to offer a pull.
     pub fn model_not_found(model: &str) -> Self {
         Self::new(
             ErrorKind::ModelNotFound,
-            format!("model '{model}' not found"),
+            format!("model '{model}' not found, try pulling it first"),
         )
+    }
+
+    /// [`HttpError::model_not_found`] with the catalog's suggestions (`; did you mean ...`).
+    fn model_not_found_hint(model: &str, hint: &str) -> Self {
+        let mut e = Self::model_not_found(model);
+        e.message.push_str(hint);
+        e
     }
 
     /// The HTTP status.
@@ -85,18 +93,18 @@ impl HttpError {
 
     /// Maps a scheduler failure, keeping its status (`SchedError::status_code`).
     pub fn from_sched(e: &SchedError) -> Self {
-        let status = e.status_code();
-        let kind = match (status, e.root()) {
-            (404, SchedError::Store(StoreError::ModelNotFound { .. })) => ErrorKind::ModelNotFound,
-            (s, _) => ErrorKind::from_status(s),
-        };
-        Self::new(kind, e.to_string())
+        if let SchedError::Store(store @ StoreError::ModelNotFound { .. }) = e.root() {
+            return Self::from_store(store);
+        }
+        Self::new(ErrorKind::from_status(e.status_code()), e.to_string())
     }
 
     /// Maps a store failure.
     pub fn from_store(e: &StoreError) -> Self {
+        if let StoreError::ModelNotFound { reference, hint } = e {
+            return Self::model_not_found_hint(reference, hint);
+        }
         let kind = match e {
-            StoreError::ModelNotFound { .. } => ErrorKind::ModelNotFound,
             StoreError::AmbiguousModel { .. }
             | StoreError::NotLoadable { .. }
             | StoreError::InvalidSettings { .. }
@@ -192,6 +200,25 @@ pub async fn resolve_entry(catalog: Arc<Catalog>, model: &str) -> Result<Catalog
             .map_err(|e| HttpError::from_store(&e))
     })
     .await
+}
+
+/// The model's Ollama `SYSTEM` layer, if it has a non-empty one. Lookup failures count as
+/// "no system prompt": the request already holds a lease on the model, so they can only be
+/// races with a concurrent delete, which must not fail the request.
+pub async fn model_system(state: &AppState, model: &str) -> Option<String> {
+    let catalog = state.service::<Arc<Catalog>>()?;
+    let model = model.to_string();
+    blocking(move || {
+        Ok(catalog
+            .resolve(&model)
+            .and_then(|e| catalog.detail(&e))
+            .ok()
+            .and_then(|d| d.system)
+            .filter(|s| !s.trim().is_empty()))
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Refuses a model outside the caller key's allowlist (403). The allowlist may name the

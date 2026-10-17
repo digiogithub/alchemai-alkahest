@@ -18,7 +18,18 @@ struct Server {
 }
 
 impl Drop for Server {
+    /// Stops the server with SIGTERM so its graceful shutdown stops the engine processes
+    /// (a SIGKILL would orphan them), then kills it if it is still running after 10 s.
     fn drop(&mut self) {
+        let _ = Command::new("kill")
+            .args(["-TERM", &self.child.id().to_string()])
+            .status();
+        for _ in 0..100 {
+            if let Ok(Some(_)) = self.child.try_wait() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

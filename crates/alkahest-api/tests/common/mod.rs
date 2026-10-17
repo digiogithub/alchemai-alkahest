@@ -189,6 +189,18 @@ async fn completion(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
     sse(events, false, log.clone(), false)
 }
 
+/// llama-server `/infill`: the same stream as `/completion`.
+async fn infill(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    log.requests.lock().push(("/infill".into(), body.clone()));
+    let timings: Value = serde_json::from_str(TIMINGS).unwrap();
+    let events = vec![
+        json!({"content":" + b","stop":false}),
+        json!({"content":"","stop":true,"stop_type":"eos","timings":timings}),
+    ];
+    sse(events, false, log.clone(), false)
+}
+
 async fn embeddings(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
     let body: Value = serde_json::from_slice(&body).unwrap();
     log.requests
@@ -306,6 +318,7 @@ pub async fn fake_llama(log: Arc<LlamaLog>) -> u16 {
         .route("/v1/chat/completions", post(chat))
         .route("/v1/completions", post(completions))
         .route("/completion", post(completion))
+        .route("/infill", post(infill))
         .route("/v1/embeddings", post(embeddings))
         .route("/apply-template", post(apply_template))
         .route("/tokenize", post(tokenize))

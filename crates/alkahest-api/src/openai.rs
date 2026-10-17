@@ -100,6 +100,26 @@ enum Endpoint {
     Completion,
 }
 
+/// Prepends the model's Ollama `SYSTEM` layer unless the conversation starts with a system
+/// (or developer) message, as Ollama's OpenAI compatibility layer does.
+async fn inject_model_system(state: &AppState, model: &str, body: &mut Map<String, Value>) {
+    let Some(Value::Array(messages)) = body.get("messages") else {
+        return;
+    };
+    let first_role = messages
+        .first()
+        .and_then(|m| m.get("role"))
+        .and_then(Value::as_str);
+    if matches!(first_role, Some("system" | "developer")) {
+        return;
+    }
+    if let Some(system) = service::model_system(state, model).await
+        && let Some(Value::Array(messages)) = body.get_mut("messages")
+    {
+        messages.insert(0, json!({"role": "system", "content": system}));
+    }
+}
+
 async fn proxy(
     state: &AppState,
     ctx: Option<&RequestContext>,
@@ -135,6 +155,9 @@ async fn proxy(
         )));
     }
     body.insert("model".into(), json!(lease.model()));
+    if endpoint == Endpoint::Chat {
+        inject_model_system(state, &model, &mut body).await;
+    }
     apply_sampling(&mut body, lease.settings(), LimitField::MaxTokens);
     let include_usage = body
         .get("stream_options")
