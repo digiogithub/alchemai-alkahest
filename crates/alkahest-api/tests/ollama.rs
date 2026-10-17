@@ -782,3 +782,67 @@ async fn blob_uploads_bypass_the_body_limit() {
         .unwrap();
     assert_eq!(resp.status(), 413);
 }
+
+/// ALK-US-0100: a multi-file diffusion model (weights + VAE + text encoders) created from
+/// uploaded blobs keeps every component as its own layer, and the catalog sees an image model
+/// whose launch request carries the component paths.
+#[tokio::test]
+async fn create_a_multi_file_diffusion_model() {
+    let h = Harness::start(&models()).await;
+    let client = reqwest::Client::new();
+    let weights = common::gguf_with(&[("general.architecture", "flux")]);
+    let parts: Vec<(&str, Vec<u8>)> = vec![
+        ("flux1-schnell-Q4_0.gguf", weights),
+        ("ae.safetensors", b"vae weights".to_vec()),
+        ("clip_l.safetensors", b"clip weights".to_vec()),
+        ("t5xxl_fp16.safetensors", b"t5 weights".to_vec()),
+    ];
+    let mut files = serde_json::Map::new();
+    for (name, bytes) in &parts {
+        let digest = Digest::of(bytes).to_string();
+        let resp = client
+            .post(h.url(&format!("/api/blobs/{digest}")))
+            .body(bytes.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 201);
+        files.insert((*name).to_string(), json!(digest));
+    }
+    let resp = h
+        .post(
+            "/api/create",
+            json!({"model": "flux-schnell", "files": files, "stream": false}),
+        )
+        .await;
+    assert_eq!(resp.status(), 200, "{}", resp.text().await.unwrap());
+
+    let store = alkahest_store::AlkahestStore::open(h.tmp.path().join("alk")).unwrap();
+    let catalog = alkahest_store::Catalog::new(store, None, None).with_overlays(
+        alkahest_store::ModelOverlays::in_data_dir(&h.tmp.path().join("data")),
+    );
+    let e = catalog.resolve("flux-schnell").unwrap();
+    assert_eq!(e.info.kind, alkahest_gguf::ModelKind::Image);
+    let comps: Vec<&str> = e.entry.components().iter().map(|(c, _)| c.id()).collect();
+    assert_eq!(comps, ["vae", "clip_l", "t5xxl"]);
+    let eff = catalog
+        .effective_settings(
+            &e,
+            &alkahest_store::ModelSettings::default(),
+            &alkahest_store::ModelSettings::default(),
+            None,
+        )
+        .unwrap();
+    let req = alkahest_engine::LaunchRequest::from_catalog(
+        &e,
+        &eff,
+        alkahest_sysinfo::Accelerator::Cpu,
+        0,
+    )
+    .unwrap();
+    let args = alkahest_engine::StableDiffusionCppEngine::model_args(&req);
+    assert_eq!(args[0], "--diffusion-model");
+    for flag in ["--vae", "--clip_l", "--t5xxl"] {
+        assert!(args.iter().any(|a| a == flag), "{flag}: {args:?}");
+    }
+}

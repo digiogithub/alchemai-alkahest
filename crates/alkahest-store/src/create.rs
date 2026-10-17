@@ -14,7 +14,8 @@ use crate::digest::Digest;
 use crate::error::{Result, StoreError};
 use crate::local::AlkahestStore;
 use crate::manifest::{
-    Descriptor, LayerKind, Manifest, ModelConfig, SourceInfo, SourceKind, media_type,
+    Descriptor, DiffusionComponent, LayerKind, Manifest, ModelConfig, SourceInfo, SourceKind,
+    media_type,
 };
 use crate::reference::ModelName;
 use crate::source::{ModelEntry, ModelSource};
@@ -50,6 +51,10 @@ pub struct CreateLayers {
     pub parameters: Option<Map<String, Value>>,
     /// Licence texts (`LICENSE`), one layer each.
     pub license: Option<Vec<String>>,
+    /// Component files of a multi-file diffusion model (blobs already in the store); each
+    /// replaces the base's layer of the same component. With components, the weights blob is
+    /// the bare diffusion model and may be safetensors as well as GGUF.
+    pub components: Vec<(DiffusionComponent, Digest)>,
 }
 
 /// What [`AlkahestStore::create_model`] wrote.
@@ -80,7 +85,7 @@ impl AlkahestStore {
         let mut blobs_copied = 0;
         let (config, mut kept, reference) = match base {
             CreateBase::Blob(digest) => {
-                let (config, model) = self.gguf_base(&digest)?;
+                let (config, model) = self.weights_base(&digest, !layers.components.is_empty())?;
                 (config, vec![model], digest.to_string())
             }
             CreateBase::Model(src, entry) => {
@@ -104,6 +109,8 @@ impl AlkahestStore {
                     LayerKind::Params => layers.parameters.is_some(),
                     LayerKind::License => layers.license.is_some(),
                     LayerKind::AlkahestSource => true,
+                    LayerKind::Other(mt) => DiffusionComponent::from_media_type(mt)
+                        .is_some_and(|c| layers.components.iter().any(|(n, _)| *n == c)),
                     _ => false,
                 };
                 let kept: Vec<Descriptor> = entry
@@ -120,6 +127,12 @@ impl AlkahestStore {
                 )
             }
         };
+        for (component, digest) in &layers.components {
+            let size = self
+                .blob_size(digest)?
+                .ok_or(StoreError::MissingBlob(*digest))?;
+            kept.push(Descriptor::new(component.media_type(), *digest, size));
+        }
         let mut layers_written = 0;
         let mut text = |mt: &str, body: &str| -> Result<Descriptor> {
             let digest = self.put_blob(body.as_bytes())?;
@@ -167,26 +180,58 @@ impl AlkahestStore {
         })
     }
 
-    /// Config descriptor and model layer of a GGUF blob base.
-    fn gguf_base(&self, digest: &Digest) -> Result<(Descriptor, Descriptor)> {
+    /// Config descriptor and model layer of a weights blob base: a GGUF, or for a diffusion
+    /// model (`diffusion`: it has component files) also a single safetensors file. Diffusion
+    /// models are marked `image-generation`; a GGUF header that names a video architecture
+    /// still wins when the catalog classifies the model.
+    fn weights_base(&self, digest: &Digest, diffusion: bool) -> Result<(Descriptor, Descriptor)> {
         let path = self.blob_path(digest);
         let size = self
             .blob_size(digest)?
             .ok_or(StoreError::MissingBlob(*digest))?;
-        let g = alkahest_gguf::Gguf::read_file(&path).map_err(|e| StoreError::InvalidManifest {
-            what: digest.to_string(),
-            reason: format!("the blob is not a GGUF model: {e}"),
-        })?;
-        let config = ModelConfig {
-            model_format: "gguf".into(),
-            model_family: g.architecture().unwrap_or_default().to_string(),
-            file_type: g.file_type_name().unwrap_or_default().to_string(),
-            capabilities: vec!["completion".into()],
-            context_length: g.context_length(),
-            embedding_length: g.embedding_length(),
-            ..ModelConfig::default()
+        let capability = if diffusion {
+            "image-generation"
+        } else {
+            "completion"
+        };
+        let config = match alkahest_gguf::Gguf::read_file(&path) {
+            Ok(g) => ModelConfig {
+                model_format: "gguf".into(),
+                model_family: g.architecture().unwrap_or_default().to_string(),
+                file_type: g.file_type_name().unwrap_or_default().to_string(),
+                capabilities: vec![capability.into()],
+                context_length: g.context_length(),
+                embedding_length: g.embedding_length(),
+                ..ModelConfig::default()
+            },
+            Err(_) if diffusion && looks_like_safetensors(&path) => ModelConfig {
+                model_format: "safetensors".into(),
+                capabilities: vec![capability.into()],
+                ..ModelConfig::default()
+            },
+            Err(e) => {
+                return Err(StoreError::InvalidManifest {
+                    what: digest.to_string(),
+                    reason: format!("the blob is not a GGUF model: {e}"),
+                });
+            }
         };
         let config = self.put_json_blob(media_type::CONFIG, &config)?;
         Ok((config, Descriptor::new(media_type::MODEL, *digest, size)))
     }
+}
+
+/// A single safetensors file: an 8-byte little-endian header length followed by a JSON
+/// object.
+fn looks_like_safetensors(path: &std::path::Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 9];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok_and(|()| {
+            let len = u64::from_le_bytes([
+                head[0], head[1], head[2], head[3], head[4], head[5], head[6], head[7],
+            ]);
+            len > 1 && len < (100 << 20) && head[8] == b'{'
+        })
 }

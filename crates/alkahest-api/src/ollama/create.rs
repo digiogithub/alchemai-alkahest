@@ -7,6 +7,10 @@
 //! accepted. Blobs land in the Alkahest store (never the read-only Ollama store), streamed
 //! and verified against the digest in the path.
 //!
+//! Multi-file diffusion models (Flux, SD3, Wan, ALK-US-0100): upload the diffusion weights
+//! and each component, and list them all in `files`; components are recognised by file name
+//! or named `vae:`, `clip_l:`, `clip_g:`, `t5xxl:`, `llm:` and stored as their own layers.
+//!
 //! Supported Modelfile subset: `FROM` (a model, or an uploaded GGUF blob), `PARAMETER`,
 //! `TEMPLATE` (stored, never executed: ADR 0001), `SYSTEM`, `LICENSE`. `ADAPTER`, `MESSAGE`,
 //! `REQUIRES`, `RENDERER`, `PARSER`, quantisation and safetensors imports answer 400.
@@ -14,7 +18,7 @@
 use std::io::Write;
 use std::str::FromStr;
 
-use alkahest_store::{CreateLayers, Digest, StoreError};
+use alkahest_store::{CreateLayers, DiffusionComponent, Digest, StoreError};
 use axum::Json;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, State};
@@ -215,8 +219,11 @@ impl CreatePlan {
             _ => Modelfile::default(),
         };
         let mut plan = CreatePlan::default();
-        // Base: uploaded files, then `from`, then the Modelfile's FROM.
-        if let Some(digest) = gguf_file(&req.files)? {
+        // Base: uploaded files, then `from`, then the Modelfile's FROM. Uploaded diffusion
+        // components may also extend a `from` model.
+        let (main, components) = uploaded_files(&req.files)?;
+        plan.layers.components = components;
+        if let Some(digest) = main {
             plan.blob = Some(digest);
         } else if let Some(from) = req.from.as_deref().filter(|f| !f.trim().is_empty()) {
             plan.set_from(from)?;
@@ -271,31 +278,61 @@ impl CreatePlan {
     }
 }
 
-/// The GGUF blob among the uploaded `files` (`{"model.gguf": "sha256:..."}`). Several GGUF
-/// files (a projector, split weights) and safetensors are not supported yet.
-fn gguf_file(files: &Map<String, Value>) -> Result<Option<Digest>, HttpError> {
-    if files.is_empty() {
-        return Ok(None);
-    }
-    let mut ggufs = Vec::new();
+/// Diffusion component blobs of a create request.
+type Components = Vec<(DiffusionComponent, Digest)>;
+
+/// The uploaded `files` (`{"model.gguf": "sha256:..."}`) split into the weights blob and
+/// the components of a multi-file diffusion model (ALK-US-0100). A component is named by its
+/// file name (`ae.safetensors` -> VAE, `clip_l.safetensors`, `t5xxl_fp16.safetensors`, ...)
+/// or explicitly as `<component>:<file>` (`llm:qwen_3_4b.safetensors`); the one remaining file
+/// is the weights. Projectors, split GGUFs and safetensors directories are not supported.
+fn uploaded_files(files: &Map<String, Value>) -> Result<(Option<Digest>, Components), HttpError> {
+    let mut main: Vec<(String, Digest)> = Vec::new();
+    let mut components: Vec<(DiffusionComponent, Digest)> = Vec::new();
     for (name, digest) in files {
-        let lower = name.to_ascii_lowercase();
-        if lower.ends_with(".safetensors") || lower.ends_with(".json") {
-            return Err(HttpError::bad_request(
-                "importing safetensors is not supported; upload a GGUF file",
-            ));
-        }
         let Some(d) = digest.as_str() else {
             return Err(HttpError::bad_request(format!("invalid digest for {name}")));
         };
-        ggufs.push(parse_digest(d)?);
+        let d = parse_digest(d)?;
+        let lower = name.to_ascii_lowercase();
+        if lower.ends_with(".json") || lower.contains("mmproj") {
+            return Err(HttpError::bad_request(format!(
+                "{name}: safetensors directories and projectors cannot be created yet"
+            )));
+        }
+        let explicit = name
+            .split_once(':')
+            .and_then(|(role, _)| DiffusionComponent::parse(role));
+        match explicit.or_else(|| DiffusionComponent::guess_from_file_name(name)) {
+            Some(c) if components.iter().any(|(x, _)| *x == c) => {
+                return Err(HttpError::bad_request(format!(
+                    "two files for the {} component",
+                    c.id()
+                )));
+            }
+            Some(c) => components.push((c, d)),
+            None => main.push((name.clone(), d)),
+        }
     }
-    match ggufs.as_slice() {
-        [one] => Ok(Some(*one)),
-        _ => Err(HttpError::bad_request(
-            "models made of several files (projector, split GGUF) cannot be created yet",
-        )),
-    }
+    let main = match main.as_slice() {
+        [] => None,
+        [(name, d)] => {
+            if components.is_empty() && name.to_ascii_lowercase().ends_with(".safetensors") {
+                return Err(HttpError::bad_request(
+                    "importing safetensors language models is not supported; upload a GGUF file",
+                ));
+            }
+            Some(*d)
+        }
+        _ => {
+            return Err(HttpError::bad_request(
+                "several weights files (split GGUF) cannot be created yet; name diffusion \
+                 components `vae:`, `clip_l:`, `clip_g:`, `t5xxl:` or `llm:`",
+            ));
+        }
+    };
+    components.sort_by_key(|(c, _)| *c);
+    Ok((main, components))
 }
 
 /// The supported subset of a Modelfile.
@@ -431,6 +468,36 @@ mod tests {
         assert!(parse_modelfile("FROM x\nADAPTER ./lora.gguf\n").is_err());
         assert!(parse_modelfile("FROM x\nBOGUS y\n").is_err());
         assert!(parse_modelfile("FROM x\nSYSTEM \"\"\"never closed\n").is_err());
+    }
+
+    #[test]
+    fn diffusion_components_are_split_from_the_weights() {
+        let d = |n: u8| format!("sha256:{}", format!("{n:02x}").repeat(32));
+        let files: Map<String, Value> = serde_json::from_value(json!({
+            "flux1-dev-Q4_0.gguf": d(1), "ae.safetensors": d(2),
+            "clip_l.safetensors": d(3), "t5xxl_fp16.safetensors": d(4),
+            "llm:qwen_3_4b.safetensors": d(5),
+        }))
+        .unwrap();
+        let (main, comps) = uploaded_files(&files).unwrap();
+        assert_eq!(main.map(|m| m.to_string()), Some(d(1)));
+        let ids: Vec<&str> = comps.iter().map(|(c, _)| c.id()).collect();
+        assert_eq!(ids, ["vae", "clip_l", "t5xxl", "llm"]);
+        // Two weights files, a duplicate component, a lone safetensors LLM: refused.
+        for bad in [
+            json!({"a.gguf": d(1), "b.gguf": d(2)}),
+            json!({"vae.safetensors": d(1), "ae.safetensors": d(2), "m.gguf": d(3)}),
+            json!({"model.safetensors": d(1)}),
+            json!({"mmproj-f16.gguf": d(1)}),
+        ] {
+            let files: Map<String, Value> = serde_json::from_value(bad.clone()).unwrap();
+            assert!(uploaded_files(&files).is_err(), "{bad}");
+        }
+        // A safetensors diffusion model with components is fine.
+        let files: Map<String, Value> =
+            serde_json::from_value(json!({"sd3.safetensors": d(1), "clip_g.safetensors": d(2)}))
+                .unwrap();
+        assert!(uploaded_files(&files).is_ok());
     }
 
     #[test]

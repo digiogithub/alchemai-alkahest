@@ -39,8 +39,8 @@ pub use digest::{Digest, DigestParseError};
 pub use error::{Result, StoreError};
 pub use local::{AlkahestStore, BlobWriter, StoreLock, StoredManifest};
 pub use manifest::{
-    Descriptor, LayerKind, ListEntry, ListTarget, Manifest, ManifestDocument, ModelConfig,
-    SourceInfo, SourceKind, media_type,
+    Descriptor, DiffusionComponent, LayerKind, ListEntry, ListTarget, Manifest, ManifestDocument,
+    ModelConfig, SourceInfo, SourceKind, media_type,
 };
 pub use meta::{DecisionInfo, GgufFacts, ModelInfo, format_parameters};
 pub use ollama::OllamaStore;

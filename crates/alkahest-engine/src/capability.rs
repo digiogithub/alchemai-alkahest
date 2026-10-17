@@ -27,6 +27,9 @@ pub enum Capability {
     TextToSpeech,
     /// Image generation.
     Image,
+    /// Video generation (kept apart from [`Capability::Image`] so image requests never reach
+    /// a video model).
+    Video,
     /// Decision API (systemone / decisions).
     Decision,
     /// Per-token log probabilities of candidate tokens (needed for decision scoring).
@@ -47,6 +50,7 @@ impl Capability {
             Capability::SpeechToText => "speech_to_text",
             Capability::TextToSpeech => "text_to_speech",
             Capability::Image => "image",
+            Capability::Video => "video",
             Capability::Decision => "decision",
             Capability::Logits => "logits",
             Capability::Tokenize => "tokenize",
@@ -64,6 +68,7 @@ impl Capability {
             Capability::SpeechToText => "speech to text",
             Capability::TextToSpeech => "text to speech",
             Capability::Image => "image generation",
+            Capability::Video => "video generation",
             Capability::Decision => "decisions",
             Capability::Logits => "token log probabilities",
             Capability::Tokenize => "tokenization",
@@ -172,7 +177,8 @@ pub fn kind_capabilities(kind: ModelKind, has_projector: bool) -> Capabilities {
         ModelKind::Rerank => Capabilities::of(&[C::Rerank, C::Tokenize]),
         ModelKind::SpeechToText => Capabilities::of(&[C::SpeechToText]),
         ModelKind::TextToSpeech => Capabilities::of(&[C::TextToSpeech]),
-        ModelKind::Image | ModelKind::Video => Capabilities::of(&[C::Image]),
+        ModelKind::Image => Capabilities::of(&[C::Image]),
+        ModelKind::Video => Capabilities::of(&[C::Video]),
         ModelKind::Decision => {
             Capabilities::of(&[C::Decision, C::Completion, C::Logits, C::Tokenize])
         }
@@ -194,6 +200,14 @@ mod tests {
             serde_json::to_string(&caps).unwrap(),
             r#"["chat","embeddings"]"#
         );
+    }
+
+    #[test]
+    fn video_models_do_not_serve_image_requests() {
+        let v = kind_capabilities(ModelKind::Video, false);
+        assert!(v.contains(Capability::Video));
+        assert!(!v.contains(Capability::Image));
+        assert!(!kind_capabilities(ModelKind::Image, false).contains(Capability::Video));
     }
 
     #[test]

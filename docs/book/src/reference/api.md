@@ -29,7 +29,7 @@ server (`scripts/conformance.sh`).
 | `POST /api/pull` | streaming progress |
 | `POST /api/copy`, `DELETE /api/delete` | models of the Ollama store are read-only (403) |
 | `HEAD`, `POST /api/blobs/:digest` | upload a GGUF into the Alkahest store, verified against the digest (no body size limit) |
-| `POST /api/create` | from a model (`from`) or one uploaded GGUF (`files`), with `template`, `system`, `parameters`, `license`, or a Modelfile with `FROM`, `PARAMETER`, `TEMPLATE`, `SYSTEM`, `LICENSE`; `ADAPTER`, `MESSAGE`, quantisation and safetensors imports answer 400 |
+| `POST /api/create` | from a model (`from`) or one uploaded GGUF (`files`; a diffusion model may list its components too: `ae`/`vae`, `clip_l`, `clip_g`, `t5xxl` files by name, or `llm:<file>`), with `template`, `system`, `parameters`, `license`, or a Modelfile with `FROM`, `PARAMETER`, `TEMPLATE`, `SYSTEM`, `LICENSE`; `ADAPTER`, `MESSAGE`, quantisation and safetensors imports answer 400 |
 | `GET /api/version`, `GET /` | version; `/` answers "Alkahest is running" |
 
 `pull`, `copy`, `create`, blob uploads and `delete` need the admin scope for remote callers.
