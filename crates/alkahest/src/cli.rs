@@ -395,6 +395,14 @@ pub enum EnginesAction {
         /// engine, for a CUDA build on a machine without a system-wide CUDA runtime.
         #[arg(long)]
         with_runtime: bool,
+        /// Also install the optional dependency with this id (see `engines info`); repeatable.
+        #[arg(long = "with", value_name = "ID")]
+        with: Vec<String>,
+        /// Build the native variant of the engine from source for this machine's CPU
+        /// (for example llama.cpp with `-DGGML_NATIVE=ON`). Never picked automatically; the
+        /// build is not portable to other CPUs.
+        #[arg(long, conflicts_with = "variant")]
+        native: bool,
     },
     /// Remove an installed engine version.
     #[command(visible_alias = "remove", disable_version_flag = true)]

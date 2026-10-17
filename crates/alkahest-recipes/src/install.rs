@@ -38,9 +38,13 @@ struct Marker {
     /// Library directories relative to the install directory.
     #[serde(default)]
     library_dirs: Vec<String>,
-    /// Names of the companion archives unpacked into this directory.
+    /// Ids of the dependencies (including legacy companions) unpacked into this directory.
+    #[serde(default, alias = "companions")]
+    dependencies: Vec<String>,
+    /// CPU features of the machine a native variant was compiled for; `None` for portable
+    /// builds.
     #[serde(default)]
-    companions: Vec<String>,
+    native_cpu_flags: Option<Vec<String>>,
 }
 
 /// An engine present on disk.
@@ -61,8 +65,22 @@ pub struct InstalledEngine {
     pub library_dirs: Vec<PathBuf>,
     /// Built locally from source rather than downloaded.
     pub from_source: bool,
-    /// Names of the companion archives installed next to the engine (`cuda-runtime`).
+    /// Ids of the dependencies installed next to the engine (`cuda-runtime`).
+    pub dependencies: Vec<String>,
+    /// Same as [`InstalledEngine::dependencies`]; the name from before dependencies existed.
     pub companions: Vec<String>,
+    /// For a native build, the CPU features it was compiled for.
+    pub native_cpu_flags: Option<Vec<String>>,
+}
+
+impl InstalledEngine {
+    /// Whether this is a native build (ALK-SP-0011.R6) that needs a CPU feature `host_flags`
+    /// does not have, so it may crash with an illegal instruction on this machine.
+    pub fn native_stale(&self, host_flags: &[String]) -> bool {
+        self.native_cpu_flags
+            .as_ref()
+            .is_some_and(|built| built.iter().any(|f| !host_flags.contains(f)))
+    }
 }
 
 /// Knobs of [`install`].
@@ -86,6 +104,10 @@ pub struct InstallOptions {
     /// engine directory. They are large, so they are never installed implicitly. On an engine
     /// that is already installed without them, only the companions are fetched.
     pub with_runtime: bool,
+    /// Ids of optional dependencies to install (`--with <id>`).
+    pub with: Vec<String>,
+    /// CPU features recorded for a native build; the host's are detected when `None`.
+    pub cpu_flags: Option<Vec<String>>,
 }
 
 impl std::fmt::Debug for InstallOptions {
@@ -95,6 +117,7 @@ impl std::fmt::Debug for InstallOptions {
             .field("force", &self.force)
             .field("from_source", &self.from_source)
             .field("with_runtime", &self.with_runtime)
+            .field("with", &self.with)
             .finish_non_exhaustive()
     }
 }
@@ -119,8 +142,8 @@ pub async fn install(
     if !opts.force
         && let Some(done) = read_installed(&final_dir)
     {
-        if opts.with_runtime && !all_companions_installed(recipe, &host, &done) {
-            return add_companions(recipe, &host, engines_dir, &final_dir, opts, cancel).await;
+        if !all_dependencies_installed(recipe, &host, &done, opts) {
+            return add_dependencies(recipe, &host, engines_dir, &final_dir, opts, cancel).await;
         }
         return Ok(done);
     }
@@ -179,17 +202,14 @@ pub async fn install(
         let digest = fetch_and_unpack(asset, engines_dir, &partial, opts, cancel).await?;
         (asset.url.clone(), digest, asset.tofu)
     };
-    let mut companions = Vec::new();
-    if opts.with_runtime {
-        for c in recipe.companions_for(&host) {
-            if let Err(e) =
-                fetch_and_unpack(&c.as_asset(), engines_dir, &partial, opts, cancel).await
-            {
-                let _ = fs::remove_dir_all(&partial);
-                return Err(e);
-            }
-            companions.push(c.name.clone());
+    let mut dependencies = Vec::new();
+    for d in recipe.selected_dependencies(&host, &opts.with, opts.with_runtime) {
+        let target = partial.join(&d.dest);
+        if let Err(e) = fetch_and_unpack(&d.as_asset(), engines_dir, &target, opts, cancel).await {
+            let _ = fs::remove_dir_all(&partial);
+            return Err(e);
         }
+        dependencies.push(d.id.clone());
     }
 
     if !partial.join(&exe_rel).is_file() {
@@ -206,7 +226,12 @@ pub async fn install(
         tofu,
         from_source,
         library_dirs: recipe.library_dirs.clone(),
-        companions,
+        dependencies,
+        native_cpu_flags: (recipe.native && from_source).then(|| {
+            opts.cpu_flags
+                .clone()
+                .unwrap_or_else(alkahest_sysinfo::detect_cpu_flags)
+        }),
     };
     let marker_path = partial.join(MARKER_FILE);
     let json = serde_json::to_vec_pretty(&marker).map_err(|e| RecipeError::Archive {
@@ -286,17 +311,22 @@ async fn fetch_and_unpack(
     Ok(digest)
 }
 
-/// Whether every companion that applies to `host` is already recorded in `installed`.
-fn all_companions_installed(recipe: &Recipe, host: &Host, installed: &InstalledEngine) -> bool {
+/// Whether every dependency selected by `opts` for `host` is already recorded in `installed`.
+fn all_dependencies_installed(
+    recipe: &Recipe,
+    host: &Host,
+    installed: &InstalledEngine,
+    opts: &InstallOptions,
+) -> bool {
     recipe
-        .companions_for(host)
+        .selected_dependencies(host, &opts.with, opts.with_runtime)
         .iter()
-        .all(|c| installed.companions.contains(&c.name))
+        .all(|d| installed.dependencies.contains(&d.id))
 }
 
-/// Unpacks the missing companions into an engine that is already installed and records them in
-/// its marker (written last, so an interrupted run is simply retried).
-async fn add_companions(
+/// Unpacks the missing dependencies into an engine that is already installed and records them
+/// in its marker (written last, so an interrupted run is simply retried).
+async fn add_dependencies(
     recipe: &Recipe,
     host: &Host,
     engines_dir: &Path,
@@ -310,12 +340,12 @@ async fn add_companions(
         archive: marker_path.clone(),
         reason: e.to_string(),
     })?;
-    for c in recipe.companions_for(host) {
-        if marker.companions.contains(&c.name) {
+    for d in recipe.selected_dependencies(host, &opts.with, opts.with_runtime) {
+        if marker.dependencies.contains(&d.id) {
             continue;
         }
-        fetch_and_unpack(&c.as_asset(), engines_dir, dir, opts, cancel).await?;
-        marker.companions.push(c.name.clone());
+        fetch_and_unpack(&d.as_asset(), engines_dir, &dir.join(&d.dest), opts, cancel).await?;
+        marker.dependencies.push(d.id.clone());
     }
     let json = serde_json::to_vec_pretty(&marker).map_err(|e| RecipeError::Archive {
         archive: marker_path.clone(),
@@ -375,7 +405,8 @@ async fn install_venv(
         tofu: false,
         from_source: false,
         library_dirs: recipe.library_dirs.clone(),
-        companions: Vec::new(),
+        dependencies: Vec::new(),
+        native_cpu_flags: None,
     };
     let marker_path = final_dir.join(MARKER_FILE);
     let json = serde_json::to_vec_pretty(&marker).map_err(|e| RecipeError::Archive {
@@ -463,7 +494,9 @@ fn read_installed(dir: &Path) -> Option<InstalledEngine> {
         executable,
         library_dirs: m.library_dirs.iter().map(|d| dir.join(d)).collect(),
         from_source: m.from_source,
-        companions: m.companions,
+        dependencies: m.dependencies.clone(),
+        companions: m.dependencies,
+        native_cpu_flags: m.native_cpu_flags,
     })
 }
 

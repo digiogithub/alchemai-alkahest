@@ -87,6 +87,20 @@ targets = ["llama-server"]
 tools = ["git", "cmake", "ninja"]
 
 
+# Native variant (ALK-SP-0011.R6): source-only, never auto-selected; built for the host CPU by
+# `alkahest engines install llama-cpp --native`. Not portable to other CPUs.
+[variants."cpu-native"]
+accelerator = "cpu"
+native = true
+notes = "Compiled for this machine's CPU (GGML_NATIVE=ON); needs git, cmake and ninja; not portable."
+[variants."cpu-native".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_NATIVE=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
 [variants."cuda12.8"]
 accelerator = "cuda"
 cuda = "12.8"

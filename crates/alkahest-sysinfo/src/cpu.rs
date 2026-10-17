@@ -33,8 +33,11 @@ pub struct MemoryInfo {
     pub available_bytes: u64,
 }
 
-/// Collects the instruction set extensions that matter for llama.cpp style engines.
-pub(crate) fn detect_flags() -> Vec<String> {
+/// Collects the instruction set extensions that matter for llama.cpp style engines, sorted.
+///
+/// Cheap (no GPU probing), which is what a native engine build records as the CPU it was
+/// compiled for.
+pub fn detect_flags() -> Vec<String> {
     #[allow(unused_mut)]
     let mut flags: Vec<&'static str> = Vec::new();
     #[cfg(target_arch = "x86_64")]

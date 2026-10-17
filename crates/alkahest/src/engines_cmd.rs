@@ -51,6 +51,8 @@ pub fn run(action: &EnginesAction, loaded: &Loaded, json: bool) -> Result<ExitCo
             from_source,
             force,
             with_runtime,
+            with,
+            native,
         } => {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -65,6 +67,8 @@ pub fn run(action: &EnginesAction, loaded: &Loaded, json: bool) -> Result<ExitCo
                     from_source: *from_source,
                     force: *force,
                     with_runtime: *with_runtime,
+                    with,
+                    native: *native,
                 },
                 &engines_dir,
                 loaded,
@@ -139,23 +143,36 @@ fn availability(r: &Recipe, host: &Host, recommended: Option<&Recipe>) -> String
     s
 }
 
+/// The state column of an installed engine; a native build whose CPU features this host lacks
+/// is marked (ALK-SP-0011.R6).
+fn installed_state(e: &InstalledEngine, host_flags: &[String]) -> String {
+    let mut s = if e.native_cpu_flags.is_some() {
+        "installed (native build)".to_string()
+    } else if e.from_source {
+        "installed (source build)".to_string()
+    } else {
+        "installed".to_string()
+    };
+    if e.native_stale(host_flags) {
+        s.push_str(" - built for another CPU");
+    }
+    s
+}
+
 /// `engines ls`: installed engines first, then installable variants not installed yet.
 fn ls(catalog: &Catalog, engines_dir: &Path, json: bool) -> Result<ExitCode> {
     let host = Host::current();
     let system = alkahest_sysinfo::detect();
     let installed = installed_all(engines_dir);
 
+    let host_flags = alkahest_sysinfo::detect_cpu_flags();
     let mut listing = Listing::new(["engine", "version", "variant", "state", "path"]);
     for e in &installed {
         listing.push_row([
             e.id.clone(),
             e.tag.clone(),
             e.variant.clone(),
-            if e.from_source {
-                "installed (source build)".to_string()
-            } else {
-                "installed".to_string()
-            },
+            installed_state(e, &host_flags),
             e.executable.display().to_string(),
         ]);
     }
@@ -244,17 +261,34 @@ fn info(catalog: &Catalog, engine: &str, engines_dir: &Path, json: bool) -> Resu
             if !r.notes.is_empty() {
                 writeln!(out, "      {}", r.notes)?;
             }
-            for c in r.companions_for(&host) {
-                let size = c
+            if r.native {
+                writeln!(
+                    out,
+                    "      native build for this CPU: `alkahest engines install {} --native`",
+                    r.id
+                )?;
+            }
+            for d in r.dependencies_for(&host) {
+                let size = d
                     .size
                     .map(|b| format!(", {} MB", b / 1_000_000))
                     .unwrap_or_default();
-                writeln!(
-                    out,
-                    "      --with-runtime also installs {} ({}{size})",
-                    c.name,
-                    c.url.rsplit('/').next().unwrap_or(&c.url)
-                )?;
+                let file = d.url.rsplit('/').next().unwrap_or(&d.url);
+                if d.optional {
+                    writeln!(
+                        out,
+                        "      optional dependency {} ({file}{size}): --with {}{}",
+                        d.id,
+                        d.id,
+                        if d.id.starts_with("cuda-") {
+                            " or --with-runtime"
+                        } else {
+                            ""
+                        }
+                    )?;
+                } else {
+                    writeln!(out, "      installs dependency {} ({file}{size})", d.id)?;
+                }
             }
         }
     }
@@ -300,6 +334,8 @@ struct InstallArgs<'a> {
     from_source: bool,
     force: bool,
     with_runtime: bool,
+    with: &'a [String],
+    native: bool,
 }
 
 /// `alkahest engines install <id>`.
@@ -312,14 +348,32 @@ async fn install_cmd(
 ) -> Result<ExitCode> {
     let host = Host::current();
     let system = alkahest_sysinfo::detect();
-    let recipe = catalog.resolve(
-        args.engine,
-        args.version,
-        args.variant,
-        Some(&system),
-        &host,
-    )?;
-    if args.from_source && recipe.source.is_none() {
+    let recipe = if args.native {
+        // A native variant is never auto-selected: look for the one matching this machine in
+        // the requested version, else the newest version that has one.
+        catalog
+            .versions(args.engine)
+            .iter()
+            .filter(|v| args.version.is_none_or(|want| want == v.as_str()))
+            .find_map(|v| alkahest_recipes::select_native(&catalog.variants(args.engine, v), &system, &host))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "engine `{}` has no native variant for this machine; `alkahest engines info {}` lists its variants",
+                    args.engine,
+                    args.engine
+                )
+            })?
+    } else {
+        catalog.resolve(
+            args.engine,
+            args.version,
+            args.variant,
+            Some(&system),
+            &host,
+        )?
+    };
+    let from_source = args.from_source || recipe.native;
+    if from_source && recipe.source.is_none() {
         bail!(
             "{} {} ({}) has no source build steps in its recipe",
             recipe.id,
@@ -327,7 +381,7 @@ async fn install_cmd(
             recipe.variant
         );
     }
-    if !args.from_source && !recipe.installable_on(&host) {
+    if !from_source && !recipe.installable_on(&host) {
         bail!(
             "{} {} ({}) has no prebuilt archive for {}/{}; try `--from-source`",
             recipe.id,
@@ -363,8 +417,9 @@ async fn install_cmd(
     };
     let opts = InstallOptions {
         force: args.force,
-        from_source: args.from_source,
+        from_source,
         with_runtime: args.with_runtime,
+        with: args.with.to_vec(),
         fetch: FetchConfig {
             max_bytes_per_sec: loaded.config.pull.bandwidth_cap(),
             ..FetchConfig::default()
@@ -372,7 +427,7 @@ async fn install_cmd(
         progress: Some(progress),
         ..InstallOptions::default()
     };
-    if (args.from_source || recipe.needs_source_build(&host)) && !json {
+    if (from_source || recipe.needs_source_build(&host)) && !json {
         eprintln!(
             "building {} {} from source; this takes a while",
             recipe.id, recipe.tag
@@ -382,7 +437,12 @@ async fn install_cmd(
         .await
         .with_context(|| format!("installing {} ({})", recipe.id, recipe.variant))?;
     bar.finish_and_clear();
-    if args.with_runtime && recipe.companions_for(&host).is_empty() {
+    if args.with_runtime
+        && !recipe
+            .dependencies_for(&host)
+            .iter()
+            .any(|d| d.optional && d.id.starts_with("cuda-"))
+    {
         eprintln!(
             "note: {} ({}) has no runtime archive for {}/{}; --with-runtime had no effect",
             recipe.id, recipe.variant, host.os, host.arch

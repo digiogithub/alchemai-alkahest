@@ -42,6 +42,15 @@ pub fn extract(archive: &Path, format: ArchiveFormat, strip: usize, dest: &Path)
     match format {
         ArchiveFormat::TarGz => extract_tar_gz(archive, strip, dest),
         ArchiveFormat::Zip => extract_zip(archive, strip, dest),
+        ArchiveFormat::File => {
+            let name = archive
+                .file_name()
+                .ok_or_else(|| archive_err(archive, "no file name"))?;
+            let target = dest.join(name);
+            fs::copy(archive, &target)
+                .map(|_| ())
+                .map_err(|e| RecipeError::io(&target, e))
+        }
     }
 }
 
