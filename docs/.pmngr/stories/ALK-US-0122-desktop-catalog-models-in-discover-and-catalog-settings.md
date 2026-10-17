@@ -2,7 +2,7 @@
 id: ALK-US-0122
 type: story
 title: "Desktop: catalog models in Discover and catalog settings"
-status: backlog
+status: in_progress
 priority: medium
 parent: ALK-EP-0015
 milestone: ALK-M-0006
@@ -10,7 +10,8 @@ author: mcp
 labels: [catalog, desktop, design]
 estimate: 5
 created: 2026-10-17T18:30:04Z
-updated: 2026-10-17T18:30:04Z
+updated: 2026-10-17T19:49:54Z
+started: 2026-10-17T19:49:54Z
 ---
 
 ## Description
