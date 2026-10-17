@@ -2,14 +2,15 @@
 id: ALK-US-0064
 type: story
 title: Desktop crate scaffold
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0013
 milestone: ALK-M-0005
 labels: [desktop]
 estimate: 5
 created: 2026-10-16T22:42:43Z
-updated: 2026-10-16T22:52:07Z
+updated: 2026-10-17T02:06:40Z
+started: 2026-10-17T02:06:40Z
 links:
   - { kind: implements, target: ALK-SP-0008.R1 }
 ---

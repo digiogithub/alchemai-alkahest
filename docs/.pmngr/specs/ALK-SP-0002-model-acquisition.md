@@ -5,7 +5,7 @@ title: Model acquisition
 status: backlog
 labels: [pull, hf]
 created: 2026-10-16T22:37:33Z
-updated: 2026-10-16T23:54:14Z
+updated: 2026-10-17T01:54:43Z
 requirements:
   R1:
     status: backlog
@@ -27,11 +27,21 @@ requirements:
       code:
         - crates/alkahest-hf/src/pull.rs#select_files
         - crates/alkahest-hf/src/pull.rs#pull_hf
+        - crates/alkahest-hf/src/pull.rs#pull_hf_with
+        - crates/alkahest-hf/src/safetensors.rs#select_snapshot_files
+        - crates/alkahest-hf/src/safetensors.rs#pull_snapshot
+        - crates/alkahest-store/src/snapshot.rs#materialise_snapshot
       tests:
         - crates/alkahest-hf/tests/pull.rs#quant_selection_downloads_only_that_file_and_the_projector
         - crates/alkahest-hf/tests/pull.rs#default_pull_picks_q4_k_m_and_names_the_model_after_it
         - crates/alkahest-hf/tests/pull.rs#gated_repository_without_token_explains_how_to_authenticate
         - crates/alkahest-hf/src/pull.rs#shards_are_all_selected_by_any_shard_file
+        - crates/alkahest-hf/tests/safetensors.rs#safetensors_flag_downloads_the_snapshot_and_builds_the_directory
+        - crates/alkahest-hf/tests/safetensors.rs#repository_without_gguf_is_pulled_as_a_snapshot_automatically
+        - crates/alkahest-hf/tests/safetensors.rs#catalog_lists_the_snapshot_as_safetensors_for_vllm
+        - crates/alkahest-hf/tests/safetensors.rs#delete_and_gc_remove_the_snapshot_view
+        - crates/alkahest-hf/tests/safetensors.rs#corrupt_lfs_file_is_rejected
+        - crates/alkahest-hf/tests/safetensors.rs#real_hub_pull_of_a_tiny_safetensors_repository
   R3:
     status: backlog
     trace:
