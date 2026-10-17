@@ -43,6 +43,9 @@ use crate::admission::{
 use crate::backend::{EngineInstance, ModelBackend, ResolvedModel};
 use crate::error::{Result, SchedError};
 use crate::memory::{DEFAULT_VRAM_FRACTION, MemoryEstimate};
+use crate::metrics::{
+    ModelState, ModelStatus, Processor, SchedulerSnapshot, Usage, render_prometheus, rfc3339,
+};
 
 /// Context length per slot when neither the request nor the model sets one (Ollama's default).
 pub const DEFAULT_CONTEXT_LENGTH: u64 = 4096;
@@ -222,6 +225,18 @@ struct Runner {
     slots: Arc<Semaphore>,
     /// Leases granted over the runner's life.
     requests_total: AtomicU64,
+    /// Token counters and load timing for the status views.
+    stats: Mutex<RunnerStats>,
+}
+
+/// Counters of one runner reported in [`ModelStatus`].
+#[derive(Debug, Default)]
+struct RunnerStats {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    tokens_per_second: Option<f64>,
+    load_duration: Option<Duration>,
+    loaded_at: Option<std::time::SystemTime>,
 }
 
 impl Runner {
@@ -373,6 +388,14 @@ struct Inner {
     queued: AtomicUsize,
     /// Requests refused with "server busy".
     rejected: AtomicU64,
+    loads: AtomicU64,
+    load_failures: AtomicU64,
+    evictions: AtomicU64,
+    crashes: AtomicU64,
+    /// Memory reported by the probe at the last load or refresh.
+    last_memory: Mutex<Option<MemorySnapshot>>,
+    /// Bumped on every state change (status streams wait on it).
+    events: watch::Sender<u64>,
     backend: Arc<dyn ModelBackend>,
     probe: Arc<dyn MemoryProbe>,
     opts: SchedulerOptions,
@@ -390,6 +413,12 @@ impl Inner {
     fn wake(&self) {
         self.changed.notify_waiters();
         let _ = self.reaper.try_send(());
+        self.bump();
+    }
+
+    /// Tells status subscribers that something changed.
+    fn bump(&self) {
+        self.events.send_modify(|v| *v = v.wrapping_add(1));
     }
 
     /// Unloads every idle model whose keep-alive passed; returns the next deadline.
@@ -451,6 +480,7 @@ impl Inner {
                 st.entries.remove(&runner.key);
                 if exit.crashed() {
                     tracing::warn!(model = %runner.model.name, %exit, "engine crashed");
+                    self.crashes.fetch_add(1, Ordering::Relaxed);
                     let now = std::time::Instant::now();
                     let policy = self.opts.restart;
                     let slot = st
@@ -498,6 +528,7 @@ async fn load(inner: &Arc<Inner>, runner: &Arc<Runner>) -> Result<Arc<dyn Engine
         tokio::time::sleep(delay).await;
     }
     let _gate = inner.load_gate.lock().await;
+    let started = Instant::now();
     let estimate = admit(inner, runner).await?;
     let mut req = runner.launch.clone();
     req.settings.gpu_layers = launch_gpu_layers(&runner.model, &estimate);
@@ -523,6 +554,7 @@ async fn load(inner: &Arc<Inner>, runner: &Arc<Runner>) -> Result<Arc<dyn Engine
         m.measured_ram = measured_ram;
         m.measured_vram = measured_vram;
     }
+    runner.stats.lock().load_duration = Some(started.elapsed());
     Ok(engine)
 }
 
@@ -551,6 +583,7 @@ async fn admit(inner: &Arc<Inner>, runner: &Arc<Runner>) -> Result<MemoryEstimat
         tokio::pin!(notified);
         notified.as_mut().enable();
         let snap = inner.probe.snapshot();
+        *inner.last_memory.lock() = Some(snap);
         let step = {
             let mut st = inner.state.lock();
             if st.current(runner).is_none() {
@@ -656,6 +689,7 @@ async fn admit(inner: &Arc<Inner>, runner: &Arc<Runner>) -> Result<MemoryEstimat
                 return Ok(est);
             }
             Admission::Evict(stop) => {
+                inner.evictions.fetch_add(1, Ordering::Relaxed);
                 inner.wake();
                 if let Some(stop) = stop {
                     stop.await;
@@ -686,6 +720,8 @@ fn finish_load(inner: &Arc<Inner>, runner: &Arc<Runner>, result: Result<Arc<dyn 
                 if e.is_idle() {
                     e.arm_expiry(now);
                 }
+                runner.stats.lock().loaded_at = Some(std::time::SystemTime::now());
+                inner.loads.fetch_add(1, Ordering::Relaxed);
                 runner.status.send_replace(RunnerStatus::Ready);
                 spawn_exit_watch(inner, runner, engine.as_ref());
                 tracing::info!(model = %runner.model.name, url = %engine.base_url(), "model loaded");
@@ -696,6 +732,7 @@ fn finish_load(inner: &Arc<Inner>, runner: &Arc<Runner>, result: Result<Arc<dyn 
             }
             (Err(err), current) => {
                 tracing::warn!(model = %runner.model.name, error = %err, "model load failed");
+                inner.load_failures.fetch_add(1, Ordering::Relaxed);
                 if current.is_some() {
                     st.entries.remove(&runner.key);
                 }
@@ -856,6 +893,12 @@ impl Scheduler {
         let inner = Arc::new(Inner {
             queued: AtomicUsize::new(0),
             rejected: AtomicU64::new(0),
+            loads: AtomicU64::new(0),
+            load_failures: AtomicU64::new(0),
+            evictions: AtomicU64::new(0),
+            crashes: AtomicU64::new(0),
+            last_memory: Mutex::new(None),
+            events: watch::Sender::new(0),
             backend,
             probe,
             load_gate: tokio::sync::Mutex::new(()),
@@ -954,6 +997,7 @@ impl Scheduler {
                                         if let Some(mut g) = guard.take() {
                                             g.release_locked(st);
                                         }
+                                        inner.bump();
                                         return Ok(Lease {
                                             inner: Arc::clone(inner),
                                             runner,
@@ -1018,6 +1062,7 @@ impl Scheduler {
                             load_task: Mutex::new(None),
                             slots: Arc::new(Semaphore::new(inner.opts.parallel() as usize)),
                             requests_total: AtomicU64::new(0),
+                            stats: Mutex::new(RunnerStats::default()),
                         });
                         st.entries.insert(
                             key,
@@ -1097,6 +1142,84 @@ impl Scheduler {
                 }
             }
         }
+    }
+
+    /// Runtime status of every loaded or loading model plus global counters
+    /// (ALK-SP-0004.R7). Cheap: uses the last memory samples; call
+    /// [`Scheduler::refresh_usage`] first for fresh RSS / VRAM figures.
+    pub fn snapshot(&self) -> SchedulerSnapshot {
+        let inner = &self.inner;
+        let now = Instant::now();
+        let wall = std::time::SystemTime::now();
+        let mut models: Vec<ModelStatus> = {
+            let st = inner.state.lock();
+            st.entries
+                .values()
+                .map(|e| model_status(e, &inner.opts, now, wall))
+                .collect()
+        };
+        models.sort_by(|a, b| a.name.cmp(&b.name));
+        SchedulerSnapshot {
+            models,
+            queued: inner.queued.load(Ordering::Relaxed),
+            max_queue: inner.opts.max_queue.max(1) as usize,
+            rejected_total: inner.rejected.load(Ordering::Relaxed),
+            loads_total: inner.loads.load(Ordering::Relaxed),
+            load_failures_total: inner.load_failures.load(Ordering::Relaxed),
+            evictions_total: inner.evictions.load(Ordering::Relaxed),
+            crashes_total: inner.crashes.load(Ordering::Relaxed),
+            memory: *inner.last_memory.lock(),
+        }
+    }
+
+    /// Samples RSS (process tree) and per-process VRAM of every ready engine and the free
+    /// memory. Blocking work (process table scan, driver calls): run it on the blocking pool
+    /// before a `ps` answer or on a timer. Measurements above the estimate are also charged by
+    /// admission from then on.
+    pub fn refresh_usage(&self) {
+        let engines: Vec<(Arc<Runner>, Arc<dyn EngineInstance>)> = {
+            let st = self.inner.state.lock();
+            st.entries
+                .values()
+                .filter_map(|e| {
+                    e.runner
+                        .engine
+                        .get()
+                        .map(|en| (Arc::clone(&e.runner), Arc::clone(en)))
+                })
+                .collect()
+        };
+        let samples: Vec<(Arc<Runner>, Option<u64>, Option<u64>)> = engines
+            .into_iter()
+            .map(|(r, e)| {
+                let rss = e.resource_usage().map(|u| u.rss_bytes);
+                let vram = e.pid().and_then(|pid| self.inner.probe.process_vram(pid));
+                (r, rss, vram)
+            })
+            .collect();
+        let snap = self.inner.probe.snapshot();
+        *self.inner.last_memory.lock() = Some(snap);
+        let mut st = self.inner.state.lock();
+        for (runner, rss, vram) in samples {
+            if let Some(m) = st.current(&runner).and_then(|e| e.memory.as_mut()) {
+                m.measured_ram = rss.or(m.measured_ram);
+                m.measured_vram = vram.or(m.measured_vram);
+            }
+        }
+        drop(st);
+        self.inner.bump();
+    }
+
+    /// [`Scheduler::snapshot`] in the Prometheus text format, for the API's `/metrics` route.
+    pub fn prometheus(&self) -> String {
+        render_prometheus(&self.snapshot())
+    }
+
+    /// A receiver whose value changes on every scheduler state change (load, unload, request
+    /// start and end, crash): the admin API's status stream (SSE) re-sends the snapshot on
+    /// each change.
+    pub fn subscribe(&self) -> watch::Receiver<u64> {
+        self.inner.events.subscribe()
     }
 
     /// Requests waiting for a model (load or slot) across all models.
@@ -1280,6 +1403,93 @@ impl Lease {
                 };
             }
         }
+    }
+}
+
+impl Lease {
+    /// Reports the token counts of the request (prompt, generated, generation time) for the
+    /// runtime metrics: totals and tokens per second.
+    pub fn record_usage(&self, usage: Usage) {
+        let mut stats = self.runner.stats.lock();
+        stats.prompt_tokens = stats.prompt_tokens.saturating_add(usage.prompt_tokens);
+        stats.completion_tokens = stats
+            .completion_tokens
+            .saturating_add(usage.completion_tokens);
+        if let Some(t) = usage.generation_time.filter(|t| !t.is_zero()) {
+            stats.tokens_per_second = Some(usage.completion_tokens as f64 / t.as_secs_f64());
+        }
+        drop(stats);
+        self.inner.bump();
+    }
+}
+
+/// Builds the status row of one entry.
+fn model_status(
+    e: &Entry,
+    opts: &SchedulerOptions,
+    now: Instant,
+    wall: std::time::SystemTime,
+) -> ModelStatus {
+    let r = &e.runner;
+    let engine = r.engine.get();
+    let stats = r.stats.lock();
+    let (ram, vram, est_ram, est_vram, gpu_layers, total_layers, rss, pvram) = match &e.memory {
+        Some(m) => (
+            m.ram(),
+            m.vram(),
+            m.estimate.ram_bytes,
+            m.estimate.vram_bytes,
+            m.estimate.gpu_layers,
+            m.estimate.total_layers,
+            m.measured_ram,
+            m.measured_vram,
+        ),
+        None => (0, 0, 0, 0, 0, 0, None, None),
+    };
+    let processor = Processor::from_bytes(ram, vram);
+    let expires_in = e
+        .expires_at
+        .filter(|_| e.is_idle() && e.phase == Phase::Ready)
+        .map(|t| t.saturating_duration_since(now));
+    ModelStatus {
+        name: r.model.name.clone(),
+        key: r.key.clone(),
+        digest: r.model.digest.clone(),
+        engine: r.model.engine,
+        dialect: r.model.dialect,
+        state: match (e.phase, e.stale) {
+            (Phase::Loading, _) => ModelState::Loading,
+            (Phase::Ready, false) => ModelState::Ready,
+            (Phase::Ready, true) => ModelState::Draining,
+        },
+        pid: engine.and_then(|en| en.pid()),
+        port: engine.map(|en| en.port()),
+        context_length: r.fingerprint.context,
+        num_parallel: opts.parallel(),
+        gpu_layers,
+        total_layers,
+        processor,
+        processor_label: processor.label(),
+        ram_bytes: ram,
+        vram_bytes: vram,
+        size_bytes: ram.saturating_add(vram),
+        estimated_ram_bytes: est_ram,
+        estimated_vram_bytes: est_vram,
+        rss_bytes: rss,
+        process_vram_bytes: pvram,
+        keep_alive: e.keep_alive.to_string(),
+        expires_at: expires_in.map(|d| rfc3339(wall + d)),
+        expires_in_ms: expires_in.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+        active_requests: e.active,
+        queued_requests: e.waiting,
+        requests_total: r.requests_total.load(Ordering::Relaxed),
+        prompt_tokens_total: stats.prompt_tokens,
+        completion_tokens_total: stats.completion_tokens,
+        tokens_per_second: stats.tokens_per_second,
+        loaded_at: stats.loaded_at.map(rfc3339),
+        load_duration_ms: stats
+            .load_duration
+            .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
     }
 }
 
