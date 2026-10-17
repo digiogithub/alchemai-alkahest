@@ -2,14 +2,15 @@
 id: ALK-US-0051
 type: story
 title: PrismML llama.cpp recipe for Bonsai ternary models
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0010
 milestone: ALK-M-0004
 labels: [recipes, bonsai]
 estimate: 3
 created: 2026-10-16T22:41:52Z
-updated: 2026-10-16T22:41:57Z
+updated: 2026-10-17T00:55:10Z
+started: 2026-10-17T00:55:10Z
 links:
   - { kind: implements, target: ALK-SP-0003.R2 }
   - { kind: implements, target: ALK-SP-0003.R4 }

@@ -5,12 +5,23 @@ title: Service management
 status: backlog
 labels: [service]
 created: 2026-10-16T22:37:39Z
-updated: 2026-10-17T00:39:01Z
+updated: 2026-10-17T00:54:11Z
 requirements:
   R1:
     status: backlog
+    trace:
+      code: [crates/alkahest/src/service_cmd.rs#run]
+      tests:
+        - crates/alkahest/tests/service.rs#system_install_into_a_root_writes_the_unit_and_runs_nothing
+        - crates/alkahest/tests/service.rs#status_json_reports_the_listen_address
   R2:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest/src/service_cmd.rs#plan_install
+        - packaging/systemd/alkahest.service
+      tests:
+        - crates/alkahest/src/service_cmd.rs#system_unit_has_restart_always_and_groups
   R3:
     status: backlog
   R4:

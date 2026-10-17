@@ -2,13 +2,14 @@
 id: ALK-T-0222
 type: task
 title: "Server wiring: FsLocator with bundled engine roots"
-status: backlog
+status: done
 priority: medium
 parent: ALK-US-0025
 author: mcp
 labels: [engine, recipes]
 created: 2026-10-17T00:18:07Z
-updated: 2026-10-17T00:19:24Z
+updated: 2026-10-17T00:53:53Z
+closed: 2026-10-17T00:53:53Z
 inbox:
   status: accepted
   source: mcp
