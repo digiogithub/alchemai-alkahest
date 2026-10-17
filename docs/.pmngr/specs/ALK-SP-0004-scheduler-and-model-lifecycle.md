@@ -5,7 +5,7 @@ title: Scheduler and model lifecycle
 status: backlog
 labels: [sched]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-17T01:44:49Z
+updated: 2026-10-17T04:48:10Z
 requirements:
   R1:
     status: backlog
@@ -35,16 +35,25 @@ requirements:
     trace:
       code:
         - crates/alkahest-sched/src/memory.rs#MemoryEstimate
+        - crates/alkahest-sched/src/memory.rs#ModelProfile
+        - crates/alkahest-sched/src/memory.rs#estimate_ggml
         - crates/alkahest-sched/src/admission.rs#placement
         - crates/alkahest-sched/src/admission.rs#pick_victim
         - crates/alkahest-sched/src/admission.rs#SystemMemoryProbe
         - crates/alkahest-sched/src/scheduler.rs#admit
+        - crates/alkahest-sysinfo/src/memory.rs#MemoryMonitor
+        - crates/alkahest-sysinfo/src/nvidia.rs#Session
       tests:
         - crates/alkahest-sched/tests/memory.rs#admission_uses_the_fraction_of_free_memory
+        - crates/alkahest-sched/tests/memory.rs#hybrid_model_keeps_kv_only_in_attention_blocks_and_counts_recurrent_state
+        - crates/alkahest-sched/tests/memory.rs#encoder_only_model_has_no_kv_cache
+        - crates/alkahest-sched/tests/memory.rs#tied_embeddings_put_a_copy_of_the_input_embedding_on_the_gpu
+        - crates/alkahest-sched/tests/memory.rs#whisper_estimate_follows_the_published_memory_table
         - crates/alkahest-sched/tests/admission.rs#eviction
         - crates/alkahest-sched/tests/admission.rs#busy_models_until_the_timeout_give_503_with_the_estimate
         - crates/alkahest-sched/tests/admission.rs#max_loaded_evicts_least_recently_used_idle_model
         - crates/alkahest-sched/tests/admission.rs#automatic_gpu_layers_offload_what_fits
+        - crates/alkahest/tests/gpu_vram.rs#nvml_reports_the_vram_of_a_cuda_llama_server
   R4:
     status: backlog
     trace:

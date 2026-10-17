@@ -179,7 +179,9 @@ async fn estimator_matches_llama_server_buffers() {
                 },
             );
             let real_weights = sum_buffers(&log, "model");
-            let real_kv = sum_buffers(&log, "KV");
+            // Hybrid models keep their recurrent state in a separate "RS" buffer; the estimator
+            // counts it with the KV cache, so compare the sum.
+            let real_kv = sum_buffers(&log, "KV") + sum_buffers(&log, "RS");
             let real_compute = sum_buffers(&log, "compute");
             for (part, e, r) in [
                 ("weights", est.weights_bytes as f64, real_weights),

@@ -12,10 +12,15 @@ repository = "https://github.com/digiogithub/alkahest"
 rust-version = "1.98"
 publish = false
 
+# Release profile (ALK-US-0078). Fat LTO with one codegen unit and stripped symbols took the
+# headless binary from 25.8 to 20.0 MiB (thin LTO: 21.3 MiB; opt-level "s" would reach 13.8 MiB
+# but slows hashing and JSON paths, so it stays at 3). `panic = "abort"` is deliberately NOT
+# set: the API server relies on tower-http's `CatchPanicLayer` to turn a handler panic into a
+# 500 instead of killing every in-flight request and the engines it supervises.
 [profile.release]
-lto = "thin"
+lto = "fat"
 codegen-units = 1
-strip = "debuginfo"
+strip = "symbols"
 
 [workspace.lints.rust]
 # Denied, not forbidden: the NVML loader (alkahest-sysinfo) and memory-mapped GGUF reads

@@ -2,13 +2,14 @@
 id: ALK-T-0223
 type: task
 title: Per-process VRAM via NVML for scheduler metrics and admission
-status: backlog
+status: done
 priority: medium
 parent: ALK-US-0085
 author: mcp
 labels: [sysinfo, sched]
 created: 2026-10-17T01:08:40Z
-updated: 2026-10-17T01:11:43Z
+updated: 2026-10-17T04:47:50Z
+closed: 2026-10-17T04:47:50Z
 inbox:
   status: accepted
   source: mcp

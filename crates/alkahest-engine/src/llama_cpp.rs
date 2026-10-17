@@ -375,6 +375,7 @@ impl Engine for LlamaCppEngine {
 
     fn prepare(&self, req: &LaunchRequest, install: &EngineInstall) -> Result<LaunchSpec> {
         self.check(req)?;
+        install.check_runtime()?;
         let mut spec =
             LaunchSpec::new(self.id, &install.binary, req.host, req.port, self.dialect());
         spec.working_dir = install.root.clone();

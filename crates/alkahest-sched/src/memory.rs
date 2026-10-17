@@ -11,6 +11,10 @@
 //!   (`token_embd*`, a lookup that stays in RAM) and the output head (everything else);
 //! * KV cache: `cells * n_head_kv * (key_len * bits_k + value_len * bits_v) / 8` per block,
 //!   where `cells = ctx * num_parallel` and block `i` of the cache lives where block `i` runs;
+//! * hybrid and recurrent architectures (`qwen35`, Mamba): only the blocks with full attention
+//!   have a KV cache; the others keep a fixed recurrent state per sequence, which is sized from
+//!   the `ssm.*` metadata and counted with the KV cache ([`MemoryEstimate::kv_bytes`]);
+//! * encoder-only models (`attention.causal = false`, BERT-like embedders) have no KV cache;
 //! * compute buffer: activations plus logits, from batch size and vocabulary, and (without flash
 //!   attention) the attention score matrix, which makes it an upper bound for non-FA builds;
 //! * mmproj: projector weights plus a fixed encoder graph, always on the GPU when one exists;
@@ -20,7 +24,7 @@
 //! The calibration harness against real `llama-server` measurements (ALK-T-0030) tunes the
 //! heuristic constants below; the structure is exact.
 
-use alkahest_gguf::Gguf;
+use alkahest_gguf::{Gguf, Value};
 
 /// Default share of free VRAM the scheduler is willing to use (Ollama-like 80% rule).
 pub const DEFAULT_VRAM_FRACTION: f64 = 0.8;
@@ -113,6 +117,22 @@ pub struct ModelProfile {
     pub input_weight_bytes: u64,
     /// Output head bytes (final norm and `output.weight`; follows the last blocks onto the GPU).
     pub output_weight_bytes: u64,
+    /// Bytes of the input embedding that the output head reuses (tied embeddings: no
+    /// `output.weight` tensor). The same file bytes, so they are not part of
+    /// [`Self::weights_bytes`], but the output head runs where the last blocks run and
+    /// llama.cpp then holds a GPU copy next to the CPU-mapped input embedding (measured:
+    /// tev1:0.8b has 257.66 MiB `CPU_Mapped` and 763.78 MiB `CUDA0` for a 763.78 MiB file).
+    pub output_tied_bytes: u64,
+    /// Which blocks have a KV cache (full attention). Empty means every block has one (plain
+    /// decoder models); otherwise one entry per block, `false` for recurrent blocks of hybrid
+    /// architectures.
+    pub attention_blocks: Vec<bool>,
+    /// Causal attention. `false` for encoder-only models (BERT, nomic-bert, ...), which run
+    /// without any KV cache.
+    pub causal: bool,
+    /// Recurrent state of one recurrent block for one sequence (`conv` plus `ssm` state, F32);
+    /// 0 for models without recurrent blocks.
+    pub recurrent_state_bytes: u64,
 }
 
 impl ModelProfile {
@@ -131,13 +151,30 @@ impl ModelProfile {
         let embedding_length = g
             .embedding_length()
             .ok_or(EstimateError::MissingMetadata("embedding_length"))?;
-        let head_count_kv = g.head_count_kv().unwrap_or(head_count);
+        let arch = g.architecture().unwrap_or_default();
+        let causal = g
+            .get(&format!("{arch}.attention.causal"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let attention_blocks = attention_blocks(g, arch, block_count as usize);
+        // Hybrid models list 0 kv heads for their recurrent blocks, so take the first block
+        // that attends rather than the first block.
+        let head_count_kv = per_block_u64(g, arch, "attention.head_count_kv")
+            .and_then(|v| v.into_iter().find(|&h| h > 0))
+            .or_else(|| g.head_count_kv())
+            .unwrap_or(head_count);
+        let recurrent_state_bytes = if attention_blocks.contains(&false) {
+            recurrent_state_bytes(g, arch)
+        } else {
+            0
+        };
         let default_len = embedding_length / head_count.max(1);
         let key_length = g.arch_u64("attention.key_length").unwrap_or(default_len);
         let value_length = g.arch_u64("attention.value_length").unwrap_or(default_len);
 
         let mut blocks = vec![0u64; block_count as usize];
         let (mut input, mut output) = (0u64, 0u64);
+        let has_output_weight = g.tensors.iter().any(|t| t.name == "output.weight");
         for t in &g.tensors {
             let bytes = t.byte_size().unwrap_or(0);
             if let Some(idx) = t
@@ -170,7 +207,23 @@ impl ModelProfile {
             block_weight_bytes: blocks,
             input_weight_bytes: input,
             output_weight_bytes: output,
+            output_tied_bytes: if has_output_weight { 0 } else { input },
+            attention_blocks,
+            causal,
+            recurrent_state_bytes,
         })
+    }
+
+    /// Whether block `i` keeps a KV cache.
+    pub fn has_kv(&self, i: usize) -> bool {
+        self.causal && self.attention_blocks.get(i).copied().unwrap_or(true)
+    }
+
+    /// Whether block `i` keeps a recurrent state (a block of a hybrid model without attention).
+    pub fn has_recurrent_state(&self, i: usize) -> bool {
+        self.recurrent_state_bytes > 0
+            && self.causal
+            && !self.attention_blocks.get(i).copied().unwrap_or(true)
     }
 
     /// Total weight bytes.
@@ -181,6 +234,74 @@ impl ModelProfile {
             .saturating_add(self.input_weight_bytes)
             .saturating_add(self.output_weight_bytes)
     }
+}
+
+/// An array metadata value as one number per block; `None` when the key is missing, is a
+/// scalar, or the array was too large to keep.
+fn per_block_u64(g: &Gguf, arch: &str, suffix: &str) -> Option<Vec<u64>> {
+    match g.get(&format!("{arch}.{suffix}"))? {
+        Value::Array { items, .. } if !items.is_empty() => {
+            items.iter().map(Value::as_u64).collect()
+        }
+        _ => None,
+    }
+}
+
+/// Which of `n` blocks have full attention, or empty when all of them do.
+///
+/// Sources, in order: an explicit `attention.recurrent_layers` flag per block; a per-block
+/// `attention.head_count_kv` with zeros for the blocks without attention; and
+/// `full_attention_interval` (llama.cpp's qwen3next / qwen35: block `i` attends when
+/// `(i + 1) % interval == 0`).
+fn attention_blocks(g: &Gguf, arch: &str, n: usize) -> Vec<bool> {
+    if let Some(Value::Array { items, .. }) = g.get(&format!("{arch}.attention.recurrent_layers"))
+        && items.len() == n
+    {
+        let flags: Vec<bool> = items
+            .iter()
+            .map(|v| {
+                !(v.as_bool()
+                    .unwrap_or_else(|| v.as_u64().is_some_and(|x| x != 0)))
+            })
+            .collect();
+        return normalise_mask(flags);
+    }
+    if let Some(heads) = per_block_u64(g, arch, "attention.head_count_kv")
+        && heads.len() == n
+    {
+        return normalise_mask(heads.iter().map(|&h| h > 0).collect());
+    }
+    match g.arch_u64("full_attention_interval") {
+        Some(k) if k > 1 => normalise_mask((0..n as u64).map(|i| (i + 1) % k == 0).collect()),
+        _ => Vec::new(),
+    }
+}
+
+/// An all-true mask carries no information; represent it as empty.
+fn normalise_mask(mask: Vec<bool>) -> Vec<bool> {
+    if mask.iter().all(|&b| b) {
+        Vec::new()
+    } else {
+        mask
+    }
+}
+
+/// Recurrent state of one block for one sequence, from the `ssm.*` metadata, in bytes.
+///
+/// llama.cpp keeps a convolution state of `(conv_kernel - 1) * (inner + 2 * groups * state)`
+/// and a scan state of `state * inner` elements per recurrent block, both F32. Missing
+/// metadata gives 0 (nothing is added).
+fn recurrent_state_bytes(g: &Gguf, arch: &str) -> u64 {
+    let get = |k: &str| g.get_u64(&format!("{arch}.ssm.{k}"));
+    let (Some(kernel), Some(inner), Some(state)) =
+        (get("conv_kernel"), get("inner_size"), get("state_size"))
+    else {
+        return 0;
+    };
+    let groups = get("group_count").unwrap_or(0);
+    let conv = kernel.saturating_sub(1) * (inner + 2 * groups * state);
+    let scan = state * inner;
+    (conv + scan) * 4
 }
 
 /// The configuration an estimate is made for.
@@ -261,7 +382,8 @@ impl MemoryEstimate {
     }
 }
 
-/// KV cache bytes of one block for `cfg`.
+/// KV cache bytes of one block that has a cache, for `cfg`. Blocks without one (recurrent
+/// blocks, encoder-only models) are skipped by [`ModelProfile::has_kv`] in [`estimate`].
 pub fn kv_bytes_per_layer(p: &ModelProfile, cfg: &EstimateConfig) -> u64 {
     // llama.cpp rounds each sequence's cache up to a multiple of 256 cells (measured on
     // b11669, docs/research/memory-estimator-calibration.md).
@@ -276,16 +398,39 @@ pub fn kv_bytes_per_layer(p: &ModelProfile, cfg: &EstimateConfig) -> u64 {
     (cells as f64 * per_cell_bits / 8.0).ceil() as u64
 }
 
+/// Cache bytes of block `i`: its KV cache, or the recurrent state of a block without
+/// attention, or 0.
+fn state_bytes(p: &ModelProfile, cfg: &EstimateConfig, i: usize, kv_layer: u64) -> u64 {
+    if p.has_kv(i) {
+        kv_layer
+    } else if p.has_recurrent_state(i) {
+        p.recurrent_state_bytes
+            .saturating_mul(u64::from(cfg.num_parallel.max(1)))
+    } else {
+        0
+    }
+}
+
 /// Compute graph bytes: activations, logits, and the attention scores without flash attention.
 pub fn compute_buffer_bytes(p: &ModelProfile, cfg: &EstimateConfig) -> u64 {
-    let ub = u64::from(cfg.batch_size.max(1));
+    let mut ub = u64::from(cfg.batch_size.max(1));
     let cells = cfg
         .context_length
         .saturating_mul(u64::from(cfg.num_parallel.max(1)));
     // F32 activations: a few embedding-wide tensors per token, plus one logits row per slot
     // (llama-server only materialises logits for the sampled positions).
-    let activations =
-        4 * ub * 4 * p.embedding_length + 4 * p.vocab_size * u64::from(cfg.num_parallel.max(1));
+    // Encoder-only models see a whole sequence in one micro-batch (llama-server raises the
+    // batch to the context length for embeddings) and keep every layer's intermediate
+    // tensors of the full sequence alive: measured on nomic-bert as 76 bytes per token and
+    // embedding column (19 F32), against 16 for decoders.
+    let width_factor = if p.causal {
+        4
+    } else {
+        ub = ub.max(cfg.context_length);
+        19
+    };
+    let activations = 4 * ub * width_factor * p.embedding_length
+        + 4 * p.vocab_size * u64::from(cfg.num_parallel.max(1));
     let scores = if cfg.flash_attention {
         0
     } else {
@@ -298,6 +443,7 @@ pub fn compute_buffer_bytes(p: &ModelProfile, cfg: &EstimateConfig) -> u64 {
 pub fn estimate(p: &ModelProfile, cfg: &EstimateConfig) -> MemoryEstimate {
     let n = p.block_count as usize;
     let kv_layer = kv_bytes_per_layer(p, cfg);
+    let state: Vec<u64> = (0..n).map(|i| state_bytes(p, cfg, i, kv_layer)).collect();
     let compute = compute_buffer_bytes(p, cfg);
     let mmproj = cfg
         .mmproj_bytes
@@ -317,14 +463,15 @@ pub fn estimate(p: &ModelProfile, cfg: &EstimateConfig) -> MemoryEstimate {
             (c, c > 0)
         }
         GpuLayers::Auto => {
+            let out_cost = p.output_weight_bytes.saturating_add(p.output_tied_bytes);
             let mut left = budget.saturating_sub(fixed_gpu);
-            if left < p.output_weight_bytes || n == 0 {
+            if left < out_cost || n == 0 {
                 (0, false)
             } else {
-                left -= p.output_weight_bytes;
+                left -= out_cost;
                 let mut count = 0usize;
                 for i in (0..n).rev() {
-                    let cost = p.block_weight_bytes[i].saturating_add(kv_layer);
+                    let cost = p.block_weight_bytes[i].saturating_add(state[i]);
                     if cost > left {
                         break;
                     }
@@ -344,15 +491,23 @@ pub fn estimate(p: &ModelProfile, cfg: &EstimateConfig) -> MemoryEstimate {
         .iter()
         .fold(0u64, |a, &b| a.saturating_add(b));
     let output_gpu = if output_on_gpu {
-        p.output_weight_bytes
+        p.output_weight_bytes.saturating_add(p.output_tied_bytes)
     } else {
         0
     };
-    let output_cpu = p.output_weight_bytes - output_gpu;
+    let output_cpu = if output_on_gpu {
+        0
+    } else {
+        p.output_weight_bytes
+    };
 
     let on_gpu = gpu_blocks > 0 || output_on_gpu;
-    let gpu_kv = kv_layer.saturating_mul(gpu_blocks as u64);
-    let cpu_kv = kv_layer.saturating_mul((n - gpu_blocks) as u64);
+    let gpu_kv = state[first_gpu..]
+        .iter()
+        .fold(0u64, |a, &b| a.saturating_add(b));
+    let cpu_kv = state[..first_gpu]
+        .iter()
+        .fold(0u64, |a, &b| a.saturating_add(b));
 
     let vram = if on_gpu {
         gpu_weights
@@ -377,12 +532,75 @@ pub fn estimate(p: &ModelProfile, cfg: &EstimateConfig) -> MemoryEstimate {
 
     MemoryEstimate {
         weights_bytes: p.weights_bytes(),
-        kv_bytes: kv_layer.saturating_mul(n as u64),
+        kv_bytes: gpu_kv.saturating_add(cpu_kv),
         compute_bytes: compute,
         mmproj_bytes: mmproj,
         total_layers: p.block_count,
         gpu_layers: gpu_blocks as u32,
         output_on_gpu,
+        vram_bytes: vram,
+        ram_bytes: ram,
+    }
+}
+
+/// ggml engines that carry no GGUF architecture metadata the estimator can read: the memory
+/// of a model is its weights file plus a documented overhead (ALK-US-0100).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GgmlWorkload {
+    /// whisper.cpp speech to text.
+    Whisper,
+    /// stable-diffusion.cpp image generation at the default 512 x 512 / 1024 x 1024 sizes.
+    Image,
+    /// stable-diffusion.cpp video generation (frames multiply the latent and the compute graph).
+    Video,
+}
+
+impl GgmlWorkload {
+    /// `(numerator, denominator, fixed bytes)` of `extra = weights * n / d + fixed`.
+    ///
+    /// * whisper: `1.3 * weights + 200 MiB`, fitted to the memory table of the whisper.cpp
+    ///   README (tiny 273 MB, base 388, small 852, medium 2.1 GB, large 3.9 GB for models of
+    ///   75, 142, 466, 1500 and 2900 MB: within 12% everywhere);
+    /// * image: `1.15 * weights + 1 GiB` for the graph and latents at the default size;
+    /// * video: `1.15 * weights + 3 GiB`.
+    ///
+    /// Resolution and frame count change the diffusion graph a lot; these are floors for the
+    /// defaults, and the measured process VRAM raises the charge after load.
+    const fn overhead(self) -> (u64, u64, u64) {
+        match self {
+            Self::Whisper => (3, 10, 200 * MIB),
+            Self::Image => (15, 100, 1024 * MIB),
+            Self::Video => (15, 100, 3 * 1024 * MIB),
+        }
+    }
+}
+
+/// Host-side memory of a GPU-resident ggml engine process (staging buffers, runtime).
+const GGML_HOST_BYTES_ON_GPU: u64 = 256 * MIB;
+
+/// Estimates a ggml engine model from its weights file size: `weights + overhead` in VRAM
+/// when the engine runs on a GPU build (plus the fixed CUDA/Vulkan context cost and a small
+/// host footprint), the same total in RAM otherwise.
+pub fn estimate_ggml(workload: GgmlWorkload, weights_bytes: u64, on_gpu: bool) -> MemoryEstimate {
+    let (n, d, fixed) = workload.overhead();
+    let extra = weights_bytes.saturating_mul(n) / d + fixed;
+    let total = weights_bytes.saturating_add(extra);
+    let (vram, ram) = if on_gpu {
+        (
+            total.saturating_add(GPU_RUNTIME_OVERHEAD_BYTES),
+            GGML_HOST_BYTES_ON_GPU,
+        )
+    } else {
+        (0, total)
+    };
+    MemoryEstimate {
+        weights_bytes,
+        kv_bytes: 0,
+        compute_bytes: extra,
+        mmproj_bytes: 0,
+        total_layers: 0,
+        gpu_layers: 0,
+        output_on_gpu: on_gpu,
         vram_bytes: vram,
         ram_bytes: ram,
     }

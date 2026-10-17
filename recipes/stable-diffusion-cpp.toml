@@ -77,6 +77,15 @@ sha256 = "0d181034a61ba75a7e89b1962e764393c1c636cdce164a8ed3a209749f4d6dac"
 size = 338054307
 format = "zip"
 strip_components = 0
+[[variants."cuda12.4".companions]]
+name = "cuda-runtime"
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-970-2f016e8/cudart-sd-bin-win-cu12-x64.zip"
+sha256 = "fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d"
+size = 563452046
+format = "zip"
+strip_components = 0
 [variants."cuda12.4".source]
 git = "https://github.com/leejet/stable-diffusion.cpp.git"
 rev = "master-970-2f016e8"

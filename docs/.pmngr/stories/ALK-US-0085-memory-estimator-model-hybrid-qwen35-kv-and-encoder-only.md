@@ -2,13 +2,14 @@
 id: ALK-US-0085
 type: story
 title: "Memory estimator: model hybrid (qwen35) KV and encoder-only models"
-status: in_progress
+status: done
 parent: ALK-EP-0006
 milestone: ALK-M-0004
 author: mcp
 created: 2026-10-17T00:54:04Z
-updated: 2026-10-17T04:21:42Z
+updated: 2026-10-17T04:50:44Z
 started: 2026-10-17T04:21:42Z
+closed: 2026-10-17T04:50:44Z
 inbox:
   status: accepted
   source: mcp

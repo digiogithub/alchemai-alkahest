@@ -38,6 +38,9 @@ struct Marker {
     /// Library directories relative to the install directory.
     #[serde(default)]
     library_dirs: Vec<String>,
+    /// Names of the companion archives unpacked into this directory.
+    #[serde(default)]
+    companions: Vec<String>,
 }
 
 /// An engine present on disk.
@@ -58,6 +61,8 @@ pub struct InstalledEngine {
     pub library_dirs: Vec<PathBuf>,
     /// Built locally from source rather than downloaded.
     pub from_source: bool,
+    /// Names of the companion archives installed next to the engine (`cuda-runtime`).
+    pub companions: Vec<String>,
 }
 
 /// Knobs of [`install`].
@@ -77,6 +82,10 @@ pub struct InstallOptions {
     pub build_tools: BuildTools,
     /// Directory for source-build logs; `<engines_dir>/.logs` when `None`.
     pub log_dir: Option<PathBuf>,
+    /// Also install the recipe's companion archives (the CUDA runtime libraries) into the
+    /// engine directory. They are large, so they are never installed implicitly. On an engine
+    /// that is already installed without them, only the companions are fetched.
+    pub with_runtime: bool,
 }
 
 impl std::fmt::Debug for InstallOptions {
@@ -85,7 +94,7 @@ impl std::fmt::Debug for InstallOptions {
             .field("host", &self.host)
             .field("force", &self.force)
             .field("from_source", &self.from_source)
-            .field("from_source", &self.from_source)
+            .field("with_runtime", &self.with_runtime)
             .finish_non_exhaustive()
     }
 }
@@ -110,6 +119,9 @@ pub async fn install(
     if !opts.force
         && let Some(done) = read_installed(&final_dir)
     {
+        if opts.with_runtime && !all_companions_installed(recipe, &host, &done) {
+            return add_companions(recipe, &host, engines_dir, &final_dir, opts, cancel).await;
+        }
         return Ok(done);
     }
     // A recipe without a prebuilt archive for this host is built from source.
@@ -164,58 +176,21 @@ pub async fn install(
                 os: host.os.clone(),
                 arch: host.arch.clone(),
             })?;
-        let downloads = engines_dir.join(".downloads");
-        fs::create_dir_all(&downloads).map_err(|e| RecipeError::io(&downloads, e))?;
-        let file_name = asset
-            .url
-            .rsplit('/')
-            .next()
-            .filter(|n| !n.is_empty())
-            .unwrap_or("engine-archive");
-        let archive = downloads.join(file_name);
-        let mut req = DownloadRequest::new(&asset.url, &archive);
-        if let Some(d) = &asset.sha256 {
-            req = req.with_sha256(d);
-        }
-        if let Some(size) = asset.size {
-            req = req.with_size(size);
-        }
-        let mut downloader =
-            Downloader::new(opts.fetch.clone()).map_err(|source| RecipeError::Fetch {
-                url: asset.url.clone(),
-                source,
-            })?;
-        if let Some(p) = &opts.progress {
-            downloader = downloader.with_progress(p.clone());
-        }
-        downloader
-            .download(&req, cancel)
-            .await
-            .map_err(|source| RecipeError::Fetch {
-                url: asset.url.clone(),
-                source,
-            })?;
-        let digest = match &asset.sha256 {
-            Some(d) => d.clone(),
-            None => hash_file(&archive)?,
-        };
-        // Unpacking is blocking file work; keep it off the async worker threads.
-        let (src, dst, format, strip) = (
-            archive.clone(),
-            partial.clone(),
-            asset.format,
-            asset.strip_components,
-        );
-        tokio::task::spawn_blocking(move || extract(&src, format, strip, &dst))
-            .await
-            .map_err(|e| RecipeError::Archive {
-                archive: archive.clone(),
-                reason: e.to_string(),
-            })??;
-        // The archive is only a cache; keeping it would double the disk use.
-        let _ = fs::remove_file(&archive);
+        let digest = fetch_and_unpack(asset, engines_dir, &partial, opts, cancel).await?;
         (asset.url.clone(), digest, asset.tofu)
     };
+    let mut companions = Vec::new();
+    if opts.with_runtime {
+        for c in recipe.companions_for(&host) {
+            if let Err(e) =
+                fetch_and_unpack(&c.as_asset(), engines_dir, &partial, opts, cancel).await
+            {
+                let _ = fs::remove_dir_all(&partial);
+                return Err(e);
+            }
+            companions.push(c.name.clone());
+        }
+    }
 
     if !partial.join(&exe_rel).is_file() {
         let _ = fs::remove_dir_all(&partial);
@@ -231,6 +206,7 @@ pub async fn install(
         tofu,
         from_source,
         library_dirs: recipe.library_dirs.clone(),
+        companions,
     };
     let marker_path = partial.join(MARKER_FILE);
     let json = serde_json::to_vec_pretty(&marker).map_err(|e| RecipeError::Archive {
@@ -238,6 +214,7 @@ pub async fn install(
         reason: e.to_string(),
     })?;
     fs::write(&marker_path, json).map_err(|e| RecipeError::io(&marker_path, e))?;
+    write_engine_license(&partial, &recipe.id)?;
 
     if final_dir.exists() {
         fs::remove_dir_all(&final_dir).map_err(|e| RecipeError::io(&final_dir, e))?;
@@ -245,6 +222,107 @@ pub async fn install(
     fs::rename(&partial, &final_dir).map_err(|e| RecipeError::io(&final_dir, e))?;
 
     read_installed(&final_dir).ok_or(RecipeError::MissingExecutable(marker.executable))
+}
+
+/// Downloads `asset` (resumable, SHA-256 verified when pinned), unpacks it into `dest` and
+/// returns its digest. The archive is deleted afterwards: it is only a cache.
+async fn fetch_and_unpack(
+    asset: &crate::recipe::Asset,
+    engines_dir: &Path,
+    dest: &Path,
+    opts: &InstallOptions,
+    cancel: &CancellationToken,
+) -> Result<String> {
+    let downloads = engines_dir.join(".downloads");
+    fs::create_dir_all(&downloads).map_err(|e| RecipeError::io(&downloads, e))?;
+    let file_name = asset
+        .url
+        .rsplit('/')
+        .next()
+        .filter(|n| !n.is_empty())
+        .unwrap_or("engine-archive");
+    let archive = downloads.join(file_name);
+    let mut req = DownloadRequest::new(&asset.url, &archive);
+    if let Some(d) = &asset.sha256 {
+        req = req.with_sha256(d);
+    }
+    if let Some(size) = asset.size {
+        req = req.with_size(size);
+    }
+    let mut downloader =
+        Downloader::new(opts.fetch.clone()).map_err(|source| RecipeError::Fetch {
+            url: asset.url.clone(),
+            source,
+        })?;
+    if let Some(p) = &opts.progress {
+        downloader = downloader.with_progress(p.clone());
+    }
+    downloader
+        .download(&req, cancel)
+        .await
+        .map_err(|source| RecipeError::Fetch {
+            url: asset.url.clone(),
+            source,
+        })?;
+    let digest = match &asset.sha256 {
+        Some(d) => d.clone(),
+        None => hash_file(&archive)?,
+    };
+    // Unpacking is blocking file work; keep it off the async worker threads.
+    let (src, dst, format, strip) = (
+        archive.clone(),
+        dest.to_path_buf(),
+        asset.format,
+        asset.strip_components,
+    );
+    tokio::task::spawn_blocking(move || extract(&src, format, strip, &dst))
+        .await
+        .map_err(|e| RecipeError::Archive {
+            archive: archive.clone(),
+            reason: e.to_string(),
+        })??;
+    // The archive is only a cache; keeping it would double the disk use.
+    let _ = fs::remove_file(&archive);
+    Ok(digest)
+}
+
+/// Whether every companion that applies to `host` is already recorded in `installed`.
+fn all_companions_installed(recipe: &Recipe, host: &Host, installed: &InstalledEngine) -> bool {
+    recipe
+        .companions_for(host)
+        .iter()
+        .all(|c| installed.companions.contains(&c.name))
+}
+
+/// Unpacks the missing companions into an engine that is already installed and records them in
+/// its marker (written last, so an interrupted run is simply retried).
+async fn add_companions(
+    recipe: &Recipe,
+    host: &Host,
+    engines_dir: &Path,
+    dir: &Path,
+    opts: &InstallOptions,
+    cancel: &CancellationToken,
+) -> Result<InstalledEngine> {
+    let marker_path = dir.join(MARKER_FILE);
+    let bytes = fs::read(&marker_path).map_err(|e| RecipeError::io(&marker_path, e))?;
+    let mut marker: Marker = serde_json::from_slice(&bytes).map_err(|e| RecipeError::Archive {
+        archive: marker_path.clone(),
+        reason: e.to_string(),
+    })?;
+    for c in recipe.companions_for(host) {
+        if marker.companions.contains(&c.name) {
+            continue;
+        }
+        fetch_and_unpack(&c.as_asset(), engines_dir, dir, opts, cancel).await?;
+        marker.companions.push(c.name.clone());
+    }
+    let json = serde_json::to_vec_pretty(&marker).map_err(|e| RecipeError::Archive {
+        archive: marker_path.clone(),
+        reason: e.to_string(),
+    })?;
+    fs::write(&marker_path, json).map_err(|e| RecipeError::io(&marker_path, e))?;
+    read_installed(dir).ok_or(RecipeError::MissingExecutable(marker.executable))
 }
 
 /// Installs a Python engine into a virtual environment created in place.
@@ -297,6 +375,7 @@ async fn install_venv(
         tofu: false,
         from_source: false,
         library_dirs: recipe.library_dirs.clone(),
+        companions: Vec::new(),
     };
     let marker_path = final_dir.join(MARKER_FILE);
     let json = serde_json::to_vec_pretty(&marker).map_err(|e| RecipeError::Archive {
@@ -304,7 +383,52 @@ async fn install_venv(
         reason: e.to_string(),
     })?;
     fs::write(&marker_path, json).map_err(|e| RecipeError::io(&marker_path, e))?;
+    write_engine_license(final_dir, &recipe.id)?;
     read_installed(final_dir).ok_or(RecipeError::MissingExecutable(marker.executable))
+}
+
+/// Name of the licence file written next to every installed engine.
+pub const ENGINE_LICENSE_FILE: &str = "ALKAHEST-ENGINE-LICENSE.txt";
+
+/// Licence texts of the built-in engines (ALK-US-0077), one file per recipe id under
+/// `packaging/licenses/`. Upstream archives usually carry their own licence file too; this copy
+/// guarantees the notice is present for every install path (archive, source build, venv).
+const ENGINE_LICENSES: &[(&str, &str)] = &[
+    (
+        "llama-cpp",
+        include_str!("../../../packaging/licenses/llama-cpp.txt"),
+    ),
+    (
+        "prism-llama-cpp",
+        include_str!("../../../packaging/licenses/prism-llama-cpp.txt"),
+    ),
+    ("vllm", include_str!("../../../packaging/licenses/vllm.txt")),
+    (
+        "whisper-cpp",
+        include_str!("../../../packaging/licenses/whisper-cpp.txt"),
+    ),
+    (
+        "stable-diffusion-cpp",
+        include_str!("../../../packaging/licenses/stable-diffusion-cpp.txt"),
+    ),
+];
+
+/// The licence text of the built-in engine `id`, if it is one of the shipped recipes.
+pub fn engine_license_text(id: &str) -> Option<&'static str> {
+    ENGINE_LICENSES
+        .iter()
+        .find(|(i, _)| *i == id)
+        .map(|(_, t)| *t)
+}
+
+/// Writes [`ENGINE_LICENSE_FILE`] into an engine directory (no-op for user recipes whose id
+/// has no embedded text).
+fn write_engine_license(dir: &Path, id: &str) -> Result<()> {
+    let Some(text) = engine_license_text(id) else {
+        return Ok(());
+    };
+    let path = dir.join(ENGINE_LICENSE_FILE);
+    fs::write(&path, text).map_err(|e| RecipeError::io(&path, e))
 }
 
 /// SHA-256 of a file, lower-case hex (for trust-on-first-use assets).
@@ -339,6 +463,7 @@ fn read_installed(dir: &Path) -> Option<InstalledEngine> {
         executable,
         library_dirs: m.library_dirs.iter().map(|d| dir.join(d)).collect(),
         from_source: m.from_source,
+        companions: m.companions,
     })
 }
 

@@ -50,6 +50,7 @@ pub fn run(action: &EnginesAction, loaded: &Loaded, json: bool) -> Result<ExitCo
             engine_version: version,
             from_source,
             force,
+            with_runtime,
         } => {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -63,6 +64,7 @@ pub fn run(action: &EnginesAction, loaded: &Loaded, json: bool) -> Result<ExitCo
                     version: version.as_deref(),
                     from_source: *from_source,
                     force: *force,
+                    with_runtime: *with_runtime,
                 },
                 &engines_dir,
                 loaded,
@@ -242,6 +244,18 @@ fn info(catalog: &Catalog, engine: &str, engines_dir: &Path, json: bool) -> Resu
             if !r.notes.is_empty() {
                 writeln!(out, "      {}", r.notes)?;
             }
+            for c in r.companions_for(&host) {
+                let size = c
+                    .size
+                    .map(|b| format!(", {} MB", b / 1_000_000))
+                    .unwrap_or_default();
+                writeln!(
+                    out,
+                    "      --with-runtime also installs {} ({}{size})",
+                    c.name,
+                    c.url.rsplit('/').next().unwrap_or(&c.url)
+                )?;
+            }
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -285,6 +299,7 @@ struct InstallArgs<'a> {
     version: Option<&'a str>,
     from_source: bool,
     force: bool,
+    with_runtime: bool,
 }
 
 /// `alkahest engines install <id>`.
@@ -349,6 +364,7 @@ async fn install_cmd(
     let opts = InstallOptions {
         force: args.force,
         from_source: args.from_source,
+        with_runtime: args.with_runtime,
         fetch: FetchConfig {
             max_bytes_per_sec: loaded.config.pull.bandwidth_cap(),
             ..FetchConfig::default()
@@ -366,6 +382,21 @@ async fn install_cmd(
         .await
         .with_context(|| format!("installing {} ({})", recipe.id, recipe.variant))?;
     bar.finish_and_clear();
+    if args.with_runtime && recipe.companions_for(&host).is_empty() {
+        eprintln!(
+            "note: {} ({}) has no runtime archive for {}/{}; --with-runtime had no effect",
+            recipe.id, recipe.variant, host.os, host.arch
+        );
+    }
+    // A CUDA build without its runtime fails at launch; say so now, with the remedy.
+    if let Err(e) = alkahest_recipes::check_cuda_runtime(
+        &engine.variant,
+        &host.os,
+        &engine.dir,
+        &engine.library_dirs,
+    ) {
+        eprintln!("warning: {e}");
+    }
 
     let mut out = std::io::stdout().lock();
     if json {

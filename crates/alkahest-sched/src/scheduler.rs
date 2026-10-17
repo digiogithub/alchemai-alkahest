@@ -888,7 +888,7 @@ impl Scheduler {
     /// A scheduler over `backend` measuring the real machine's memory. Must be called from
     /// within a tokio runtime (it starts the keep-alive reaper task).
     pub fn new(backend: Arc<dyn ModelBackend>, opts: SchedulerOptions) -> Result<Self> {
-        Self::with_probe(backend, Arc::new(SystemMemoryProbe), opts)
+        Self::with_probe(backend, Arc::new(SystemMemoryProbe::new()), opts)
     }
 
     /// A scheduler with an explicit memory probe (tests, embedding).

@@ -57,6 +57,26 @@ pub struct EngineInstall {
 }
 
 impl EngineInstall {
+    /// Fails with [`EngineError::RuntimeMissing`] when this is a CUDA build whose runtime
+    /// libraries (`libcudart`, `libcublas`) are neither next to it nor on the system. Other
+    /// builds, and unlabelled installs, always pass. Run it before launching, so the user
+    /// sees the remedy instead of a bare loader error.
+    pub fn check_runtime(&self) -> Result<()> {
+        let (Some(variant), Some(root)) = (self.variant.as_deref(), self.root.as_deref()) else {
+            return Ok(());
+        };
+        alkahest_recipes::check_cuda_runtime(
+            variant,
+            &alkahest_recipes::Host::current().os,
+            root,
+            &self.library_dirs,
+        )
+        .map_err(|e| EngineError::RuntimeMissing {
+            engine: self.engine,
+            reason: e.to_string(),
+        })
+    }
+
     /// The backend this build really offloads to when the caller asked for `wanted`.
     ///
     /// The platform may have a GPU while the installed build has no GPU backend (the bundled

@@ -2,15 +2,16 @@
 id: ALK-US-0086
 type: story
 title: "Recipes: install companion archives (CUDA runtime) next to an engine archive"
-status: in_progress
+status: done
 priority: medium
 parent: ALK-EP-0010
 milestone: ALK-M-0004
 author: mcp
 labels: [recipes]
 created: 2026-10-17T01:14:42Z
-updated: 2026-10-17T04:21:42Z
+updated: 2026-10-17T04:50:44Z
 started: 2026-10-17T04:21:42Z
+closed: 2026-10-17T04:50:44Z
 inbox:
   status: accepted
   source: mcp

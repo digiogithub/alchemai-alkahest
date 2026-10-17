@@ -124,6 +124,7 @@ impl Engine for WhisperCppEngine {
 
     fn prepare(&self, req: &LaunchRequest, install: &EngineInstall) -> Result<LaunchSpec> {
         self.check(req)?;
+        install.check_runtime()?;
         let convert = self.ffmpeg.unwrap_or_else(|| on_path("ffmpeg"));
         let mut spec = LaunchSpec::new(
             EngineId::WhisperCpp,

@@ -99,6 +99,14 @@ pub enum EngineError {
         /// Why (no recipe, download or digest failure).
         reason: String,
     },
+    /// A CUDA build is installed but its CUDA runtime libraries are missing from the machine.
+    #[error("engine `{engine}` cannot start: {reason}")]
+    RuntimeMissing {
+        /// Engine that was about to start.
+        engine: EngineId,
+        /// What is missing and how to install it.
+        reason: String,
+    },
     /// The engine executable could not be started.
     #[error("cannot start {}: {source}", program.display())]
     Spawn {

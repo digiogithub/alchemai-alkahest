@@ -28,18 +28,23 @@ mod catalog;
 mod error;
 mod install;
 mod recipe;
+mod runtime;
 
 pub use archive::{extract, strip_components};
 pub use build::BuildTools;
 pub use catalog::{Catalog, DiscoveryIssue};
 pub use error::{RecipeError, Result};
 pub use install::{
-    InstallOptions, InstalledEngine, MARKER_FILE, bundled_roots, install, list_installed, locate,
-    remove_installed,
+    ENGINE_LICENSE_FILE, InstallOptions, InstalledEngine, MARKER_FILE, bundled_roots,
+    engine_license_text, install, list_installed, locate, remove_installed,
 };
 pub use recipe::{
-    AcceleratorKind, ArchiveFormat, Asset, Host, Recipe, SourceBuild, VenvBuild, parse_recipes,
-    select_variant,
+    AcceleratorKind, ArchiveFormat, Asset, Companion, Host, Recipe, SourceBuild, VenvBuild,
+    parse_recipes, select_variant,
+};
+pub use runtime::{
+    check_cuda_runtime, cuda_major_of_variant, cuda_runtime_libraries, missing_libraries,
+    system_cuda_dirs,
 };
 
 /// The built-in recipe for `id` and `variant` (`None` means the CPU variant, the default that

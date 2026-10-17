@@ -2,14 +2,16 @@
 id: ALK-US-0077
 type: story
 title: Licence compliance
-status: backlog
+status: done
 priority: critical
 parent: ALK-EP-0014
 milestone: ALK-M-0006
 labels: [release, legal]
 estimate: 2
 created: 2026-10-16T22:43:33Z
-updated: 2026-10-16T22:52:05Z
+updated: 2026-10-17T05:18:32Z
+started: 2026-10-17T04:50:51Z
+closed: 2026-10-17T05:18:32Z
 ---
 
 ## Description

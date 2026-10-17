@@ -61,3 +61,50 @@ wiremock.workspace = true
 # `alkahest-desktop` is only referenced through the optional `desktop` feature.
 [package.metadata.cargo-machete]
 ignored = ["alkahest-desktop"]
+
+# Linux packages (ALK-US-0074): `cargo xtask bundle` builds the flavours and runs cargo-packager
+# for the desktop `.deb` and `.AppImage`. Paths are relative to this manifest. `engines/` is
+# staged by `cargo xtask bundle` (the bundled CPU llama.cpp, ALK-SP-0003.R6) and is found at run
+# time through `alkahest_recipes::bundled_roots` (`<exe dir>/../lib/alkahest/engines`).
+[package.metadata.packager]
+product-name = "alkahest"
+identifier = "es.digio.alkahest"
+description = "Local and on-premise AI model server and manager."
+long-description = "Alkahest runs language, vision, speech and image models on your own machine: an Ollama-style CLI, on-demand loading, several engines and one API (Ollama, OpenAI, Anthropic). This package contains the desktop app, the CLI, the server and a CPU llama.cpp engine."
+homepage = "https://github.com/digiogithub/alkahest"
+authors = ["Digio <jose@digio.es>"]
+publisher = "Digio"
+copyright = "Copyright (c) Digio. MIT licensed."
+license-file = "../../LICENSE"
+category = "Utility"
+out-dir = "../../target/packager"
+binaries-dir = "../../target/release"
+binaries = [{ path = "alkahest", main = true }]
+icons = [
+    "../../packaging/icons/alkahest-32.png",
+    "../../packaging/icons/alkahest-128.png",
+    "../../packaging/icons/alkahest-256.png",
+    "../../packaging/icons/alkahest-512.png",
+]
+resources = [
+    { src = "../../target/bundle/engines", target = "engines" },
+    { src = "../../packaging/licenses", target = "licenses" },
+    { src = "../../packaging/systemd/alkahest.service", target = "systemd/alkahest.service" },
+    { src = "../../packaging/systemd/alkahest.user.service", target = "systemd/alkahest.user.service" },
+    { src = "../../NOTICE", target = "NOTICE" },
+    { src = "../../THIRD_PARTY_LICENSES", target = "THIRD_PARTY_LICENSES" },
+]
+
+[package.metadata.packager.deb]
+section = "utils"
+desktop-template = "../../packaging/linux/alkahest.desktop"
+# GPUI renders through Vulkan: the loader and an ICD are required at runtime.
+depends = [
+    "libvulkan1",
+    "mesa-vulkan-drivers | libvulkan-driver",
+    "libxkbcommon-x11-0",
+    "libxkbcommon0",
+    "libfontconfig1",
+    "libwayland-client0",
+    "libasound2t64 | libasound2",
+]

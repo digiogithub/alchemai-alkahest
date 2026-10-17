@@ -2,14 +2,15 @@
 id: ALK-US-0048
 type: story
 title: Windows service
-status: backlog
+status: in_progress
 priority: medium
 parent: ALK-EP-0009
 milestone: ALK-M-0006
 labels: [service, windows]
 estimate: 5
 created: 2026-10-16T22:41:36Z
-updated: 2026-10-16T22:41:39Z
+updated: 2026-10-17T05:18:41Z
+started: 2026-10-17T05:18:41Z
 links:
   - { kind: implements, target: ALK-SP-0009.R1 }
 ---
