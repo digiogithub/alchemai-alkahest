@@ -54,7 +54,7 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
     tokio_bridge::init(cx)?;
     let settings = load_settings(options);
     Theme::install(cx, settings.theme, cx.window_appearance());
-    let (server_url, connection, client) = start_connection(cx, options, &settings)?;
+    let (server_url, connection, client) = connect(cx, options)?;
 
     let bounds = Bounds::centered(
         None,
@@ -72,6 +72,7 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
         ..Default::default()
     };
     let url_for_shell = server_url.clone();
+    let shell_options = options.clone();
     let (handle, _shell) = ui::open_main_window(window_options, cx, move |window, cx| {
         window
             .observe_window_appearance(|window, cx| Theme::follow_appearance(window, cx))
@@ -80,7 +81,8 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
             commands,
             snapshots,
         } = connection;
-        let shell = cx.new(|cx| Shell::new(&url_for_shell, commands, client, window, cx));
+        let shell =
+            cx.new(|cx| Shell::new(shell_options, &url_for_shell, commands, client, window, cx));
         Shell::follow(&shell, snapshots, cx);
         shell
     })
@@ -136,14 +138,15 @@ fn load_settings(options: &LaunchOptions) -> DesktopSettings {
     })
 }
 
-/// Builds the client for the effective server and starts the connection manager on the tokio
-/// runtime. It stops by itself when the window (holding the handle) goes away. The client is
-/// returned too: the screens send their own requests (model list, actions) with it.
-fn start_connection(
+/// Builds the client for the effective server (desktop settings and keyring read again, so a
+/// reconnect picks up a new URL or key) and starts the connection manager on the tokio
+/// runtime. It stops by itself when its handle goes away (window closed, reconnect). The
+/// client is returned too: the screens send their own requests (model list, actions) with it.
+pub(crate) fn connect(
     cx: &mut App,
     options: &LaunchOptions,
-    settings: &DesktopSettings,
 ) -> Result<(String, ConnectionHandle, Client), DesktopError> {
+    let settings = load_settings(options);
     let server_url = settings
         .effective_server_url(&options.server_url)
         .to_string();

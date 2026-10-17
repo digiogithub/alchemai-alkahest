@@ -1829,6 +1829,8 @@ mod tests {
                     }),
                     can_start: false,
                     service_unit: None,
+                    notice: None,
+                    manages_server: false,
                     runtime: None,
                 },
                 cx,

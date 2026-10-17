@@ -227,6 +227,7 @@ pub struct LibraryState {
     pub filter: LibraryFilter,
     pending: HashMap<String, PendingOp>,
     confirm_delete: Option<String>,
+    refused_delete: Option<String>,
     notice: Option<Notice>,
     settings_for: Option<String>,
 }
@@ -397,7 +398,8 @@ impl LibraryState {
     }
 
     /// The user clicked delete on `name`. Models of the read-only Ollama store are refused
-    /// with a hint (no request is sent); others open the confirmation.
+    /// with an information dialog (screen 17.10, no request is sent); others open the
+    /// confirmation (17.9).
     pub fn request_delete(&mut self, name: &str) {
         let read_only = self
             .models
@@ -405,13 +407,36 @@ impl LibraryState {
             .find(|m| m.name == name)
             .is_some_and(is_read_only);
         if read_only {
-            self.notice = Some(Notice {
-                tone: NoticeTone::Danger,
-                text: read_only_hint(name),
-            });
+            self.refused_delete = Some(name.to_string());
         } else if !self.is_pending(name) {
             self.confirm_delete = Some(name.to_string());
         }
+    }
+
+    /// The Ollama-store model whose delete was refused (dialog 17.10).
+    pub fn refused_delete(&self) -> Option<&str> {
+        self.refused_delete.as_deref()
+    }
+
+    /// Closes the refusal dialog.
+    pub fn dismiss_refused(&mut self) {
+        self.refused_delete = None;
+    }
+
+    /// Facts line of the delete confirmation: `GGUF · Q4_K_M · 5.2 GB`.
+    pub fn delete_facts(&self, name: &str) -> String {
+        let Some(m) = self.models.iter().find(|m| m.name == name) else {
+            return String::new();
+        };
+        let mut parts = Vec::new();
+        if !m.format.is_empty() {
+            parts.push(m.format.to_uppercase());
+        }
+        if let Some(q) = m.quantization.as_deref().filter(|q| !q.is_empty()) {
+            parts.push(q.to_string());
+        }
+        parts.push(crate::present::format_bytes(m.size));
+        parts.join(" \u{b7} ")
     }
 
     /// The model waiting for delete confirmation.
@@ -453,10 +478,12 @@ impl LibraryState {
 
 /// Why a model of the Ollama store cannot be deleted here, and what to do instead.
 pub fn read_only_hint(name: &str) -> String {
-    format!(
-        "{name} is read from the Ollama store, which Alkahest never modifies. \
-         Remove it with `ollama rm {name}`."
-    )
+    format!("Alkahest never changes the Ollama store. Remove it with Ollama: ollama rm {name}")
+}
+
+/// The command the refusal dialog copies.
+pub fn ollama_rm_command(name: &str) -> String {
+    format!("ollama rm {name}")
 }
 
 #[cfg(test)]
@@ -619,12 +646,11 @@ mod tests {
         let mut s = state();
         s.request_delete("qwen3:8b");
         assert_eq!(s.confirming_delete(), None);
-        let notice = s.notice().cloned().unwrap();
-        assert!(
-            notice.text.contains("ollama rm qwen3:8b"),
-            "{}",
-            notice.text
-        );
+        assert_eq!(s.refused_delete(), Some("qwen3:8b"));
+        assert!(read_only_hint("qwen3:8b").contains("ollama rm qwen3:8b"));
+        assert_eq!(ollama_rm_command("qwen3:8b"), "ollama rm qwen3:8b");
+        s.dismiss_refused();
+        assert_eq!(s.refused_delete(), None);
     }
 
     #[test]

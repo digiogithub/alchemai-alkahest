@@ -18,6 +18,8 @@
 pub mod connection;
 pub mod discover;
 pub mod downloads;
+pub mod engines;
+pub mod keys;
 pub mod launcher;
 pub mod library;
 pub mod model_settings;
@@ -26,6 +28,7 @@ pub mod ops;
 pub mod present;
 pub mod running;
 pub mod settings;
+pub mod settings_screen;
 pub mod theme;
 
 #[cfg(feature = "gui")]
