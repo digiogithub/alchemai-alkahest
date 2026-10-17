@@ -113,7 +113,7 @@ rustyline = { version = "=18.0.1", default-features = false, features = ["with-f
 
 # Security
 keyring = "=4.2.0"
-rpassword = "=7.5.0"
+rpassword = "=7.5.4"
 argon2 = "=0.6.0"
 rand = "=0.10.3"
 # Wipes secrets (TLS keys, API key secrets, HF token) from memory on drop.
