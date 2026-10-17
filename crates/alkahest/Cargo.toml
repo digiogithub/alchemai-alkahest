@@ -23,6 +23,7 @@ default = []
 desktop = ["dep:alkahest-desktop"]
 
 [dependencies]
+alkahest-api.workspace = true
 alkahest-core.workspace = true
 alkahest-fetch.workspace = true
 alkahest-desktop = { workspace = true, optional = true }

@@ -10,6 +10,7 @@ mod model_config_cmd;
 mod models_cmd;
 mod pull_cmd;
 mod search_cmd;
+mod serve_cmd;
 mod sysinfo_cmd;
 // The renderer is consumed by the listing commands (`ls`, `ps`, ...) of ALK-US-0012/0031.
 #[allow(dead_code)]
@@ -102,6 +103,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             force,
         } => pull_cmd::run(model, *insecure, *force, &loaded, cli.global.json),
         Command::Engines { action } => engines_cmd::run(action, &loaded, cli.global.json),
+        Command::Serve => serve_cmd::run(&loaded),
         Command::Desktop => desktop(),
         other => Ok(not_implemented(other)),
     }

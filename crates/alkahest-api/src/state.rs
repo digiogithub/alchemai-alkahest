@@ -1,0 +1,127 @@
+//! Shared application state handed to every handler and middleware.
+//!
+//! The server is assembled before the subsystems that later stories add (scheduler, catalog,
+//! metrics exporters) exist, so [`AppState`] carries them in a typed slot map instead of
+//! fixed fields: a later story defines its trait in its own crate and registers an
+//! `Arc<dyn Trait>` with [`AppStateBuilder::service`]; its handlers fetch it back with
+//! [`AppState::service`]. Nothing in this crate needs to change for that.
+
+use std::fmt;
+use std::sync::Arc;
+
+use axum::http::Extensions;
+
+/// Static facts about the running server, reported by `/api/version`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerInfo {
+    /// Alkahest version string (`CARGO_PKG_VERSION` of the binary).
+    pub version: String,
+}
+
+impl Default for ServerInfo {
+    fn default() -> Self {
+        Self {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+}
+
+/// Cheaply cloneable state shared by all requests.
+#[derive(Clone)]
+pub struct AppState {
+    inner: Arc<Inner>,
+}
+
+struct Inner {
+    info: ServerInfo,
+    services: Extensions,
+}
+
+impl fmt::Debug for AppState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppState")
+            .field("info", &self.inner.info)
+            .field("services", &self.inner.services.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl AppState {
+    /// Starts building a state with the given server facts.
+    pub fn builder(info: ServerInfo) -> AppStateBuilder {
+        AppStateBuilder {
+            info,
+            services: Extensions::new(),
+        }
+    }
+
+    /// Server facts.
+    pub fn info(&self) -> &ServerInfo {
+        &self.inner.info
+    }
+
+    /// Returns the service registered under type `T`, typically an `Arc<dyn Trait>`.
+    pub fn service<T: Clone + Send + Sync + 'static>(&self) -> Option<T> {
+        self.inner.services.get::<T>().cloned()
+    }
+}
+
+/// Builder for [`AppState`]; services are fixed once the state is built.
+pub struct AppStateBuilder {
+    info: ServerInfo,
+    services: Extensions,
+}
+
+impl fmt::Debug for AppStateBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppStateBuilder")
+            .field("info", &self.info)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AppStateBuilder {
+    /// Registers a service under its type, replacing an earlier one of the same type.
+    ///
+    /// Register trait objects as `Arc<dyn Trait + Send + Sync>` so handlers can look them up
+    /// by that exact type.
+    pub fn service<T: Clone + Send + Sync + 'static>(mut self, value: T) -> Self {
+        self.services.insert(value);
+        self
+    }
+
+    /// Finishes the state.
+    pub fn build(self) -> AppState {
+        AppState {
+            inner: Arc::new(Inner {
+                info: self.info,
+                services: self.services,
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    trait Catalog: Send + Sync {
+        fn count(&self) -> usize;
+    }
+    struct Fixed;
+    impl Catalog for Fixed {
+        fn count(&self) -> usize {
+            3
+        }
+    }
+
+    #[test]
+    fn trait_object_services_round_trip() {
+        let state = AppState::builder(ServerInfo::default())
+            .service::<Arc<dyn Catalog>>(Arc::new(Fixed))
+            .build();
+        let catalog = state.service::<Arc<dyn Catalog>>().unwrap();
+        assert_eq!(catalog.count(), 3);
+        assert!(state.service::<Arc<String>>().is_none());
+    }
+}

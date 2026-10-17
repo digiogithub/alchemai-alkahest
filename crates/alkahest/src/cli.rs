@@ -325,7 +325,6 @@ impl Command {
             Self::Ps | Self::Stop { .. } => "ALK-US-0031",
             Self::Rm { .. } | Self::Cp { .. } | Self::Gc { .. } => "ALK-US-0013",
             Self::Run { .. } => "ALK-US-0039",
-            Self::Serve => "ALK-US-0033",
             Self::Desktop => "ALK-US-0064",
             Self::Keys { .. } => "ALK-US-0041",
             Self::Service { .. } => "ALK-US-0045",
@@ -333,6 +332,7 @@ impl Command {
             | Self::Config { .. }
             | Self::Completions { .. }
             | Self::Sysinfo
+            | Self::Serve
             | Self::Engines { .. }
             | Self::Hf { .. } => {
                 return None;

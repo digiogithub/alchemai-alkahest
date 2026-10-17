@@ -62,13 +62,24 @@ pub struct ServerConfig {
     pub host: String,
     /// TCP port.
     pub port: u16,
+    /// Largest accepted request body in bytes. Generous by default because Ollama and OpenAI
+    /// requests may carry base64 images; it still stops a client from exhausting memory.
+    pub max_body_bytes: u64,
+    /// Whole-request timeout in seconds; `0` disables it. Off by default because a streamed
+    /// generation legitimately runs for minutes.
+    pub request_timeout_secs: u64,
 }
+
+/// Default request body limit: 64 MiB.
+pub const DEFAULT_MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             host: DEFAULT_HOST.to_string(),
             port: DEFAULT_PORT,
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            request_timeout_secs: 0,
         }
     }
 }
@@ -352,6 +363,11 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         if self.server.host.trim().is_empty() {
             return Err(Error::InvalidConfig("server.host must not be empty".into()));
+        }
+        if self.server.max_body_bytes == 0 {
+            return Err(Error::InvalidConfig(
+                "server.max_body_bytes must be at least 1".into(),
+            ));
         }
         if self.scheduler.max_queue == 0 {
             return Err(Error::InvalidConfig(
