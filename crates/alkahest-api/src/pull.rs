@@ -1,12 +1,13 @@
 //! Pull orchestration shared by `alkahest pull` and `POST /api/pull`: parse the reference,
-//! pick the Ollama registry or Hugging Face path, transfer into the Alkahest store and
-//! persist recommended defaults (HF).
+//! pick the Ollama registry, Hugging Face or git catalog path (`alkahest/<namespace>/<model>`,
+//! ALK-SP-0011.R13), transfer into the Alkahest store and persist recommended defaults.
 //!
 //! It lives here rather than in `alkahest-pull` because it needs both registry clients, and
 //! `alkahest-ollama` / `alkahest-hf` themselves depend on `alkahest-pull`.
 
 use std::time::Duration;
 
+use alkahest_catalog::{CatalogPullError, KeyringCredentials, load_states, pull_catalog};
 use alkahest_core::Config;
 use alkahest_core::config::ResolvedPaths;
 use alkahest_core::paths::process_env;
@@ -22,7 +23,7 @@ use alkahest_store::{AlkahestStore, ModelOverlays, ModelRef, OllamaStore, Scoped
 use tokio_util::sync::CancellationToken;
 
 /// Options of one pull.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullOptions {
     /// Plain HTTP to the registry (private registries without TLS).
     pub insecure: bool,
@@ -30,6 +31,9 @@ pub struct PullOptions {
     pub force: bool,
     /// Pull a safetensors snapshot for vLLM instead of GGUF (`pull --safetensors`).
     pub safetensors: bool,
+    /// Catalog models: take the entry from this configured catalog instead of the highest
+    /// layer that has it (`pull --catalog <name>`).
+    pub catalog: Option<String>,
 }
 
 /// How a pull ended.
@@ -47,8 +51,10 @@ pub enum PullSummary {
         downloaded: u64,
         /// Hugging Face commit, for HF pulls.
         revision: Option<String>,
-        /// Files fetched, for HF pulls.
+        /// Files fetched, for HF and catalog pulls.
         files: Vec<String>,
+        /// Catalog models: the catalog layer the entry came from (`official@2d45ae95a500`).
+        origin: Option<String>,
     },
     /// The Ollama store already has the model; it is used from there.
     ReusedOllama {
@@ -106,6 +112,48 @@ impl PullService {
             ..FetchConfig::default()
         };
         match scoped.reference {
+            ModelRef::Name { name, .. } if name.is_catalog() => {
+                let http = http_client()?;
+                let mut transfer = Transfer::new(store, http, fetch, cancel);
+                if let Some(p) = progress {
+                    transfer = transfer.with_progress(p);
+                }
+                let states = load_states(&self.paths.data_dir, &self.config.catalogs);
+                let overlays = ModelOverlays::in_data_dir(&self.paths.data_dir);
+                let outcome = pull_catalog(
+                    &transfer,
+                    &states,
+                    &name,
+                    opts.catalog.as_deref(),
+                    &KeyringCredentials,
+                    Some(&overlays),
+                )
+                .await
+                .map_err(|e| {
+                    let msg = format!("pulling {name}: {e}");
+                    match e {
+                        e if e.is_not_found() => PullError::NotFound(msg),
+                        CatalogPullError::NotACatalogName(_) | CatalogPullError::Name(_) => {
+                            PullError::InvalidReference(msg)
+                        }
+                        _ => PullError::Failed(msg),
+                    }
+                })?;
+                let short = &outcome.commit[..outcome.commit.len().min(12)];
+                Ok(PullSummary::Installed {
+                    short_name: outcome.name.display_short(),
+                    name: outcome.name.to_string(),
+                    manifest_digest: outcome.manifest_digest.to_string(),
+                    downloaded: outcome.downloaded,
+                    revision: Some(outcome.commit.clone()).filter(|c| !c.is_empty()),
+                    files: outcome.files,
+                    origin: Some(if short.is_empty() {
+                        outcome.catalog
+                    } else {
+                        format!("{}@{short}", outcome.catalog)
+                    }),
+                })
+            }
             ModelRef::Name { name, .. } => {
                 let registry = RegistryClient::for_name(&name, opts.insecure)
                     .map_err(|e| PullError::InvalidReference(e.to_string()))?;
@@ -145,6 +193,7 @@ impl PullService {
                         downloaded,
                         revision: None,
                         files: Vec::new(),
+                        origin: None,
                     },
                     PullOutcome::ReusedOllama { name } => PullSummary::ReusedOllama {
                         short_name: name.display_short(),
@@ -155,11 +204,7 @@ impl PullService {
             ModelRef::HuggingFace(hf) => {
                 let client = HfClient::from_config(&self.config.hf, &process_env, &KeyringStore)
                     .map_err(|e| PullError::Failed(e.to_string()))?;
-                let http = reqwest::Client::builder()
-                    .user_agent(concat!("alkahest/", env!("CARGO_PKG_VERSION")))
-                    .connect_timeout(Duration::from_secs(15))
-                    .build()
-                    .map_err(|e| PullError::Failed(format!("building the HTTP client: {e}")))?;
+                let http = http_client()?;
                 let mut transfer = Transfer::new(store, http, fetch, cancel);
                 if let Some(p) = progress {
                     transfer = transfer.with_progress(p);
@@ -189,6 +234,7 @@ impl PullService {
                     downloaded: outcome.downloaded,
                     revision: Some(outcome.revision),
                     files: outcome.files,
+                    origin: None,
                 })
             }
             ModelRef::Digest(d) => Err(PullError::InvalidReference(format!(
@@ -196,4 +242,14 @@ impl PullService {
             ))),
         }
     }
+}
+
+/// The HTTP client of Hugging Face and catalog downloads (redirects followed, the bearer
+/// dropped by reqwest when a redirect leaves the host).
+fn http_client() -> Result<reqwest::Client, PullError> {
+    reqwest::Client::builder()
+        .user_agent(concat!("alkahest/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| PullError::Failed(format!("building the HTTP client: {e}")))
 }

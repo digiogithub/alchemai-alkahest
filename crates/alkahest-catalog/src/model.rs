@@ -1,9 +1,9 @@
 //! Model entries of a catalog (ALK-SP-0011.R7): parsed, validated and stored in snapshots.
-//! Pulling them (`alkahest pull catalog:...`) is ALK-US-0120, which reads these types.
+//! Pulling them (`alkahest pull alkahest/<namespace>/<model>`) is [`crate::pull`].
 
 use serde::{Deserialize, Serialize};
 
-use alkahest_core::config::is_catalog_name;
+use alkahest_core::config::{is_catalog_name, is_loopback_http};
 
 /// File format of a model variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -52,15 +52,18 @@ pub enum ModelFileKind {
 pub struct ModelFile {
     /// Role of the file.
     pub kind: ModelFileKind,
-    /// Single download URL (https).
+    /// Single download URL (https; plain http only to a loopback host).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     /// Mirrors tried in order (https); exclusive with `url`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub urls: Vec<String>,
-    /// Lower-case hex SHA-256 (mandatory).
+    /// Lower-case hex SHA-256 (mandatory; parsed with a default so that a missing value is
+    /// reported by [`ModelEntry::validate`] with the entry, tag and file).
+    #[serde(default)]
     pub sha256: String,
-    /// Size in bytes (mandatory).
+    /// Size in bytes (mandatory, greater than zero; defaulted for the same reason).
+    #[serde(default)]
     pub size: u64,
     /// Name inside the store; the last URL segment when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -229,11 +232,21 @@ impl ModelEntry {
                     (None, true) => return Err(fat("needs url or urls")),
                     _ => {}
                 }
-                if f.sources().iter().any(|u| !u.starts_with("https://")) {
+                // Plain http only to loopback (local mirrors and tests), as for sources.
+                if f.sources()
+                    .iter()
+                    .any(|u| !u.starts_with("https://") && !is_loopback_http(u))
+                {
                     return Err(fat("url must be https"));
+                }
+                if f.sha256.is_empty() {
+                    return Err(fat("sha256 is required"));
                 }
                 if !is_sha256(&f.sha256) {
                     return Err(fat("sha256 must be 64 lower-case hex digits"));
+                }
+                if f.size == 0 {
+                    return Err(fat("size is required (bytes, greater than zero)"));
                 }
                 if let Some(n) = &f.filename
                     && (n.is_empty() || n.contains(['/', '\\']) || n == "." || n == "..")
@@ -285,11 +298,14 @@ size = 24
             "sha256 = \"a4e5e156ddec27e286f75328784d7106b60a4eb1d246e950a001a3f944fbda99\"\n",
             "",
         );
-        let err = toml::from_str::<ModelEntry>(&text)
+        let err = parse(&text)
+            .validate("acme/assistant")
             .err()
-            .map(|e| e.to_string())
             .unwrap_or_default();
-        assert!(err.contains("sha256"), "{err}");
+        assert_eq!(
+            err,
+            "acme/assistant:q4_k_m: file a.gguf: sha256 is required"
+        );
     }
 
     #[test]

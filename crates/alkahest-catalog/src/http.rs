@@ -48,6 +48,29 @@ impl fmt::Display for Token {
 pub trait CredentialSource: Send + Sync {
     /// The token of catalog `name`, if any.
     fn catalog_token(&self, name: &str) -> Option<Token>;
+
+    /// The token of download host `host` (a model file's `auth`, ALK-SP-0011.R7, R14), if
+    /// any. The default has none.
+    fn host_token(&self, _host: &str) -> Option<Token> {
+        None
+    }
+}
+
+/// Environment variable holding the token of download host `host`:
+/// `ALKAHEST_HOST_TOKEN_<HOST>` with every character other than a letter or digit turned
+/// into `_` (`ALKAHEST_HOST_TOKEN_MODELS_EXAMPLE_ORG`).
+pub fn host_token_env_var(host: &str) -> String {
+    let upper: String = host
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("ALKAHEST_HOST_TOKEN_{upper}")
 }
 
 /// Environment variable holding the token of catalog `name`:
@@ -67,7 +90,8 @@ pub fn token_env_var(name: &str) -> String {
 }
 
 /// Tokens from `ALKAHEST_CATALOG_TOKEN_<NAME>`, else the OS keyring (service `alkahest`, user
-/// `catalog:<name>`). An unavailable keyring counts as "no token".
+/// `catalog:<name>`); host tokens likewise from `ALKAHEST_HOST_TOKEN_<HOST>` or user
+/// `host:<host>`. An unavailable keyring counts as "no token".
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeyringCredentials;
 
@@ -77,6 +101,18 @@ impl CredentialSource for KeyringCredentials {
             return Some(t);
         }
         let entry = keyring::Entry::new(KEYRING_SERVICE, &format!("catalog:{name}")).ok()?;
+        entry.get_password().ok().and_then(Token::new)
+    }
+
+    /// `ALKAHEST_HOST_TOKEN_<HOST>`, else the keyring (service `alkahest`, user `host:<host>`).
+    fn host_token(&self, host: &str) -> Option<Token> {
+        if let Some(t) = std::env::var(host_token_env_var(host))
+            .ok()
+            .and_then(Token::new)
+        {
+            return Some(t);
+        }
+        let entry = keyring::Entry::new(KEYRING_SERVICE, &format!("host:{host}")).ok()?;
         entry.get_password().ok().and_then(Token::new)
     }
 }

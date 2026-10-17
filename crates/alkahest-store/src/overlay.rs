@@ -349,7 +349,18 @@ pub struct RecommendedLayer {
     /// Chat template keyword arguments.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub chat_template_kwargs: BTreeMap<String, Value>,
-    /// Where the advice came from (`generation_config`, `model_card`, `metadata`).
+    /// Stop sequences the publisher recommends (git catalog `params.stop`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<Vec<String>>,
+    /// Engine the publisher recommends (git catalog `engine`, ALK-SP-0011.R7); a user
+    /// overlay still wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    /// Chat template the publisher recommends: a llama.cpp built-in name (`chatml`) or inline
+    /// Jinja text (git catalog `template` / `template_text`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+    /// Where the advice came from (`generation_config`, `model_card`, `metadata`, `catalog`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<String>,
 }
@@ -378,6 +389,9 @@ impl RecommendedLayer {
             kv_cache_type_k: self.kv_cache_type_k.clone(),
             kv_cache_type_v: self.kv_cache_type_v.clone(),
             chat_template_kwargs: self.chat_template_kwargs.clone(),
+            stop: self.stop.clone(),
+            engine: self.engine.clone(),
+            template: self.template.clone(),
             ..ModelSettings::default()
         }
     }

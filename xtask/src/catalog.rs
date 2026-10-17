@@ -20,6 +20,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use alkahest_catalog::ModelEntry;
 use alkahest_recipes::{RecipeOrigin, parse_recipes_with};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
@@ -62,54 +63,6 @@ struct IndexFile {
     path: String,
     sha256: String,
     size: u64,
-}
-
-/// A model entry (R7).
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Model {
-    name: String,
-    description: String,
-    license: String,
-    #[allow(dead_code)]
-    homepage: Option<String>,
-    #[allow(dead_code)]
-    tags: Option<Vec<String>>,
-    #[serde(default)]
-    variants: Vec<Variant>,
-}
-
-/// One `[[variants]]` entry of a model.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Variant {
-    tag: String,
-    format: Option<String>,
-    #[allow(dead_code)]
-    quant: Option<String>,
-    #[allow(dead_code)]
-    engine: Option<String>,
-    template: Option<String>,
-    template_text: Option<String>,
-    template_format: Option<String>,
-    #[allow(dead_code)]
-    params: Option<toml::Table>,
-    #[serde(default)]
-    files: Vec<ModelFile>,
-}
-
-/// One `[[variants.files]]` entry.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ModelFile {
-    kind: String,
-    url: Option<String>,
-    urls: Option<Vec<String>>,
-    sha256: Option<String>,
-    size: Option<u64>,
-    filename: Option<String>,
-    #[allow(dead_code)]
-    auth: Option<String>,
 }
 
 /// A remote file to verify with `--net`.
@@ -239,13 +192,6 @@ fn valid_name(s: &str) -> bool {
         && s.chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'))
         && !s.starts_with('.')
-}
-
-/// Whether `s` is 64 lower-case hex digits.
-fn is_sha256(s: &str) -> bool {
-    s.len() == 64
-        && s.chars()
-            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
 }
 
 /// Lower-case hex sha256 of `bytes`.
@@ -504,7 +450,7 @@ fn check_models(dir: &Path, r: &mut Report) {
                 continue;
             }
         };
-        let model: Model = match toml::from_str(&text) {
+        let model: ModelEntry = match toml::from_str(&text) {
             Ok(m) => m,
             Err(e) => {
                 r.errors.push(format!("{rp}: {e}"));
@@ -535,110 +481,31 @@ fn check_models(dir: &Path, r: &mut Report) {
     }
 }
 
-/// Field rules of one model entry.
-fn check_model(rp: &str, m: &Model, r: &mut Report) {
+/// Field rules of one model entry: the shared rules of `alkahest_catalog::ModelEntry`
+/// (the same code a sync runs, ALK-SP-0011.R7) plus the lint-level checks of the strict
+/// check (non-empty description and licence).
+fn check_model(rp: &str, m: &ModelEntry, r: &mut Report) {
+    let expected = m.name.clone();
+    if let Err(e) = m.validate(&expected) {
+        r.errors.push(format!("{rp}: {e}"));
+    }
     if m.description.trim().is_empty() {
         r.errors.push(format!("{rp}: description is empty"));
     }
     if m.license.trim().is_empty() {
         r.errors.push(format!("{rp}: license is empty"));
     }
-    if m.variants.is_empty() {
-        r.errors
-            .push(format!("{rp}: at least one [[variants]] is required"));
-    }
-    let mut tags = BTreeSet::new();
     for v in &m.variants {
-        let at = format!("{rp}: variant `{}`", v.tag);
-        if v.tag.is_empty() || !tags.insert(v.tag.clone()) {
-            r.errors
-                .push(format!("{at}: tag must be non-empty and unique"));
-        }
-        if let Some(f) = &v.format
-            && !matches!(f.as_str(), "gguf" | "safetensors")
-        {
-            r.errors
-                .push(format!("{at}: format `{f}` must be gguf or safetensors"));
-        }
-        if v.template.is_some() && v.template_text.is_some() {
-            r.errors
-                .push(format!("{at}: set template or template_text, not both"));
-        }
-        match (&v.template_text, &v.template_format) {
-            (Some(_), Some(f)) if matches!(f.as_str(), "jinja" | "go") => {}
-            (Some(_), _) => r.errors.push(format!(
-                "{at}: template_text needs template_format jinja or go"
-            )),
-            (None, Some(_)) => r
-                .errors
-                .push(format!("{at}: template_format needs template_text")),
-            (None, None) => {}
-        }
-        let models = v.files.iter().filter(|f| f.kind == "model").count();
-        if models != 1 {
-            r.errors.push(format!(
-                "{at}: exactly one file with kind = \"model\" is required, found {models}"
-            ));
-        }
-        for (i, f) in v.files.iter().enumerate() {
-            check_model_file(&format!("{at}: file {}", i + 1), f, r);
-            let urls: Vec<&String> = f.url.iter().chain(f.urls.iter().flatten()).collect();
-            for u in urls {
+        for f in &v.files {
+            for u in f.sources() {
                 r.remotes.push(Remote {
                     origin: format!("{rp} variant `{}` ({u})", v.tag),
-                    url: u.clone(),
-                    size: f.size,
-                    sha256: f.sha256.clone(),
+                    url: u.to_string(),
+                    size: Some(f.size),
+                    sha256: Some(f.sha256.clone()),
                 });
             }
         }
-    }
-}
-
-/// Field rules of one model file (R7).
-fn check_model_file(at: &str, f: &ModelFile, r: &mut Report) {
-    const KINDS: [&str; 7] = [
-        "model",
-        "projector",
-        "adapter",
-        "vae",
-        "text-encoder",
-        "tokenizer",
-        "config",
-    ];
-    if !KINDS.contains(&f.kind.as_str()) {
-        r.errors.push(format!("{at}: unknown kind `{}`", f.kind));
-    }
-    match (&f.url, &f.urls) {
-        (Some(_), Some(_)) => r.errors.push(format!("{at}: set url or urls, not both")),
-        (None, None) => r.errors.push(format!("{at}: url or urls is required")),
-        (None, Some(u)) if u.is_empty() => r.errors.push(format!("{at}: urls is empty")),
-        _ => {}
-    }
-    for u in f.url.iter().chain(f.urls.iter().flatten()) {
-        if !u.starts_with("https://") {
-            r.errors.push(format!("{at}: url must be https: {u}"));
-        }
-    }
-    match &f.sha256 {
-        None => r.errors.push(format!("{at}: sha256 is required")),
-        Some(s) if !is_sha256(s) => r
-            .errors
-            .push(format!("{at}: sha256 must be 64 lower-case hex digits")),
-        _ => {}
-    }
-    match f.size {
-        None => r.errors.push(format!("{at}: size is required")),
-        Some(0) => r
-            .errors
-            .push(format!("{at}: size must be greater than zero")),
-        _ => {}
-    }
-    if let Some(n) = &f.filename
-        && (n.is_empty() || n.contains('/') || n.contains('\\') || n.contains(".."))
-    {
-        r.errors
-            .push(format!("{at}: filename `{n}` must be a plain file name"));
     }
 }
 

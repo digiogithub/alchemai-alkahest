@@ -46,12 +46,14 @@ pub struct GlobalArgs {
 /// Where `alkahest search` looks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SearchSource {
-    /// Hugging Face and the Ollama library.
+    /// The git catalogs, Hugging Face and the Ollama library.
     All,
     /// Hugging Face only.
     Hf,
     /// The Ollama library only.
     Ollama,
+    /// The git catalogs only (local snapshots, `alkahest/<namespace>/<model>` names).
+    Catalog,
 }
 
 /// Sort order of Hugging Face results.
@@ -91,6 +93,9 @@ pub struct SearchArgs {
     /// Maximum results per source.
     #[arg(long, default_value_t = 20, value_name = "N")]
     pub limit: u32,
+    /// Catalog results: only entries of this configured catalog.
+    #[arg(long, value_name = "NAME")]
+    pub catalog: Option<String>,
 }
 
 /// Arguments of `alkahest desktop`.
@@ -183,9 +188,10 @@ pub enum Command {
         /// Target shell.
         shell: Shell,
     },
-    /// Download a model from the Ollama registry or Hugging Face.
+    /// Download a model from the Ollama registry, Hugging Face or a git catalog.
     Pull {
-        /// Model reference, for example `llama3.2:3b` or `hf.co/org/repo:Q4_K_M`.
+        /// Model reference, for example `llama3.2:3b`, `hf.co/org/repo:Q4_K_M` or the catalog
+        /// model `alkahest/qwen/qwen2.5-0.5b-instruct:q4_k_m`.
         model: String,
         /// Talk to the registry over plain HTTP (private registries without TLS).
         #[arg(long)]
@@ -197,8 +203,12 @@ pub enum Command {
         /// GGUF (chosen automatically when the repository has no GGUF files).
         #[arg(long)]
         safetensors: bool,
+        /// Catalog models: take the entry from this configured catalog instead of the
+        /// highest layer that has it.
+        #[arg(long, value_name = "NAME")]
+        catalog: Option<String>,
     },
-    /// Search the Ollama library and Hugging Face for models.
+    /// Search the git catalogs, the Ollama library and Hugging Face for models.
     Search(SearchArgs),
     /// List local models.
     #[command(visible_alias = "list")]

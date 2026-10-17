@@ -39,6 +39,8 @@ fn alkahest(hf: &MockServer, ollama: &MockServer, home: &std::path::Path) -> Com
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join("cfg"))
         .env("XDG_DATA_HOME", home.join("data"))
+        // Hermetic: no catalog is fetched, so the catalog source contributes no rows.
+        .env("ALKAHEST_CATALOG_AUTO_SYNC", "0")
         .env_remove("HF_ENDPOINT");
     cmd
 }

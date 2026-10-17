@@ -272,6 +272,7 @@ async fn pull_inner(state: &AppState, body: Bytes) -> Result<Response, HttpError
         insecure: req.insecure,
         force: false,
         safetensors: false,
+        catalog: None,
     };
     let cancel = CancellationToken::new();
     if !req.stream.unwrap_or(true) {

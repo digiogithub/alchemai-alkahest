@@ -221,3 +221,44 @@ pub fn find_model(
             .next_back(),
     }
 }
+
+/// Catalog models matching `query`, one row per `(name, tag)` after layering (R12): every
+/// whitespace-separated word of `query` must appear, case-insensitively, in the entry name,
+/// description, licence, tags, the variant tag or its quant. An empty query lists everything.
+/// `catalog` keeps only rows whose winning entry comes from that catalog.
+pub fn search_models(
+    states: &[CatalogState],
+    query: &str,
+    catalog: Option<&str>,
+) -> Vec<CatalogModel> {
+    let words: Vec<String> = query
+        .split_whitespace()
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let scope: Vec<CatalogState> = match catalog {
+        // Layering only within the chosen catalog, so its own rows are shown even when a
+        // later catalog overrides them.
+        Some(c) => states
+            .iter()
+            .filter(|s| s.source.name == c)
+            .cloned()
+            .collect(),
+        None => states.to_vec(),
+    };
+    layered_models(&scope)
+        .into_iter()
+        .filter(|m| {
+            let hay = format!(
+                "{} {} {} {} {} {}",
+                m.entry.name,
+                m.entry.description,
+                m.entry.license,
+                m.entry.tags.join(" "),
+                m.variant.tag,
+                m.variant.quant.as_deref().unwrap_or_default()
+            )
+            .to_ascii_lowercase();
+            words.iter().all(|w| hay.contains(w.as_str()))
+        })
+        .collect()
+}

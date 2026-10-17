@@ -80,6 +80,10 @@ struct PullRequest {
     insecure: bool,
     #[serde(default)]
     force: bool,
+    /// Catalog models (`alkahest/<namespace>/<model>`): the configured catalog to take the
+    /// entry from; the layer order decides when absent.
+    #[serde(default)]
+    catalog: Option<String>,
 }
 
 /// The reference to pull: `quant` becomes the Hugging Face selector (`hf.co/o/r:Q4_K_M`).
@@ -165,10 +169,11 @@ fn summary_json(s: &PullSummary) -> Value {
             downloaded,
             revision,
             files,
+            origin,
         } => json!({
             "status": "installed", "name": short_name, "reference": name,
             "digest": manifest_digest, "downloaded": downloaded,
-            "revision": revision, "files": files,
+            "revision": revision, "files": files, "origin": origin,
         }),
         PullSummary::ReusedOllama { name, short_name } => json!({
             "status": "reused_ollama", "name": short_name, "reference": name,
@@ -187,6 +192,7 @@ pub(super) async fn start_pull(State(state): State<AppState>, body: Bytes) -> Re
             insecure: req.insecure,
             force: req.force,
             safetensors: req.safetensors,
+            catalog: req.catalog.clone().filter(|c| !c.trim().is_empty()),
         };
         let target = reference.clone();
         let (job, created) = ctx

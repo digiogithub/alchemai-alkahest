@@ -137,6 +137,7 @@ impl PullRunner for FakePulls {
                 downloaded: 400,
                 revision: None,
                 files: Vec::new(),
+                origin: None,
             })
         })
     }
@@ -1424,4 +1425,64 @@ async fn hf_estimate_reads_the_remote_header() {
         let (status, doc) = send(&h, "GET", &format!("/alkahest/v1/hf/estimate?{q}"), None).await;
         assert_eq!(status, want, "{q}: {doc}");
     }
+}
+
+/// ALK-US-0120: catalog search for the desktop Discover screen, from the local snapshots.
+#[tokio::test]
+async fn catalog_search_lists_snapshot_models() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut files = std::collections::BTreeMap::new();
+    files.insert(
+        "catalog.toml".to_string(),
+        b"schema_version = \"1.0\"\nname = \"local\"\ndescription = \"t\"\n".to_vec(),
+    );
+    let entry = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../alkahest-recipes/tests/fixtures/catalog/models/acme/assistant.toml"),
+    )
+    .unwrap();
+    files.insert("models/acme/assistant.toml".to_string(), entry);
+    let idx = alkahest_catalog::manifest::Index::generate(&files, "1.0");
+    files.insert("index.toml".to_string(), idx.to_toml().into_bytes());
+    for (p, b) in &files {
+        let dest = repo.path().join(p);
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        std::fs::write(dest, b).unwrap();
+    }
+    let mut config = Config::default();
+    config.catalogs = vec![alkahest_core::config::CatalogSource::new(
+        "local",
+        format!("file://{}", repo.path().display()),
+    )];
+    let admin = admin_ctx(config.clone(), false);
+    let data = admin.tmp.path().join("data");
+    let ctx = alkahest_catalog::SyncContext::new(&data).unwrap();
+    alkahest_catalog::sync(&config.catalogs[0], &ctx)
+        .await
+        .unwrap();
+    let h = harness(&admin).await;
+
+    let (status, doc) = send(&h, "GET", "/alkahest/v1/catalog/search?q=assistant", None).await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    let models = doc["models"].as_array().unwrap();
+    assert_eq!(models.len(), 2, "{doc}");
+    assert_eq!(models[0]["reference"], "alkahest/acme/assistant:q4_k_m");
+    assert_eq!(models[0]["default"], true);
+    assert_eq!(models[0]["size"], 24);
+    assert_eq!(models[0]["quant"], "Q4_K_M");
+    assert_eq!(models[0]["license"], "apache-2.0");
+    assert_eq!(models[0]["catalog"], "local");
+    assert_eq!(models[1]["tag"], "q8_0");
+
+    let (status, doc) = send(
+        &h,
+        "GET",
+        "/alkahest/v1/catalog/search?q=q8_0&limit=5",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["models"].as_array().unwrap().len(), 1);
+    let (status, _) = send(&h, "GET", "/alkahest/v1/catalog/search?catalog=nope", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

@@ -55,6 +55,10 @@ pub enum PullError {
     /// The name is not an Ollama registry name.
     #[error("`{0}` is a Hugging Face model; pull it with the hf.co/ reference")]
     NotARegistryName(String),
+    /// The name is a git catalog model (`alkahest/<namespace>/<model>`); the host `alkahest`
+    /// is never contacted as a registry (ALK-SP-0011.R13).
+    #[error("`{0}` is a catalog model; it is pulled through the configured git catalogs")]
+    CatalogName(String),
 }
 
 /// Pulls `name` from `registry` into the store behind `transfer`.
@@ -67,6 +71,9 @@ pub async fn pull_ollama(
 ) -> Result<PullOutcome, PullError> {
     if name.to_hf().is_some() {
         return Err(PullError::NotARegistryName(name.to_string()));
+    }
+    if name.is_catalog() {
+        return Err(PullError::CatalogName(name.to_string()));
     }
     if !opts.force
         && let Some(store) = ollama

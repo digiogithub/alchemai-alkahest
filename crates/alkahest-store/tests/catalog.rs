@@ -384,3 +384,42 @@ fn walk(p: &std::path::Path) -> Vec<std::path::PathBuf> {
     }
     out
 }
+
+/// ALK-SP-0011.R13: a catalog model named without a tag resolves to its only local tag (the
+/// pull stored the concrete default variant); with two local tags it is ambiguous.
+#[test]
+fn catalog_model_without_tag_resolves_to_its_only_tag() {
+    let w = world();
+    put_model(
+        w.catalog.alkahest(),
+        "alkahest/acme/assistant:q4_k_m",
+        &gguf_bytes("llama", 15, 2048, None),
+        &[],
+    );
+    let e = w.catalog.resolve("alkahest/acme/assistant").unwrap();
+    assert_eq!(e.entry.name.to_string(), "alkahest/acme/assistant:q4_k_m");
+    let e = w
+        .catalog
+        .resolve("alkahest:alkahest/acme/assistant")
+        .unwrap();
+    assert_eq!(e.entry.name.tag(), "q4_k_m");
+    assert!(w.catalog.resolve("ollama:alkahest/acme/assistant").is_err());
+    assert!(
+        w.catalog
+            .list()
+            .unwrap()
+            .iter()
+            .any(|e| e.summary().name == "alkahest/acme/assistant:q4_k_m")
+    );
+
+    put_model(
+        w.catalog.alkahest(),
+        "alkahest/acme/assistant:q8_0",
+        &gguf_bytes("llama", 15, 2048, Some("x")),
+        &[],
+    );
+    assert!(matches!(
+        w.catalog.resolve("alkahest/acme/assistant"),
+        Err(StoreError::AmbiguousModel { .. })
+    ));
+}
