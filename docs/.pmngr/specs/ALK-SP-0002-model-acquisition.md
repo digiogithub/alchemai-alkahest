@@ -5,7 +5,7 @@ title: Model acquisition
 status: backlog
 labels: [pull, hf]
 created: 2026-10-16T22:37:33Z
-updated: 2026-10-17T23:09:44Z
+updated: 2026-10-17T23:27:07Z
 requirements:
   R1:
     status: backlog
@@ -75,12 +75,58 @@ requirements:
         - crates/alkahest-ollama/src/library.rs#parses_fixture_models
   R7:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-store/src/import.rs#AlkahestStore::import_file
+        - crates/alkahest-store/src/import.rs#AlkahestStore::write_imported_model
+        - crates/alkahest-api/src/import.rs#import_model
+        - crates/alkahest/src/import_cmd.rs#import
+      tests:
+        - crates/alkahest-api/tests/import.rs#import_a_gguf_file
+        - crates/alkahest-api/tests/import.rs#source_file_untouched
+        - crates/alkahest-api/tests/import.rs#ollama_store_untouched_by_import
+        - crates/alkahest/tests/import.rs#import_a_gguf_file_from_the_cli
   R8:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/import.rs#resolve
+        - crates/alkahest-api/src/import.rs#plan_folder
+        - crates/alkahest-store/src/snapshot.rs#AlkahestStore::materialise_snapshot
+        - crates/alkahest-store/src/source.rs#ModelEntry::weights_path
+        - crates/alkahest/src/import_cmd.rs#create
+      tests:
+        - crates/alkahest-api/tests/import.rs#split_and_multimodal_folder
+        - crates/alkahest-api/tests/import.rs#modelfile_in_folder
+        - crates/alkahest-api/tests/import.rs#create_from_a_modelfile
+        - crates/alkahest-api/tests/import.rs#safetensors_folder
+        - crates/alkahest/tests/import.rs#create_from_a_modelfile_with_the_cli
   R9:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-store/src/import.rs#AlkahestStore::import_file
+        - crates/alkahest-store/src/import.rs#linked_files_problem
+        - crates/alkahest-store/src/catalog.rs#CatalogEntry::ensure_loadable
+        - crates/alkahest-store/src/local.rs#BlobWriter::replacing_links
+      tests:
+        - crates/alkahest-api/tests/import.rs#link_with_a_hard_link
+        - crates/alkahest-api/tests/import.rs#linked_file_changed
+        - crates/alkahest-api/tests/import.rs#linked_file_disappeared
+        - crates/alkahest-api/tests/import.rs#copy_import_replaces_a_linked_blob
   R10:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/admin/imports.rs#start_import
+        - crates/alkahest-client/src/admin.rs#Client::import_model
+        - crates/alkahest/src/run_cmd.rs#run
+        - crates/alkahest/src/import_cmd.rs#import_for_run
+      tests:
+        - crates/alkahest-api/tests/import.rs#api_import_from_loopback
+        - crates/alkahest-api/tests/import.rs#api_import_refused_for_remote_callers
+        - crates/alkahest/tests/run.rs#run_a_gguf_path
+        - crates/alkahest-client/src/admin.rs#import_model_starts_a_job
 ---
 
 ## Purpose
