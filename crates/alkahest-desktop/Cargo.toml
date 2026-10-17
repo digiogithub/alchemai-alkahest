@@ -23,11 +23,16 @@ gui-test = ["gui", "gpui-kit/test-support"]
 
 [dependencies]
 alkahest-client.workspace = true
+futures.workspace = true
 gpui-kit = { workspace = true, optional = true }
+keyring.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+toml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# Paused clock for the connection manager tests.
+tokio = { workspace = true, features = ["test-util"] }

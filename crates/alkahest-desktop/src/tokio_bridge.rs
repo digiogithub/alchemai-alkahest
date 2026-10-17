@@ -69,7 +69,6 @@ pub fn init(cx: &mut App) -> std::io::Result<()> {
 /// # Panics
 ///
 /// Panics if [`init`] was not called, a programming error at app start.
-#[allow(dead_code)]
 pub fn handle(cx: &App) -> Handle {
     cx.global::<TokioGlobal>().handle.clone()
 }

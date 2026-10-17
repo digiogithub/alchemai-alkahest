@@ -2,7 +2,8 @@
 //!
 //! [`Client`] talks to a running `alkahest serve` over its Ollama-compatible routes:
 //! [`Client::version`], [`Client::tags`], [`Client::show`], [`Client::ps`],
-//! [`Client::stop`], and the streaming [`Client::generate`] / [`Client::chat`]. A refused
+//! [`Client::stop`], and the streaming [`Client::generate`] / [`Client::chat`], plus the admin
+//! runtime routes [`Client::runtime_status`] and [`Client::events`] (server-sent events). A refused
 //! connection is reported as [`ClientError::NotRunning`] so commands can tell the user to
 //! start the server. Remote servers need an API key ([`Client::with_api_key`]).
 //!
@@ -184,6 +185,77 @@ pub struct Running {
     /// Loaded models.
     pub models: Vec<RunningModel>,
 }
+
+/// One model in the scheduler snapshot (`/alkahest/v1/ps`, `status` events).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RuntimeModel {
+    /// Display name (`qwen3:8b`).
+    pub name: String,
+    /// Lifecycle state: `loading`, `ready` or `draining`.
+    pub state: String,
+    /// Engine id (`llama-cpp`, `vllm`, ...).
+    pub engine: String,
+    /// Engine process id.
+    pub pid: Option<u32>,
+    /// Context length per request slot.
+    pub context_length: u64,
+    /// Parallel request slots.
+    pub num_parallel: u32,
+    /// CPU/GPU split as Ollama prints it (`100% GPU`).
+    pub processor_label: String,
+    /// RAM charged to the model, bytes.
+    pub ram_bytes: u64,
+    /// VRAM charged to the model, bytes.
+    pub vram_bytes: u64,
+    /// `ram_bytes + vram_bytes`.
+    pub size_bytes: u64,
+}
+
+/// The scheduler snapshot of `GET /alkahest/v1/ps` and of each `status` event of
+/// `GET /alkahest/v1/events`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SchedulerStatus {
+    /// Loaded and loading models.
+    pub models: Vec<RuntimeModel>,
+    /// Requests waiting across all models.
+    pub queued: usize,
+    /// Queue bound.
+    pub max_queue: usize,
+    /// Requests refused with "server busy" since start.
+    pub rejected_total: u64,
+    /// Successful loads since start.
+    pub loads_total: u64,
+    /// Failed loads since start.
+    pub load_failures_total: u64,
+    /// Models evicted to make room since start.
+    pub evictions_total: u64,
+    /// Engine crashes since start.
+    pub crashes_total: u64,
+}
+
+/// One server-sent event: its `event:` name (`message` when absent) and its `data:` lines
+/// joined with newlines.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerEvent {
+    /// Event name.
+    pub event: String,
+    /// Payload.
+    pub data: String,
+}
+
+impl ServerEvent {
+    /// The scheduler snapshot of a `status` event; `None` for other events.
+    pub fn status(&self) -> Option<Result<SchedulerStatus>> {
+        (self.event == "status").then(|| {
+            serde_json::from_str(&self.data).map_err(|e| ClientError::Decode(e.to_string()))
+        })
+    }
+}
+
+/// A stream of server-sent events.
+pub type EventStream = Pin<Box<dyn Stream<Item = Result<ServerEvent>> + Send>>;
 
 /// A chat message (Ollama shape).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -496,6 +568,86 @@ impl Client {
             .await?;
         Ok(Box::pin(ndjson(resp)))
     }
+
+    /// `GET /alkahest/v1/ps`: the scheduler snapshot (admin scope for remote callers).
+    pub async fn runtime_status(&self) -> Result<SchedulerStatus> {
+        self.get_json("/alkahest/v1/ps").await
+    }
+
+    /// `GET /alkahest/v1/events`: server-sent `status` events carrying the scheduler snapshot,
+    /// one on connect and one per change (admin scope for remote callers). The stream ends
+    /// when the server closes the connection.
+    pub async fn events(&self) -> Result<EventStream> {
+        let path = "/alkahest/v1/events";
+        let req = self
+            .request(reqwest::Method::GET, path)
+            .header(reqwest::header::ACCEPT, "text/event-stream");
+        let resp = self.send(req, path).await?;
+        Ok(Box::pin(sse(resp)))
+    }
+}
+
+/// Decodes a `text/event-stream` body into events. Comment lines (`: keep-alive`) and
+/// unknown fields are skipped, as the SSE specification requires.
+fn sse(resp: reqwest::Response) -> impl Stream<Item = Result<ServerEvent>> + Send {
+    let mut body = resp.bytes_stream();
+    async_stream::stream! {
+        let mut buf = BytesMut::new();
+        let mut parser = SseParser::default();
+        loop {
+            while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
+                let line = buf.split_to(pos + 1);
+                let text = String::from_utf8_lossy(&line[..pos]);
+                if let Some(ev) = parser.line(text.trim_end_matches('\r')) {
+                    yield Ok(ev);
+                }
+            }
+            match body.next().await {
+                Some(Ok(chunk)) => buf.extend_from_slice(&chunk),
+                Some(Err(e)) => {
+                    yield Err(ClientError::Decode(format!("event stream interrupted: {e}")));
+                    return;
+                }
+                None => return,
+            }
+        }
+    }
+}
+
+/// Line-by-line SSE state: the event being assembled.
+#[derive(Debug, Default)]
+struct SseParser {
+    event: Option<String>,
+    data: Vec<String>,
+}
+
+impl SseParser {
+    /// Feeds one line (without its terminator); returns an event on the blank line that ends
+    /// it.
+    fn line(&mut self, line: &str) -> Option<ServerEvent> {
+        if line.is_empty() {
+            let event = self.event.take();
+            if self.data.is_empty() {
+                return None;
+            }
+            let data = std::mem::take(&mut self.data).join("\n");
+            return Some(ServerEvent {
+                event: event.unwrap_or_else(|| "message".to_string()),
+                data,
+            });
+        }
+        if line.starts_with(':') {
+            return None;
+        }
+        let (field, value) = line.split_once(':').unwrap_or((line, ""));
+        let value = value.strip_prefix(' ').unwrap_or(value);
+        match field {
+            "event" => self.event = Some(value.to_string()),
+            "data" => self.data.push(value.to_string()),
+            _ => {}
+        }
+        None
+    }
 }
 
 /// Decodes an NDJSON body; an `{"error": ..}` line ends the stream with [`ClientError::Api`].
@@ -567,6 +719,24 @@ fn error_message(text: &str, status: u16) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sse_lines_assemble_events() {
+        let mut p = SseParser::default();
+        assert_eq!(p.line(": keep-alive"), None);
+        assert_eq!(p.line(""), None, "a comment alone is no event");
+        assert_eq!(p.line("event: status"), None);
+        assert_eq!(p.line("data: {\"queued\":1,"), None);
+        assert_eq!(p.line("data:\"models\":[]}"), None);
+        let ev = p.line("").unwrap();
+        assert_eq!(ev.event, "status");
+        assert_eq!(ev.data, "{\"queued\":1,\n\"models\":[]}");
+        assert_eq!(ev.status().unwrap().unwrap().queued, 1);
+        assert_eq!(p.line("data: x"), None);
+        let ev = p.line("").unwrap();
+        assert_eq!(ev.event, "message");
+        assert!(ev.status().is_none());
+    }
 
     #[test]
     fn bind_addresses_map_to_reachable_urls() {

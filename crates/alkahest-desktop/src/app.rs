@@ -1,10 +1,15 @@
-//! Application start-up: gpui-kit, fonts, tokio bridge, theme and the main window.
+//! Application start-up: gpui-kit, fonts, tokio bridge, settings, theme, the connection
+//! manager and the main window.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use crate::theme::ThemePreference;
+use alkahest_client::Client;
+
+use crate::connection::{ConnectionHandle, ConnectionManager};
+use crate::launcher::{LocalLauncher, is_local_url};
+use crate::settings::{DesktopSettings, KeyringKeyStore, resolve_api_key};
 use crate::theme::tokens::size;
 use crate::ui::{
     self, App, AppContext as _, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px,
@@ -47,7 +52,9 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
     ui::init(cx);
     fonts::register(cx);
     tokio_bridge::init(cx)?;
-    Theme::install(cx, ThemePreference::default(), cx.window_appearance());
+    let settings = load_settings(options);
+    Theme::install(cx, settings.theme, cx.window_appearance());
+    let (server_url, connection) = start_connection(cx, options, &settings)?;
 
     let bounds = Bounds::centered(
         None,
@@ -64,15 +71,21 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
         app_id: Some(APP_ID.into()),
         ..Default::default()
     };
-    let server_url = options.server_url.clone();
+    let url_for_shell = server_url.clone();
     let (handle, _shell) = ui::open_main_window(window_options, cx, move |window, cx| {
         window
             .observe_window_appearance(|window, cx| Theme::follow_appearance(window, cx))
             .detach();
-        cx.new(|_| Shell::new(&server_url))
+        let ConnectionHandle {
+            commands,
+            snapshots,
+        } = connection;
+        let shell = cx.new(|_| Shell::new(&url_for_shell, commands));
+        Shell::follow(&shell, snapshots, cx);
+        shell
     })
     .map_err(DesktopError::Window)?;
-    tracing::info!(server = %options.server_url, "desktop window opened");
+    tracing::info!(server = %server_url, "desktop window opened");
 
     // Closing the window ends the app (no tray yet: ALK-US-0073).
     cx.on_window_closed(|cx, _| {
@@ -109,4 +122,47 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
             .map_err(|e| DesktopError::Window(format!("{e:#}")))?;
     }
     Ok(())
+}
+
+/// The desktop settings; an unreadable file is logged and the defaults are used, so a typo
+/// never keeps the app from opening.
+fn load_settings(options: &LaunchOptions) -> DesktopSettings {
+    let Some(path) = &options.settings_file else {
+        return DesktopSettings::default();
+    };
+    DesktopSettings::load(path).unwrap_or_else(|err| {
+        tracing::warn!("{err}; using the default desktop settings");
+        DesktopSettings::default()
+    })
+}
+
+/// Builds the client for the effective server and starts the connection manager on the tokio
+/// runtime. It stops by itself when the window (holding the handle) goes away.
+fn start_connection(
+    cx: &mut App,
+    options: &LaunchOptions,
+    settings: &DesktopSettings,
+) -> Result<(String, ConnectionHandle), DesktopError> {
+    let server_url = settings
+        .effective_server_url(&options.server_url)
+        .to_string();
+    // The smoke test must never block on a keyring unlock prompt.
+    let api_key = if options.smoke_test {
+        options.api_key.clone()
+    } else {
+        resolve_api_key(options.api_key.clone(), &KeyringKeyStore)
+    };
+    let client = Client::new(&server_url)
+        .map_err(|e| DesktopError::ServerUrl(e.to_string()))?
+        .with_api_key(api_key);
+    // Starting a server only helps when the server is on this machine.
+    let launcher = options
+        .serve_program
+        .clone()
+        .filter(|_| is_local_url(&server_url))
+        .map(|program| LocalLauncher::new(program, options.serve_args.clone()));
+    let url = client.base_url().to_string();
+    let (manager, handle) = ConnectionManager::new(client, launcher, url.clone());
+    tokio_bridge::handle(cx).spawn(manager.run());
+    Ok((url, handle))
 }

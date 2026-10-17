@@ -284,11 +284,14 @@ name = "alkahest-desktop"
 version = "0.1.0"
 dependencies = [
  "alkahest-client",
+ "futures",
  "gpui-kit",
+ "keyring",
  "serde",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "toml 1.1.8+spec-1.1.0",
  "tracing",
 ]
 
