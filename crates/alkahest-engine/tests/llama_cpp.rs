@@ -116,10 +116,17 @@ fn embedding_and_rerank_kinds() {
     let a = args(&e);
     assert!(a.contains(&"--embeddings".to_string()));
     assert!(!a.contains(&"--jinja".to_string()));
+    // A pooled input must fit one micro-batch: llama-server's 512 default is too small.
+    assert_eq!(pair(&a, "-ub").as_deref(), Some("8192"));
+    assert_eq!(pair(&a, "-b").as_deref(), Some("8192"));
+    let mut e2 = e.clone();
+    e2.settings.context_length = Some(2048);
+    assert_eq!(pair(&args(&e2), "-ub").as_deref(), Some("2048"));
     let r = LaunchRequest::new("r", "/m/r.gguf", ModelFormat::Gguf, ModelKind::Rerank);
     let a = args(&r);
     assert!(a.contains(&"--reranking".to_string()));
     assert_eq!(pair(&a, "--pooling").as_deref(), Some("rank"));
+    assert_eq!(pair(&a, "-ub").as_deref(), Some("8192"));
     assert!(!a.contains(&"--jinja".to_string()));
 }
 

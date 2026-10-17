@@ -218,6 +218,46 @@ async fn embeddings(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
     .into_response_body()
 }
 
+/// llama-server rerank: the score is the document length (longer = more relevant).
+async fn rerank(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    log.requests
+        .lock()
+        .push(("/v1/rerank".into(), body.clone()));
+    let results: Vec<Value> = body["documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .map(|(i, d)| json!({"index": i, "relevance_score": d.as_str().unwrap().len() as f64}))
+        .collect();
+    axum::Json(
+        json!({"model": body["model"], "object": "list", "results": results,
+        "usage": {"prompt_tokens": 9, "total_tokens": 9}}),
+    )
+    .into_response_body()
+}
+
+/// Per-slot context the fake engine reports in `/props`.
+pub const FAKE_N_CTX: u64 = 300;
+
+async fn props() -> Response {
+    axum::Json(json!({"default_generation_settings": {"n_ctx": FAKE_N_CTX}, "total_slots": 1}))
+        .into_response_body()
+}
+
+/// Inverse of the fake `/tokenize`: code points back to text.
+async fn detokenize(body: Bytes) -> Response {
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    let content: String = body["tokens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| char::from_u32(t.as_u64().unwrap() as u32))
+        .collect();
+    axum::Json(json!({ "content": content })).into_response_body()
+}
+
 /// Raw logits of the decision scorer's candidate letters: A 2, B 0, C 1, others -50.
 fn letter_logit(id: i64) -> f64 {
     match id {
@@ -322,6 +362,9 @@ pub async fn fake_llama(log: Arc<LlamaLog>) -> u16 {
         .route("/v1/embeddings", post(embeddings))
         .route("/apply-template", post(apply_template))
         .route("/tokenize", post(tokenize))
+        .route("/detokenize", post(detokenize))
+        .route("/props", axum::routing::get(props))
+        .route("/v1/rerank", post(rerank))
         .route("/v1/systemone", post(systemone))
         .with_state(log);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -452,6 +495,13 @@ pub fn gguf_with(kv: &[(&str, &str)]) -> Vec<u8> {
         o.push(0);
     }
     o
+}
+
+pub fn rerank_model() -> FakeModel {
+    FakeModel {
+        caps: Capabilities::of(&[Capability::Rerank, Capability::Tokenize]),
+        settings: ModelSettings::default(),
+    }
 }
 
 pub fn embed_model() -> FakeModel {

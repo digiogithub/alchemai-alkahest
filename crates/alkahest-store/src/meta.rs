@@ -17,7 +17,8 @@ use crate::manifest::{LayerKind, ModelConfig};
 use crate::source::ModelEntry;
 
 /// Bump when [`GgufFacts`] changes shape or meaning; older cache files are then recomputed.
-const FACTS_SCHEMA: u32 = 2;
+// 3: pooling-less rerankers (classification head or reranker tags) classify as rerank.
+const FACTS_SCHEMA: u32 = 3;
 
 /// What Alkahest keeps from a GGUF header: enough to describe and classify the model without
 /// reopening the file.

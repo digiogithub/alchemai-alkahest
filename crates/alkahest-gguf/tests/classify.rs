@@ -352,6 +352,40 @@ fn kind_metadata_is_complete_and_round_trips() {
     assert_eq!(ModelFormat::Safetensors.label(), "safetensors");
 }
 
+#[test]
+fn pooling_less_rerankers_are_rerank() {
+    // gpustack/jina-reranker-v1-tiny-en-GGUF: no pooling type, a `cls` head and tags.
+    let mut tagged = gguf(
+        "jina-bert-v2",
+        &[("general.tags", str_array(&["reranker", "cross-encoder"]))],
+    );
+    let c = classify(&ClassifyInput {
+        gguf: Some(&tagged),
+        ..Default::default()
+    });
+    assert_eq!(c.kind, ModelKind::Rerank);
+
+    tagged.metadata.remove("general.tags");
+    tagged.tensors.push(alkahest_gguf::TensorInfo {
+        name: "cls.weight".into(),
+        shape: vec![384, 1],
+        ggml_type: alkahest_gguf::GgmlType::F16,
+        offset: 0,
+    });
+    let c = classify(&ClassifyInput {
+        gguf: Some(&tagged),
+        ..Default::default()
+    });
+    assert_eq!(c.kind, ModelKind::Rerank);
+
+    let plain = gguf("jina-bert-v2", &[]);
+    let c = classify(&ClassifyInput {
+        gguf: Some(&plain),
+        ..Default::default()
+    });
+    assert_eq!(c.kind, ModelKind::Embeddings);
+}
+
 fn str_array(items: &[&str]) -> Value {
     Value::Array {
         elem: alkahest_gguf::ValueType::String,

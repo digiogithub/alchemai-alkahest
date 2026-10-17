@@ -1,9 +1,9 @@
 //! SDK conformance (ALK-SP-0005.R5, tasks ALK-T-0107 and ALK-T-0111): the official
-//! `ollama` and `openai` Python clients run scripted calls (list, show, chat streamed and
-//! not, generate, completions, embeddings, ps, errors) against the API server over the fake
-//! llama-server.
+//! `ollama`, `openai` and `anthropic` Python clients run scripted calls (list, show, chat
+//! streamed and not, generate, completions, embeddings, messages with tools, ps, errors)
+//! against the API server over the fake llama-server.
 //!
-//! Opt-in: `ALKAHEST_TEST_CONFORMANCE=1` and a Python with both packages installed, named by
+//! Opt-in: `ALKAHEST_TEST_CONFORMANCE=1` and a Python with the packages installed, named by
 //! `ALKAHEST_CONFORMANCE_PYTHON` (default `python3`). `scripts/conformance.sh` creates that
 //! virtual environment under `target/` and runs this test.
 
@@ -71,6 +71,19 @@ async fn openai_python_conformance() {
     let h = harness().await;
     let base = h.url("");
     tokio::task::spawn_blocking(move || run_script("openai_sdk.py", &base))
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn anthropic_python_conformance() {
+    if !enabled() {
+        eprintln!("skipped: set ALKAHEST_TEST_CONFORMANCE=1");
+        return;
+    }
+    let h = harness().await;
+    let base = h.url("");
+    tokio::task::spawn_blocking(move || run_script("anthropic_sdk.py", &base))
         .await
         .unwrap();
 }
