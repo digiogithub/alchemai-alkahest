@@ -2,14 +2,15 @@
 id: ALK-US-0076
 type: story
 title: Windows installer
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0014
 milestone: ALK-M-0006
 labels: [release, windows]
 estimate: 5
 created: 2026-10-16T22:43:30Z
-updated: 2026-10-16T22:52:17Z
+updated: 2026-10-17T06:16:00Z
+started: 2026-10-17T06:16:00Z
 ---
 
 ## Description

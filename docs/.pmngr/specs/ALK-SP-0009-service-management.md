@@ -5,7 +5,7 @@ title: Service management
 status: backlog
 labels: [service]
 created: 2026-10-16T22:37:39Z
-updated: 2026-10-17T05:58:58Z
+updated: 2026-10-17T06:13:14Z
 requirements:
   R1:
     status: backlog
@@ -38,15 +38,22 @@ requirements:
     status: backlog
     trace:
       code:
+        - crates/alkahest-api/src/server.rs#Server
         - crates/alkahest-api/src/server.rs#serve_with
         - crates/alkahest-api/src/shutdown.rs#ShutdownHooks
+        - crates/alkahest-api/src/shutdown.rs#StopSignals
         - crates/alkahest-api/src/shutdown.rs#stop_signal
         - crates/alkahest/src/serve_cmd.rs#serve
+        - crates/alkahest-engine/src/supervisor/orphan.rs#spawn_tied_to_parent
       tests:
         - crates/alkahest-api/tests/shutdown.rs#no_orphans
         - crates/alkahest-api/tests/shutdown.rs#in_flight_requests_finish_and_new_ones_are_refused
         - crates/alkahest-api/tests/shutdown.rs#drain_timeout_bounds_the_wait_and_hooks_still_run
+        - crates/alkahest-api/tests/shutdown.rs#forced_stop_aborts_connections_at_once
         - crates/alkahest/tests/serve.rs#sigterm_stops_the_server_with_exit_code_0
+        - crates/alkahest/tests/serve.rs#second_stop_signal_forces_the_stop
+        - crates/alkahest-engine/tests/orphans.rs#engine_dies_when_the_server_is_sigkilled
+        - crates/alkahest-engine/tests/orphans.rs#engine_dies_with_the_server_through_the_watchdog
 ---
 
 ## Purpose

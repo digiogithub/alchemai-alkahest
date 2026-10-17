@@ -2,14 +2,14 @@
 id: ALK-US-0094
 type: story
 title: Engines of a killed server survive until the next start on macOS and Windows
-status: in_progress
+status: in_review
 priority: medium
 parent: ALK-EP-0005
 milestone: ALK-M-0006
 author: mcp
 labels: [engine, bug]
 created: 2026-10-17T02:39:27Z
-updated: 2026-10-17T05:18:41Z
+updated: 2026-10-17T06:15:54Z
 started: 2026-10-17T05:18:41Z
 inbox:
   status: accepted
