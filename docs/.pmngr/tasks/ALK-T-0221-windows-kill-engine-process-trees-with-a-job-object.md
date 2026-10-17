@@ -2,13 +2,14 @@
 id: ALK-T-0221
 type: task
 title: "Windows: kill engine process trees with a job object"
-status: backlog
+status: done
 priority: medium
 parent: ALK-US-0048
 author: mcp
 labels: [engine]
 created: 2026-10-17T00:18:07Z
-updated: 2026-10-17T00:19:24Z
+updated: 2026-10-17T05:58:48Z
+closed: 2026-10-17T05:58:48Z
 inbox:
   status: accepted
   source: mcp

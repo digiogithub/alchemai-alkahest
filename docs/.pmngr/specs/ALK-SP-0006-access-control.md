@@ -5,7 +5,7 @@ title: Access control
 status: backlog
 labels: [security]
 created: 2026-10-16T22:37:36Z
-updated: 2026-10-17T00:39:01Z
+updated: 2026-10-17T05:39:57Z
 requirements:
   R1:
     status: backlog
@@ -77,6 +77,20 @@ requirements:
         - crates/alkahest/tests/serve.rs#last_used_shows_in_keys_ls_and_the_audit_log
   R6:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/tls.rs#TlsAcceptor
+        - crates/alkahest-api/src/tls.rs#generate_self_signed
+        - crates/alkahest-api/src/server.rs#Server
+        - crates/alkahest-core/src/config.rs#TlsConfig
+        - crates/alkahest-client/src/lib.rs#Client::with_ca_cert_pem
+        - crates/alkahest/src/certs_cmd.rs#run
+      tests:
+        - crates/alkahest-api/tests/tls.rs#tls
+        - crates/alkahest-api/tests/tls.rs#renewed_certificate_is_served_after_a_file_change
+        - crates/alkahest-api/tests/tls.rs#sighup_reloads_the_certificate
+        - crates/alkahest/tests/tls.rs#generated_certificate_serves_https_to_the_cli
+        - crates/alkahest/tests/tls.rs#serve_refuses_to_start_without_the_certificate
   R7:
     status: backlog
     trace:

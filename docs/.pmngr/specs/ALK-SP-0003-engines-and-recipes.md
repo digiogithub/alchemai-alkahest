@@ -5,7 +5,7 @@ title: Engines and recipes
 status: backlog
 labels: [engine, recipes]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-17T02:05:09Z
+updated: 2026-10-17T05:56:44Z
 requirements:
   R1:
     status: backlog
@@ -68,10 +68,13 @@ requirements:
         - crates/alkahest-recipes/src/recipe.rs#select_variant
         - crates/alkahest-recipes/src/build.rs#build_from_source
         - crates/alkahest/src/engines_cmd.rs#install_cmd
+        - crates/alkahest-desktop/src/engines.rs#cards
+        - crates/alkahest-desktop/src/views/engines.rs#EnginesView
       tests:
         - crates/alkahest-recipes/tests/recipes.rs#cuda_pick_chooses_the_variant_the_driver_supports
         - crates/alkahest-recipes/tests/recipes.rs#variant_pick_follows_the_hardware_preference_order
         - crates/alkahest-recipes/tests/recipes.rs#source_build_runs_the_steps_logs_and_keeps_only_the_products
+        - crates/alkahest-desktop/src/engines.rs#cuda_pick
   R5:
     status: backlog
     trace:

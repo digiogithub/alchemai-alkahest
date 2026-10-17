@@ -2,14 +2,15 @@
 id: ALK-US-0079
 type: story
 title: End-to-end test suite
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0014
 milestone: ALK-M-0006
 labels: [release, test]
 estimate: 3
 created: 2026-10-16T22:43:38Z
-updated: 2026-10-16T22:43:38Z
+updated: 2026-10-17T06:09:48Z
+started: 2026-10-17T06:09:48Z
 ---
 
 ## Description

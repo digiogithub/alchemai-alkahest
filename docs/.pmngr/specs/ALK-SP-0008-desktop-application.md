@@ -5,7 +5,7 @@ title: Desktop application
 status: backlog
 labels: [desktop]
 created: 2026-10-16T22:37:38Z
-updated: 2026-10-17T04:33:07Z
+updated: 2026-10-17T05:56:44Z
 requirements:
   R1:
     status: backlog
@@ -76,11 +76,15 @@ requirements:
         - crates/alkahest-desktop/src/model_settings.rs#EstimateView
         - crates/alkahest-desktop/src/model_settings.rs#Debounce
         - crates/alkahest-desktop/src/views/model_settings.rs#ModelSettingsView
+        - crates/alkahest-store/src/overlay.rs#ModelSettings
+        - crates/alkahest-sched/src/scheduler.rs#parallel_slots
       tests:
         - crates/alkahest-desktop/src/model_settings.rs#estimate
         - crates/alkahest-desktop/src/model_settings.rs#edits_parse_validate_and_mark_the_origin
         - crates/alkahest-desktop/src/model_settings.rs#card_differences_are_listed_and_applied
         - crates/alkahest-desktop/src/views/model_settings.rs#the_form_renders_edits_and_drops_card_overrides
+        - crates/alkahest-desktop/src/model_settings.rs#launch_line_and_query_follow_the_draft
+        - crates/alkahest-sched/tests/scheduler.rs#per_model_parallel_slots_override_the_scheduler_value
   R6:
     status: backlog
     trace:
@@ -97,6 +101,17 @@ requirements:
         - crates/alkahest-client/tests/library.rs#runtime_status_reads_the_full_snapshot
   R7:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-desktop/src/keys.rs#KeysState
+        - crates/alkahest-desktop/src/keys.rs#SecretKey
+        - crates/alkahest-desktop/src/keys.rs#NetworkDraft
+        - crates/alkahest-desktop/src/views/keys.rs#KeysView
+      tests:
+        - crates/alkahest-desktop/src/keys.rs#create_key
+        - crates/alkahest-desktop/src/keys.rs#revoking_a_key_used_today_needs_its_name
+        - crates/alkahest-desktop/src/keys.rs#exposure_toggle_switches_the_bind_host_and_warns
+        - crates/alkahest-desktop/src/views/keys.rs#secret_shows_once_and_revoke_asks_first
 ---
 
 ## Purpose

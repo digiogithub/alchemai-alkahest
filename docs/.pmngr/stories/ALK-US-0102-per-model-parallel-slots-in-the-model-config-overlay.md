@@ -2,14 +2,15 @@
 id: ALK-US-0102
 type: story
 title: Per-model parallel slots in the model config overlay
-status: in_progress
+status: done
 priority: medium
 parent: ALK-EP-0003
 author: mcp
 labels: [config, desktop]
 created: 2026-10-17T04:30:45Z
-updated: 2026-10-17T04:42:31Z
+updated: 2026-10-17T06:09:39Z
 started: 2026-10-17T04:42:31Z
+closed: 2026-10-17T06:09:39Z
 inbox:
   status: accepted
   source: mcp

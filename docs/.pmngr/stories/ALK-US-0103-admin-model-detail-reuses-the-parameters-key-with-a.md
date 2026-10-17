@@ -2,14 +2,15 @@
 id: ALK-US-0103
 type: story
 title: Admin model detail reuses the `parameters` key with a different type
-status: in_progress
+status: done
 priority: medium
 parent: ALK-EP-0007
 author: mcp
 labels: [api, bug]
 created: 2026-10-17T04:30:45Z
-updated: 2026-10-17T04:42:31Z
+updated: 2026-10-17T06:09:39Z
 started: 2026-10-17T04:42:31Z
+closed: 2026-10-17T06:09:39Z
 inbox:
   status: accepted
   source: mcp

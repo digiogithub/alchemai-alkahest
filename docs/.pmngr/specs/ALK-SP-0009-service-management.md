@@ -5,15 +5,25 @@ title: Service management
 status: backlog
 labels: [service]
 created: 2026-10-16T22:37:39Z
-updated: 2026-10-17T00:54:11Z
+updated: 2026-10-17T05:58:58Z
 requirements:
   R1:
     status: backlog
     trace:
-      code: [crates/alkahest/src/service_cmd.rs#run]
+      code:
+        - crates/alkahest/src/service_cmd.rs#run
+        - crates/alkahest/src/service_launchd.rs#plan_install
+        - crates/alkahest/src/service_launchd.rs#render_plist
+        - crates/alkahest/src/service_windows.rs#plan_install
+        - crates/alkahest/src/service_windows.rs#run_service
       tests:
         - crates/alkahest/tests/service.rs#system_install_into_a_root_writes_the_unit_and_runs_nothing
         - crates/alkahest/tests/service.rs#status_json_reports_the_listen_address
+        - crates/alkahest/tests/service.rs#launchd_dry_run_prints_the_daemon_plist_and_launchctl_commands
+        - crates/alkahest/tests/service.rs#launchd_agent_install_into_a_root_then_status_and_uninstall
+        - crates/alkahest/tests/service.rs#windows_dry_run_prints_the_sc_commands
+        - crates/alkahest/src/service_launchd.rs#tests::status_reads_state_and_pid
+        - crates/alkahest/src/service_windows.rs#tests::status_reads_the_state_line
   R2:
     status: backlog
     trace:
