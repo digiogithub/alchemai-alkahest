@@ -42,6 +42,7 @@ Every command accepts these (`serve` binds `--host`, the client commands target 
 | [`hf`](#alkahest-hf) | Manage the Hugging Face token (`login`, `logout`, `whoami`) |
 | [`keys`](#alkahest-keys) | Manage API keys |
 | [`engines`](#alkahest-engines) | Manage inference engines |
+| [`catalog`](#alkahest-catalog) | Manage git catalogs of engine recipes and models (`[[catalogs]]`) |
 | [`certs`](#alkahest-certs) | Manage TLS certificates for HTTPS (`[server.tls]`) |
 | [`service`](#alkahest-service) | Install or control the background service |
 | [`sysinfo`](#alkahest-sysinfo) | Report CPU, memory and accelerators |
@@ -481,6 +482,104 @@ Arguments:
 
 ```text
   <ENGINE>  Engine id
+```
+
+## alkahest catalog
+
+Manage git catalogs of engine recipes and models (`[[catalogs]]`).
+
+Catalogs are folders of TOML in git repositories (the official one is `catalog/` of digiogithub/alchemai-alkahest). Their snapshots live under `<data dir>/catalogs/` and refresh in the background when older than `refresh_interval` (24h by default); `ALKAHEST_CATALOG_AUTO_SYNC=0` turns the automatic refresh off. A private catalog's token comes from the OS keyring (service `alkahest`, user `catalog:<name>`) or `ALKAHEST_CATALOG_TOKEN_<NAME>`.
+
+```text
+alkahest catalog [OPTIONS] <COMMAND>
+```
+
+| Subcommand | Purpose |
+|---|---|
+| `ls` | List the configured catalogs: ref, commit, last sync, entry counts and issues [alias: list] |
+| `sync` | Fetch catalogs now (every enabled one, or the one named) |
+| `add` | Add a catalog source after the existing ones (a later catalog overrides earlier ones) |
+| `rm` | Remove a catalog source and its snapshot [alias: remove] |
+| `index` | Write `index.toml` for a catalog directory (catalog authors) |
+
+Options (besides the global ones):
+
+```text
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### alkahest catalog ls
+
+List the configured catalogs: ref, commit, last sync, entry counts and issues
+
+```text
+alkahest catalog ls [OPTIONS]
+```
+
+### alkahest catalog sync
+
+Fetch catalogs now (every enabled one, or the one named)
+
+```text
+alkahest catalog sync [OPTIONS] [NAME]
+```
+
+Arguments:
+
+```text
+  [NAME]  Catalog name
+```
+
+### alkahest catalog add
+
+Add a catalog source after the existing ones (a later catalog overrides earlier ones)
+
+```text
+alkahest catalog add [OPTIONS] <NAME> <URL>
+```
+
+Arguments:
+
+```text
+  <NAME>  Catalog name (lower-case letters, digits, `-`, `_`, `.`)
+  <URL>   Git repository URL (`https://`), or `file://` path of a catalog directory
+```
+
+Options (besides the global ones):
+
+```text
+      --ref <GIT_REF>       Branch or tag to follow [default: main]
+      --subdir <SUBDIR>     Folder of the catalog inside the repository [default: .]
+      --pin <PIN>           Freeze the catalog at this commit id (never refreshed)
+```
+
+### alkahest catalog rm
+
+Remove a catalog source and its snapshot
+
+```text
+alkahest catalog rm [OPTIONS] <NAME>
+```
+
+Arguments:
+
+```text
+  <NAME>  Catalog name
+```
+
+### alkahest catalog index
+
+Write `index.toml` for a catalog directory (catalog authors)
+
+```text
+alkahest catalog index [OPTIONS] <DIR>
+```
+
+Arguments:
+
+```text
+  <DIR>  Catalog directory (holding `catalog.toml`)
 ```
 
 ## alkahest certs

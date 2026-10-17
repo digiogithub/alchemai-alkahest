@@ -223,15 +223,23 @@ async fn serve(
             _ => None,
         })
         .unwrap_or_else(|| loaded.paths.user_config_file());
-    let engines = Arc::new(RecipeEngineManager::new(
-        &paths.engines_dir,
-        &paths.data_dir,
-        FetchConfig {
-            max_bytes_per_sec: config.pull.bandwidth_cap(),
-            ..FetchConfig::default()
-        },
-        system.clone(),
-    ));
+    let engines = Arc::new(
+        RecipeEngineManager::new(
+            &paths.engines_dir,
+            &paths.data_dir,
+            FetchConfig {
+                max_bytes_per_sec: config.pull.bandwidth_cap(),
+                ..FetchConfig::default()
+            },
+            system.clone(),
+        )
+        .with_catalogs(&paths.data_dir, config.catalogs.clone()),
+    );
+    spawn_catalog_refresh(
+        paths.data_dir.clone(),
+        config.catalogs.clone(),
+        alkahest_catalog::Limits::from_config(&config.catalog_limits),
+    );
     let admin = AdminContext::builder(config.clone(), paths.clone(), config_file)
         .sources(loaded.sources.iter().map(ToString::to_string).collect())
         .engines(engines)
@@ -322,4 +330,54 @@ async fn serve(
     );
     eprintln!("alkahest serve: stopped");
     Ok(())
+}
+
+/// How often `serve` looks for catalogs whose refresh interval expired.
+const CATALOG_CHECK_EVERY: Duration = Duration::from_secs(10 * 60);
+
+/// Refreshes the git catalogs in the background while the server runs (ALK-SP-0011.R10):
+/// a catalog is synced when its last check is older than its `refresh_interval`. Requests never
+/// wait for it; the engine manager reads the snapshots afresh on each use.
+/// `ALKAHEST_CATALOG_AUTO_SYNC=0` turns it off.
+fn spawn_catalog_refresh(
+    data_dir: std::path::PathBuf,
+    sources: Vec<alkahest_core::config::CatalogSource>,
+    limits: alkahest_catalog::Limits,
+) {
+    if std::env::var(crate::catalog_cmd::AUTO_SYNC_ENV).is_ok_and(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        )
+    }) {
+        return;
+    }
+    tokio::spawn(async move {
+        let ctx = match alkahest_catalog::SyncContext::new(&data_dir) {
+            Ok(c) => c.with_limits(limits),
+            Err(e) => {
+                tracing::warn!(error = %e, "catalog refresh disabled");
+                return;
+            }
+        };
+        loop {
+            let states = {
+                let (d, s) = (data_dir.clone(), sources.clone());
+                tokio::task::spawn_blocking(move || alkahest_catalog::load_states(&d, &s))
+                    .await
+                    .unwrap_or_default()
+            };
+            for state in states.iter().filter(|s| s.is_due()) {
+                match alkahest_catalog::sync(&state.source, &ctx).await {
+                    Ok(r) => {
+                        tracing::info!(catalog = %r.catalog, outcome = ?r.outcome, "catalog refreshed")
+                    }
+                    Err(e) => {
+                        tracing::warn!(catalog = %state.source.name, error = %e, "catalog refresh failed; keeping the last good snapshot")
+                    }
+                }
+            }
+            tokio::time::sleep(CATALOG_CHECK_EVERY).await;
+        }
+    });
 }

@@ -14,6 +14,8 @@ fn alkahest(home: &std::path::Path, engines: &std::path::Path) -> Command {
     }
     cmd.env("ALKAHEST_HOME", home);
     cmd.env("ALKAHEST_ENGINES_DIR", engines);
+    // Hermetic: no catalog fetch from GitHub (ALK-US-0118 has its own catalog tests).
+    cmd.env("ALKAHEST_CATALOG_AUTO_SYNC", "0");
     cmd
 }
 

@@ -269,6 +269,19 @@ pub enum Command {
         #[command(subcommand)]
         action: EnginesAction,
     },
+    /// Manage git catalogs of engine recipes and models (`[[catalogs]]`).
+    ///
+    /// Catalogs are folders of TOML in git repositories (the official one is `catalog/` of
+    /// digiogithub/alchemai-alkahest). Their snapshots live under `<data dir>/catalogs/` and
+    /// refresh in the background when older than `refresh_interval` (24h by default);
+    /// `ALKAHEST_CATALOG_AUTO_SYNC=0` turns the automatic refresh off. A private catalog's
+    /// token comes from the OS keyring (service `alkahest`, user `catalog:<name>`) or
+    /// `ALKAHEST_CATALOG_TOKEN_<NAME>`.
+    Catalog {
+        /// Catalog action.
+        #[command(subcommand)]
+        action: CatalogAction,
+    },
     /// Manage TLS certificates for HTTPS (`[server.tls]`).
     Certs {
         /// Certificate action.
@@ -423,6 +436,49 @@ pub enum EnginesAction {
     },
 }
 
+/// `alkahest catalog ...`
+#[derive(Debug, Subcommand)]
+pub enum CatalogAction {
+    /// List the configured catalogs: ref, commit, last sync, entry counts and issues.
+    #[command(visible_alias = "list")]
+    Ls,
+    /// Fetch catalogs now (every enabled one, or the one named).
+    Sync {
+        /// Catalog name.
+        name: Option<String>,
+        /// Run silently as the detached background refresh started by other commands.
+        #[arg(long, hide = true)]
+        background: bool,
+    },
+    /// Add a catalog source after the existing ones (a later catalog overrides earlier ones).
+    Add {
+        /// Catalog name (lower-case letters, digits, `-`, `_`, `.`).
+        name: String,
+        /// Git repository URL (`https://`), or `file://` path of a catalog directory.
+        url: String,
+        /// Branch or tag to follow.
+        #[arg(long = "ref", default_value = "main")]
+        git_ref: String,
+        /// Folder of the catalog inside the repository.
+        #[arg(long, default_value = ".")]
+        subdir: String,
+        /// Freeze the catalog at this commit id (never refreshed).
+        #[arg(long)]
+        pin: Option<String>,
+    },
+    /// Remove a catalog source and its snapshot.
+    #[command(visible_alias = "remove")]
+    Rm {
+        /// Catalog name.
+        name: String,
+    },
+    /// Write `index.toml` for a catalog directory (catalog authors).
+    Index {
+        /// Catalog directory (holding `catalog.toml`).
+        dir: std::path::PathBuf,
+    },
+}
+
 /// `alkahest service ...`
 #[derive(Debug, Subcommand)]
 pub enum ServiceAction {
@@ -543,6 +599,7 @@ impl Command {
             | Self::Serve { .. }
             | Self::Keys { .. }
             | Self::Engines { .. }
+            | Self::Catalog { .. }
             | Self::Certs { .. }
             | Self::Hf { .. }
             | Self::Desktop(_) => {
@@ -569,6 +626,7 @@ impl Command {
             Self::Hf { .. } => "hf",
             Self::Keys { .. } => "keys",
             Self::Engines { .. } => "engines",
+            Self::Catalog { .. } => "catalog",
             Self::Certs { .. } => "certs",
             Self::Service { .. } => "service",
             Self::Sysinfo => "sysinfo",

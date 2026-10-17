@@ -20,7 +20,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use alkahest_core::config::EngineOverride;
+use alkahest_core::config::{CatalogSource, EngineOverride};
 use alkahest_fetch::{FetchConfig, ProgressEvent};
 use alkahest_recipes::{
     Catalog, Host, InstallOptions, InstalledEngine, Recipe, bundled_roots, install, list_installed,
@@ -156,6 +156,9 @@ pub trait EngineManager: Send + Sync {
 pub struct RecipeEngineManager {
     engines_dir: PathBuf,
     recipe_dirs: Vec<PathBuf>,
+    /// `<data_dir>` and the git catalog sources whose snapshots layer between the built-in
+    /// recipes and `recipe_dirs` (ALK-SP-0011.R12).
+    catalogs: Option<(PathBuf, Vec<CatalogSource>)>,
     bundled: Vec<PathBuf>,
     fetch: FetchConfig,
     system: SystemInfo,
@@ -180,6 +183,7 @@ impl RecipeEngineManager {
         Self {
             engines_dir: engines_dir.to_path_buf(),
             recipe_dirs,
+            catalogs: None,
             bundled: exe.as_deref().map(bundled_roots).unwrap_or_default(),
             fetch,
             system,
@@ -192,11 +196,19 @@ impl RecipeEngineManager {
         Self {
             engines_dir: engines_dir.to_path_buf(),
             recipe_dirs: Vec::new(),
+            catalogs: None,
             bundled: Vec::new(),
             fetch: FetchConfig::default(),
             system,
             host: Host::current(),
         }
+    }
+
+    /// Layers the snapshots of the git catalogs `sources` (stored under
+    /// `<data_dir>/catalogs/`) between the built-in recipes and the recipe directories.
+    pub fn with_catalogs(mut self, data_dir: &Path, sources: Vec<CatalogSource>) -> Self {
+        self.catalogs = Some((data_dir.to_path_buf(), sources));
+        self
     }
 
     fn catalog(&self) -> Catalog {
@@ -205,15 +217,15 @@ impl RecipeEngineManager {
 
     /// The recipe catalog and the files that were ignored (path, reason).
     fn catalog_with_issues(&self) -> (Catalog, Vec<(PathBuf, String)>) {
-        let mut catalog = Catalog::builtin();
+        let states = match &self.catalogs {
+            Some((data_dir, sources)) => alkahest_catalog::load_states(data_dir, sources),
+            None => Vec::new(),
+        };
+        let (catalog, issues) = alkahest_catalog::recipe_catalog(&states, &self.recipe_dirs);
         let mut all = Vec::new();
-        for dir in &self.recipe_dirs {
-            let (next, issues) = catalog.with_dir(dir);
-            catalog = next;
-            for issue in issues {
-                tracing::warn!(path = %issue.path.display(), reason = %issue.reason, "ignoring recipe");
-                all.push((issue.path.clone(), issue.reason.to_string()));
-            }
+        for issue in issues {
+            tracing::warn!(path = %issue.path.display(), reason = %issue.reason, "ignoring recipe");
+            all.push((issue.path.clone(), issue.reason.to_string()));
         }
         (catalog, all)
     }
