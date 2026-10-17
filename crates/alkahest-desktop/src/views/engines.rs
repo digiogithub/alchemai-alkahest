@@ -7,11 +7,12 @@
 
 use std::time::Duration;
 
-use alkahest_client::admin::{EngineInstall, EngineListing, Job};
+use alkahest_client::admin::{EngineInstall, EngineInstallOptions, EngineListing, Job};
 use alkahest_client::{Client, ClientError, EngineOverrideDoc};
 use futures::StreamExt as _;
 use serde_json::{Map, Value};
 
+use crate::catalogs::engines_offline_note;
 use crate::connection::{ConnectionState, Snapshot};
 use crate::engines::{
     ChipState, EngineCard, InstalledBuild, JobCard, JobLog, OverrideForm, PREFERENCE, RemoveAsk,
@@ -26,6 +27,7 @@ use crate::ui::{
     Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Task, Window, div, h_flex,
     px, v_flex,
 };
+use crate::views::catalogs::{CatalogsEvent, CatalogsView};
 use crate::views::icons;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
@@ -91,6 +93,8 @@ pub struct EnginesView {
     log_sheet: Option<LogSheet>,
     override_sheet: Option<OverrideSheet>,
     reloading: bool,
+    /// The catalog state of this connection (recipe layers, banner, offline notice).
+    catalogs: Entity<CatalogsView>,
 }
 
 impl std::fmt::Debug for EnginesView {
@@ -103,9 +107,18 @@ impl std::fmt::Debug for EnginesView {
 }
 
 impl EnginesView {
-    /// An Engines screen using `client`.
-    pub fn new(client: Client) -> Self {
+    /// An Engines screen using `client`; `catalogs` is the catalog state of the same
+    /// connection (a finished catalog sync can bring new recipes).
+    pub fn new(client: Client, catalogs: Entity<CatalogsView>, cx: &mut Context<Self>) -> Self {
+        cx.observe(&catalogs, |_, _, cx| cx.notify()).detach();
+        cx.subscribe(&catalogs, |this, _, e: &CatalogsEvent, cx| {
+            if *e == CatalogsEvent::Changed && this.connected {
+                this.reload(cx);
+            }
+        })
+        .detach();
         Self {
+            catalogs,
             client,
             connected: false,
             listing: None,
@@ -447,10 +460,20 @@ impl EnginesView {
     }
 
     fn install(&mut self, req: EngineInstall, cx: &mut Context<Self>) {
+        self.install_with(req, EngineInstallOptions::default(), cx);
+    }
+
+    /// Starts an install job with optional dependencies (`with`) or the native variant.
+    fn install_with(
+        &mut self,
+        req: EngineInstall,
+        opts: EngineInstallOptions,
+        cx: &mut Context<Self>,
+    ) {
         let c = self.client.clone();
         self.call(
             cx,
-            async move { c.install_engine(&req).await },
+            async move { c.install_engine_with(&req, &opts).await },
             |v, r, _| match r {
                 Ok(started) => {
                     v.log.record(&started.job);
@@ -592,6 +615,44 @@ impl EnginesView {
                 .on_click(cx.listener(|this, _, _, cx| this.reload_recipes(cx))),
             )
             .child(primary)
+    }
+
+    /// The neutral 17.18 strip: an enabled catalog has no snapshot yet (offline or never
+    /// synced), so the built-in recipes are in use.
+    fn offline_strip(&self, note: String, p: &Palette, cx: &mut Context<Self>) -> Div {
+        let syncing = self.catalogs.read(cx).any_syncing();
+        let mut sync = button(
+            "engines-catalog-sync",
+            if syncing {
+                "Syncing\u{2026}"
+            } else {
+                "Sync now"
+            },
+            ButtonKind::Secondary,
+            size::CONTROL_SMALL,
+            syncing || !self.connected,
+            p,
+        );
+        if !syncing && self.connected {
+            sync = sync.on_click(cx.listener(|this, _, _, cx| {
+                this.catalogs.update(cx, |v, cx| v.sync_all(cx));
+            }));
+        }
+        h_flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap(px(space::S3))
+            .px(px(14.0))
+            .py(px(space::S2))
+            .rounded(px(radius::LG))
+            .border_1()
+            .border_color(c(p.line_default))
+            .bg(c(p.bg_raised))
+            .type_style(text::SMALL)
+            .text_color(c(p.text_secondary))
+            .child(crate::ui::svg_icon(icons::INFO, 16.0, c(p.text_muted)))
+            .child(div().flex_1().min_w_0().child(note))
+            .child(sync)
     }
 
     fn machine_strip(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
@@ -813,6 +874,7 @@ impl EnginesView {
             ChipState::Building => (p.info_default, p.info_text, false, false),
             ChipState::SourceOnly => (p.line_dashed, p.text_secondary, true, false),
             ChipState::Unsupported => (p.line_dashed, p.text_faint, true, true),
+            ChipState::NativeStale => (p.accent_default, p.accent_text, true, false),
         };
         let mut el = h_flex()
             .id(SharedString::from(key))
@@ -844,10 +906,13 @@ impl EnginesView {
         }
         if let Some(req) = ch.install_request() {
             let hover = c(p.accent_border);
+            let opts = ch.install_options();
             el = el
                 .cursor_pointer()
                 .hover(move |s| s.border_color(hover))
-                .on_click(cx.listener(move |this, _, _, cx| this.install(req.clone(), cx)));
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.install_with(req.clone(), opts.clone(), cx);
+                }));
         }
         el
     }
@@ -889,6 +954,14 @@ impl EnginesView {
             );
         if let Some(r) = &card.recipe {
             head = head.child(tag(r.clone(), p));
+        }
+        if let Some(o) = &card.origin {
+            // The layer the recipe was read from (built-in dashed).
+            let mut chip = tag(o.text.clone(), p);
+            if o.builtin {
+                chip = chip.border_dashed().border_color(c(p.line_dashed));
+            }
+            head = head.child(chip);
         }
         {
             let (engine, name) = (card.id.clone(), card.name.clone());
@@ -959,7 +1032,116 @@ impl EnginesView {
         for (i, ch) in card.chips.iter().enumerate() {
             chips = chips.child(Self::chip(ch, format!("engine-chip-{ci}-{i}"), p, cx));
         }
+        if !card.dependencies.is_empty() {
+            el = el.child(self.dependencies_row(card, ci, p, cx));
+        }
         el.child(div().p(px(size::CARD_PADDING)).child(chips))
+    }
+
+    /// The dependencies of the installed variants: verdigris when installed, an "Install"
+    /// for a missing optional one (`engines install <id> --with <dep>`).
+    fn dependencies_row(
+        &self,
+        card: &EngineCard,
+        ci: usize,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut row = h_flex()
+            .gap(px(space::S2))
+            .flex_wrap()
+            .items_center()
+            .px(px(size::CARD_PADDING))
+            .py(px(space::S3))
+            .border_b_1()
+            .border_color(c(p.line_subtle))
+            .child(
+                div()
+                    .w(px(110.0))
+                    .type_style(text::LABEL)
+                    .text_color(c(p.text_muted))
+                    .child("DEPENDENCIES"),
+            );
+        for (i, d) in card.dependencies.iter().enumerate() {
+            let (border, fg) = if d.installed {
+                (p.ok_default, p.ok_text)
+            } else {
+                (p.line_strong, p.text_primary)
+            };
+            let mut chip = h_flex()
+                .flex_shrink_0()
+                .gap(px(space::S2))
+                .items_center()
+                .pl(px(10.0))
+                .pr(px(4.0))
+                .py(px(3.0))
+                .rounded(px(radius::SM))
+                .border_1()
+                .border_color(c(border))
+                .child(
+                    div()
+                        .type_style(text::MONO)
+                        .text_size(px(text::CAPTION.size))
+                        .text_color(c(fg))
+                        .child(SharedString::from(d.id.clone())),
+                )
+                .child(
+                    div()
+                        .type_style(text::CAPTION)
+                        .text_color(c(p.text_muted))
+                        .child(SharedString::from(d.note.clone())),
+                );
+            if d.installed {
+                chip = chip.child(
+                    div()
+                        .pr(px(6.0))
+                        .type_style(text::CAPTION)
+                        .text_color(c(p.ok_text))
+                        .child("Installed"),
+                );
+            } else if let Some((req, opts)) = d.install.clone() {
+                let target = req.variant.as_deref().map(|v| {
+                    crate::engines::job_target(
+                        &req.engine,
+                        req.version.as_deref().unwrap_or_default(),
+                        v,
+                    )
+                });
+                let running = target.is_some_and(|t| {
+                    self.jobs.iter().any(|j| {
+                        j.kind == "engine_install" && j.state == "running" && j.target == t
+                    })
+                });
+                let mut b = button(
+                    ("engine-dep-install", ci * 100 + i),
+                    if running {
+                        "Installing\u{2026}"
+                    } else {
+                        "Install"
+                    },
+                    ButtonKind::Secondary,
+                    size::CONTROL_SMALL - 6.0,
+                    running || !self.connected,
+                    p,
+                );
+                if !running && self.connected {
+                    b = b.on_click(cx.listener(move |this, _, _, cx| {
+                        this.install_with(req.clone(), opts.clone(), cx);
+                    }));
+                }
+                chip = chip.child(b);
+            }
+            row = row.child(chip);
+        }
+        if let Some(h) = &card.dependency_hint {
+            row = row.child(
+                div()
+                    .type_style(text::CAPTION)
+                    .text_color(c(p.text_secondary))
+                    .child(SharedString::from(h.clone())),
+            );
+        }
+        row
     }
 
     fn build_row(
@@ -990,6 +1172,23 @@ impl EnginesView {
                     .text_color(c(p.ok_text))
                     .type_style(text::CAPTION)
                     .child("in use"),
+            );
+        }
+        if let Some((native, stale)) = b.native_tag() {
+            let (bg, fg) = if stale {
+                (p.accent_subtle, p.accent_text)
+            } else {
+                (p.muted_subtle, p.text_secondary)
+            };
+            label = label.child(
+                div()
+                    .px(px(6.0))
+                    .py(px(1.0))
+                    .rounded(px(radius::XS))
+                    .bg(c(bg))
+                    .text_color(c(fg))
+                    .type_style(text::CAPTION)
+                    .child(native),
             );
         }
         if b.bundled {
@@ -1024,6 +1223,21 @@ impl EnginesView {
                     )
                     .child(mono_caption(b.path.clone(), p)),
             );
+        if let Some((req, opts)) = b.rebuild_request() {
+            row = row.child(
+                button(
+                    ("engine-rebuild", key.0 * 100 + key.1),
+                    "Rebuild for this CPU",
+                    ButtonKind::Secondary,
+                    size::CONTROL_SMALL,
+                    !self.connected,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.install_with(req.clone(), opts.clone(), cx);
+                })),
+            );
+        }
         // The bundled CPU build ships with the binary: there is nothing to remove.
         if !b.bundled {
             row = row.child(
@@ -1311,7 +1525,20 @@ impl Render for EnginesView {
             ));
             return div().relative().size_full().child(content);
         }
-        let mut list = v_flex().gap(px(space::S4)).child(self.machine_strip(p, cx));
+        let mut list = v_flex().gap(px(space::S4));
+        let banner = self
+            .catalogs
+            .update(cx, |v, cx| v.banner_element("engines", p, cx));
+        list = list.children(banner);
+        if let Some(note) = self
+            .catalogs
+            .read(cx)
+            .listing()
+            .and_then(engines_offline_note)
+        {
+            list = list.child(self.offline_strip(note, p, cx));
+        }
+        list = list.child(self.machine_strip(p, cx));
         for (i, job) in job_cards(&self.jobs, &self.log).iter().enumerate() {
             list = list.child(Self::job_card(job, i, p, cx));
         }
@@ -1322,12 +1549,31 @@ impl Render for EnginesView {
             list = list.child(self.engine_card(card, i, p, cx));
         }
         list = list.child(
-            div()
+            v_flex()
+                .gap(px(space::S1))
                 .type_style(text::SMALL)
                 .text_color(c(p.text_muted))
                 .child(
                     "Models use the newest installed build unless pinned in model settings \
                      (engine = \"llama-cpp@b11669\").",
+                )
+                .child(
+                    h_flex()
+                        .gap(px(space::S1))
+                        .child(
+                            "Recipe layers, lowest to highest: built-in \u{203a} catalogs \u{203a} \
+                             recipes/ beside the binary \u{203a} user recipes directory.",
+                        )
+                        .child(
+                            div()
+                                .id("engines-to-catalogs")
+                                .text_color(c(p.accent_text))
+                                .cursor_pointer()
+                                .child("Settings \u{203a} Catalogs \u{2192}")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.catalogs.update(cx, |v, cx| v.request_open(cx));
+                                })),
+                        ),
                 ),
         );
         content = content.child(
@@ -1372,7 +1618,10 @@ mod tests {
             tokio_bridge::init(cx).unwrap();
         });
         let client = Client::new("http://127.0.0.1:9").unwrap();
-        let (view, cx) = cx.add_window_view(|_, _| EnginesView::new(client));
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let catalogs = cx.new(|cx| CatalogsView::new(client.clone(), window, cx));
+            EnginesView::new(client, catalogs, cx)
+        });
         view.update(cx, |v, cx| {
             v.connected = true;
             v.listing = Some(EngineListing {

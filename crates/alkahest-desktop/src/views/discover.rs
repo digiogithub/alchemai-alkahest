@@ -14,9 +14,14 @@ use alkahest_client::HfQuant;
 use alkahest_client::admin::{Job, PullRequest};
 use futures::StreamExt;
 
+use crate::catalog_models::{
+    CatalogEntry, CatalogFormat, SEARCH_LIMIT, VariantTag, cli_line, engine_text, files_text,
+    origin_text, params_text, pull_request, selector_options, template_text, variant_rows,
+};
+use crate::catalogs::{discover_pill, never_fetched, relative};
 use crate::connection::{ConnectionState, Snapshot};
 use crate::discover::{
-    DiscoverState, Fetch, Fit, Hardware, HfFormat, HfSort, HfTask, OllamaRow, PasteTarget,
+    DiscoverState, Fetch, Fit, Hardware, HfFormat, HfSort, HfTask, OllamaRow, PasteTarget, Pick,
     QuantRow, Source, card_summary, check_token, hf_row, ollama_row, parse_paste,
     recommended_block, repo_header, tag_rows, token_pill,
 };
@@ -30,11 +35,13 @@ use crate::ui::{
     StatefulInteractiveElement, Styled, Task, Window, anchored, deferred, div, h_flex, px,
     svg_icon, v_flex,
 };
+use crate::views::catalogs::{CatalogsEvent, CatalogsView, catalog_chip};
 use crate::views::icons;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
-    ButtonKind, button, card, choice_chip, column_label, dismissable, dot, field_frame, format_tag,
-    kind_badge, meter, notice_line, overlay_shadow, segment, segmented,
+    ButtonKind, button, card, choice_chip, column_label, dismissable, dot, empty_block,
+    field_frame, format_tag, kind_badge, meter, notice_line, overlay_shadow, segment, segmented,
+    tag,
 };
 
 /// Typing pause before a search runs.
@@ -60,13 +67,17 @@ enum Menu {
     Task,
     Format,
     Sort,
+    CatalogName,
+    CatalogFormat,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum Choice {
     Task(HfTask),
     Format(HfFormat),
     Sort(HfSort),
+    Catalog(Option<String>),
+    CatalogFormat(CatalogFormat),
 }
 
 /// What the job feed delivers.
@@ -87,7 +98,15 @@ pub struct DiscoverView {
     search: Entity<InputState>,
     ollama_search: Entity<InputState>,
     paste: Entity<InputState>,
+    catalog_search: Entity<InputState>,
     token_input: Entity<InputState>,
+    /// The catalog state of this connection (listing, banner, syncs).
+    catalogs: Entity<CatalogsView>,
+    /// An "All" search copied its text into the Ollama and Catalog fields (done in render,
+    /// which has the window).
+    sync_inputs: bool,
+    catalog_task: Option<Task<()>>,
+    catalog_detail_task: Option<Task<()>>,
     paste_error: Option<String>,
     menu: Option<Menu>,
     search_task: Option<Task<()>>,
@@ -114,8 +133,14 @@ impl std::fmt::Debug for DiscoverView {
 impl EventEmitter<DiscoverEvent> for DiscoverView {}
 
 impl DiscoverView {
-    /// A Discover screen talking to the server through `client`.
-    pub fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// A Discover screen talking to the server through `client`; `catalogs` is the catalog
+    /// state of the same connection.
+    pub fn new(
+        client: Client,
+        catalogs: Entity<CatalogsView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let search = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Search Hugging Face (qwen3 8b gguf)")
         });
@@ -131,13 +156,44 @@ impl DiscoverView {
                 .placeholder("hf_\u{2026}")
                 .masked(true)
         });
+        let catalog_search = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Search the catalog snapshots (qwen chat)")
+        });
+        cx.subscribe_in(
+            &catalog_search,
+            window,
+            |this, input, event: &InputEvent, _, cx| match event {
+                InputEvent::Change => {
+                    let v = input.read(cx).value().to_string();
+                    if v != this.state.catalog.query {
+                        this.state.catalog.query = v;
+                        this.schedule_search(cx);
+                    }
+                }
+                InputEvent::PressEnter { .. } => this.run_search(cx),
+                _ => {}
+            },
+        )
+        .detach();
+        // The listing feeds the pill, the selector and the empty state; a finished sync
+        // changes what the snapshots hold.
+        cx.observe(&catalogs, |_, _, cx| cx.notify()).detach();
+        cx.subscribe(&catalogs, |this, _, e: &CatalogsEvent, cx| {
+            if *e == CatalogsEvent::Changed {
+                this.on_catalogs_changed(cx);
+            }
+        })
+        .detach();
         cx.subscribe_in(
             &search,
             window,
             |this, input, event: &InputEvent, _, cx| match event {
                 InputEvent::Change => {
-                    this.state.hf.query = input.read(cx).value().to_string();
-                    this.schedule_search(cx);
+                    let v = input.read(cx).value().to_string();
+                    if v != this.state.hf.query {
+                        this.state.hf.query = v;
+                        this.schedule_search(cx);
+                    }
                 }
                 InputEvent::PressEnter { .. } => this.run_search(cx),
                 _ => {}
@@ -149,8 +205,12 @@ impl DiscoverView {
             window,
             |this, input, event: &InputEvent, _, cx| match event {
                 InputEvent::Change => {
-                    this.state.ollama_query = input.read(cx).value().to_string();
-                    this.schedule_search(cx);
+                    // A value copied in by an "All" search is not a new search.
+                    let v = input.read(cx).value().to_string();
+                    if v != this.state.ollama_query {
+                        this.state.ollama_query = v;
+                        this.schedule_search(cx);
+                    }
                 }
                 InputEvent::PressEnter { .. } => this.run_search(cx),
                 _ => {}
@@ -189,7 +249,12 @@ impl DiscoverView {
             search,
             ollama_search,
             paste,
+            catalog_search,
             token_input,
+            catalogs,
+            sync_inputs: false,
+            catalog_task: None,
+            catalog_detail_task: None,
             paste_error: None,
             menu: None,
             search_task: None,
@@ -218,7 +283,7 @@ impl DiscoverView {
         if connected {
             self.load_server_facts(cx);
             self.follow_jobs(cx);
-            if self.state.hf_results == Fetch::Idle {
+            if self.state.hf_results == Fetch::Idle || self.state.catalog.results == Fetch::Idle {
                 self.run_search(cx);
             }
         } else {
@@ -323,42 +388,171 @@ impl DiscoverView {
         if !self.connected || self.state.token_dialog {
             return;
         }
+        match self.state.source {
+            Source::Catalog => self.run_catalog_search(cx),
+            Source::Ollama => self.run_ollama_search(cx),
+            Source::All => {
+                // One text for every source; the other tabs show the same search.
+                let q = self.state.hf.query.clone();
+                self.state.ollama_query.clone_from(&q);
+                self.state.catalog.query = q;
+                self.sync_inputs = true;
+                self.run_catalog_search(cx);
+                self.run_hf_and_ollama(cx);
+            }
+            Source::HuggingFace | Source::Paste => self.run_hf_search(cx),
+        }
+        cx.notify();
+    }
+
+    fn run_ollama_search(&mut self, cx: &mut Context<Self>) {
         let generation = self.state.begin_search();
         let client = self.client.clone();
-        match self.state.source {
-            Source::Ollama => {
-                let q = self.state.ollama_query.trim().to_string();
-                let call =
-                    tokio_bridge::spawn(
-                        cx,
-                        async move { client.ollama_search(&q, Some(30)).await },
-                    );
-                self.search_task = Some(cx.spawn(async move |this, cx| {
-                    let result = flatten(call.await);
-                    let _ = this.update(cx, |view, cx| {
-                        view.state.finish_ollama_search(generation, result);
-                        view.load_ollama_tags(cx);
-                        cx.notify();
-                    });
-                }));
-            }
-            _ => {
-                let search = self.state.hf.search();
-                let call = tokio_bridge::spawn(cx, async move { client.hf_search(&search).await });
-                self.search_task = Some(cx.spawn(async move |this, cx| {
-                    let result = flatten(call.await);
-                    let _ = this.update(cx, |view, cx| {
-                        view.state.finish_hf_search(generation, result);
-                        // Keep the selection while it is listed, else open the first result.
-                        if let Some(repo) = view.state.hf_selection_after_search() {
-                            view.select(&repo, cx);
+        let q = self.state.ollama_query.trim().to_string();
+        let call = tokio_bridge::spawn(cx, async move { client.ollama_search(&q, Some(30)).await });
+        self.search_task = Some(cx.spawn(async move |this, cx| {
+            let result = flatten(call.await);
+            let _ = this.update(cx, |view, cx| {
+                view.state.finish_ollama_search(generation, result);
+                view.load_ollama_tags(cx);
+                cx.notify();
+            });
+        }));
+    }
+
+    fn run_hf_search(&mut self, cx: &mut Context<Self>) {
+        let generation = self.state.begin_search();
+        let client = self.client.clone();
+        let search = self.state.hf.search();
+        let call = tokio_bridge::spawn(cx, async move { client.hf_search(&search).await });
+        self.search_task = Some(cx.spawn(async move |this, cx| {
+            let result = flatten(call.await);
+            let _ = this.update(cx, |view, cx| {
+                view.state.finish_hf_search(generation, result);
+                // Keep the selection while it is listed, else open the first result.
+                if let Some(repo) = view.state.hf_selection_after_search() {
+                    view.select(&repo, cx);
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    /// The Hugging Face and Ollama halves of an "All" search, in parallel.
+    fn run_hf_and_ollama(&mut self, cx: &mut Context<Self>) {
+        let generation = self.state.begin_search();
+        let client = self.client.clone();
+        let search = self.state.hf.search();
+        let q = self.state.ollama_query.trim().to_string();
+        let hf = tokio_bridge::spawn(cx, {
+            let client = client.clone();
+            async move { client.hf_search(&search).await }
+        });
+        let ol = tokio_bridge::spawn(cx, async move { client.ollama_search(&q, Some(30)).await });
+        self.search_task = Some(cx.spawn(async move |this, cx| {
+            let result = flatten(hf.await);
+            let _ = this.update(cx, |view, cx| {
+                view.state.finish_hf_search(generation, result);
+                view.open_all_pick(cx);
+                cx.notify();
+            });
+            let result = flatten(ol.await);
+            let _ = this.update(cx, |view, cx| {
+                view.state.finish_ollama_search(generation, result);
+                view.open_all_pick(cx);
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Searches the catalog snapshots (screen 11b; also the first part of "All").
+    fn run_catalog_search(&mut self, cx: &mut Context<Self>) {
+        let generation = self.state.catalog.begin_search();
+        let client = self.client.clone();
+        let q = self.state.catalog.query.trim().to_string();
+        let catalog = self.state.catalog.catalog.clone();
+        let call = tokio_bridge::spawn(cx, async move {
+            client
+                .catalog_search(&q, catalog.as_deref(), Some(SEARCH_LIMIT))
+                .await
+        });
+        self.catalog_task = Some(cx.spawn(async move |this, cx| {
+            let result = flatten(call.await);
+            let _ = this.update(cx, |view, cx| {
+                view.state.catalog.finish_search(generation, result);
+                match view.state.source {
+                    Source::Catalog => {
+                        if let Some(key) = view
+                            .state
+                            .catalog
+                            .selection_after_search(&view.state.hardware)
+                        {
+                            view.select_catalog(&key, cx);
                         }
-                        cx.notify();
-                    });
-                }));
+                    }
+                    Source::All => view.open_all_pick(cx),
+                    _ => {}
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Opens the first "All" row when nothing listed is open.
+    fn open_all_pick(&mut self, cx: &mut Context<Self>) {
+        if self.state.source != Source::All {
+            return;
+        }
+        let Some(pick) = self.state.all_pick_after_search() else {
+            return;
+        };
+        self.open_pick(pick, cx);
+    }
+
+    fn open_pick(&mut self, pick: Pick, cx: &mut Context<Self>) {
+        self.state.all_pick = Some(pick.clone());
+        match pick {
+            Pick::Catalog(key) => self.select_catalog(&key, cx),
+            Pick::Hf(repo) => self.select(&repo, cx),
+            Pick::Ollama(name) => {
+                self.state.ollama_selected = Some(name);
+                self.state.ollama_tag = None;
+                self.load_ollama_tags(cx);
             }
         }
         cx.notify();
+    }
+
+    /// Opens a catalog card and reads its model detail.
+    fn select_catalog(&mut self, key: &str, cx: &mut Context<Self>) {
+        let hw = self.state.hardware;
+        let Some(t) = self.state.catalog.select(key, &hw) else {
+            return;
+        };
+        let client = self.client.clone();
+        let (ns, model, catalog) = (t.namespace, t.model, t.catalog);
+        let call = tokio_bridge::spawn(cx, async move {
+            client.catalog_model(&ns, &model, Some(&catalog)).await
+        });
+        let generation = t.generation;
+        self.catalog_detail_task = Some(cx.spawn(async move |this, cx| {
+            let result = flatten(call.await);
+            let _ = this.update(cx, |view, cx| {
+                view.state.catalog.finish_detail(generation, result);
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    /// A sync finished or a catalog changed: search the snapshots again when they were
+    /// searched before, and re-read the open model.
+    fn on_catalogs_changed(&mut self, cx: &mut Context<Self>) {
+        if !self.connected || self.state.catalog.results == Fetch::Idle {
+            return;
+        }
+        self.state.catalog.mark_stale();
+        self.run_catalog_search(cx);
     }
 
     /// Selects a repository and fetches its card and files.
@@ -593,6 +787,9 @@ impl DiscoverView {
         let idle = match source {
             Source::Ollama => self.state.ollama_results == Fetch::Idle,
             Source::HuggingFace => self.state.hf_results == Fetch::Idle,
+            Source::Catalog => self.state.catalog.results == Fetch::Idle,
+            // "All" shows the current text across every source: search again.
+            Source::All => true,
             Source::Paste => false,
         };
         if idle {
@@ -615,6 +812,14 @@ impl DiscoverView {
                 )
                 .on_click(cx.listener(move |this, _, _, cx| this.set_source(source, cx))),
             );
+        }
+        if self.state.source == Source::Catalog {
+            return h_flex()
+                .items_center()
+                .gap(px(space::S4))
+                .child(div().mr_auto().type_style(text::H1).child("Discover"))
+                .child(segmented(segments, p))
+                .child(self.catalog_pill(p, cx));
         }
         let pill = token_pill(self.state.token.as_ref());
         let (fg, bg, dot_color) = if pill.ok {
@@ -662,7 +867,50 @@ impl DiscoverView {
 
     fn dropdown(&self, menu: Menu, p: &Palette, cx: &mut Context<Self>) -> Div {
         let f = &self.state.hf;
+        let cat = &self.state.catalog;
         let (id, label, options): (&str, String, Vec<(String, bool, Choice)>) = match menu {
+            Menu::CatalogName => {
+                let names = self
+                    .catalogs
+                    .read(cx)
+                    .listing()
+                    .map(|l| selector_options(&l.catalogs))
+                    .unwrap_or_default();
+                let mut opts = vec![(
+                    format!("all ({})", names.len()),
+                    cat.catalog.is_none(),
+                    Choice::Catalog(None),
+                )];
+                for n in names {
+                    opts.push((
+                        n.clone(),
+                        cat.catalog.as_deref() == Some(n.as_str()),
+                        Choice::Catalog(Some(n)),
+                    ));
+                }
+                (
+                    "discover-catalog",
+                    format!(
+                        "Catalog: {} \u{25BE}",
+                        cat.catalog.clone().unwrap_or_else(|| "all".into())
+                    ),
+                    opts,
+                )
+            }
+            Menu::CatalogFormat => (
+                "discover-catalog-format",
+                format!("Format: {} \u{25BE}", cat.format.label()),
+                CatalogFormat::ALL
+                    .into_iter()
+                    .map(|o| {
+                        (
+                            o.label().to_string(),
+                            cat.format == o,
+                            Choice::CatalogFormat(o),
+                        )
+                    })
+                    .collect(),
+            ),
             Menu::Task => (
                 "discover-task",
                 format!("Task: {} \u{25BE}", f.task.label()),
@@ -732,10 +980,18 @@ impl DiscoverView {
                         .hover(move |s| s.bg(hover))
                         .child(label)
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            match choice {
+                            match choice.clone() {
                                 Choice::Task(o) => this.state.hf.task = o,
                                 Choice::Format(o) => this.state.hf.format = o,
                                 Choice::Sort(o) => this.state.hf.sort = o,
+                                Choice::Catalog(o) => this.state.catalog.catalog = o,
+                                Choice::CatalogFormat(o) => {
+                                    // A client-side filter: no new request.
+                                    this.state.catalog.format = o;
+                                    this.menu = None;
+                                    cx.notify();
+                                    return;
+                                }
                             }
                             this.menu = None;
                             this.run_search(cx);
@@ -816,52 +1072,125 @@ impl DiscoverView {
                     col = col.child(muted_line("No repositories match.", p));
                 }
                 for (i, m) in rows.iter().enumerate() {
-                    let row = hf_row(m);
-                    let selected = self.state.selected.as_deref() == Some(row.id.as_str());
-                    let repo = row.id.clone();
-                    let tag = crate::present::FormatTag {
-                        text: row.format.clone(),
-                        ternary: row.ternary,
-                        read_only: false,
-                    };
-                    let mut meta = h_flex()
-                        .gap(px(space::S2))
-                        .items_center()
-                        .child(kind_badge(row.kind))
-                        .child(format_tag(&tag, p));
-                    if row.gated {
-                        meta = meta.child(lock_pill(p));
-                    }
-                    meta = meta.child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .type_style(text::CAPTION)
-                            .text_color(c(p.text_muted))
-                            .child(SharedString::from(row.meta.clone())),
-                    );
-                    col = col.child(
-                        result_card(SharedString::from(format!("hf-result-{i}")), selected, p)
-                            .child(
-                                h_flex()
-                                    .gap(px(space::S2))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .truncate()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .child(SharedString::from(row.id.clone())),
-                                    )
-                                    .child(mono_caption(row.downloads.clone(), p)),
-                            )
-                            .child(meta)
-                            .on_click(cx.listener(move |this, _, _, cx| this.select(&repo, cx))),
-                    );
+                    let selected = self.state.selected.as_deref() == Some(m.id.as_str());
+                    col = col.child(self.hf_card(i, m, selected, false, p, cx));
                 }
             }
         }
         col
+    }
+
+    /// One Hugging Face result card; `chip` adds the source chip (the "All" list).
+    fn hf_card(
+        &self,
+        i: usize,
+        m: &alkahest_client::admin::HfModel,
+        selected: bool,
+        chip: bool,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let row = hf_row(m);
+        let repo = row.id.clone();
+        let tag = crate::present::FormatTag {
+            text: row.format.clone(),
+            ternary: row.ternary,
+            read_only: false,
+        };
+        let mut meta = h_flex()
+            .gap(px(space::S2))
+            .items_center()
+            .child(kind_badge(row.kind))
+            .child(format_tag(&tag, p));
+        if row.gated {
+            meta = meta.child(lock_pill(p));
+        }
+        meta = meta.child(
+            div()
+                .min_w_0()
+                .truncate()
+                .type_style(text::CAPTION)
+                .text_color(c(p.text_muted))
+                .child(SharedString::from(row.meta.clone())),
+        );
+        let mut title = h_flex().gap(px(space::S2)).child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(SharedString::from(row.id.clone())),
+        );
+        if chip {
+            title = title.child(source_chip("Hugging Face", p));
+        }
+        result_card(SharedString::from(format!("hf-result-{i}")), selected, p)
+            .child(title.child(mono_caption(row.downloads.clone(), p)))
+            .child(meta)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if this.state.source == Source::All {
+                    this.state.all_pick = Some(Pick::Hf(repo.clone()));
+                }
+                this.select(&repo, cx);
+            }))
+    }
+
+    /// One Ollama library result card; `chip` adds the source chip (the "All" list).
+    fn ollama_card(
+        &self,
+        i: usize,
+        m: &alkahest_client::admin::LibraryModel,
+        selected: bool,
+        chip: bool,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let row = ollama_row(m);
+        let name = row.name.clone();
+        let mut meta = h_flex()
+            .gap(px(space::S2))
+            .items_center()
+            .child(kind_badge(row.kind));
+        for cap in &row.capabilities {
+            meta = meta.child(mono_caption(cap.clone(), p));
+        }
+        if !row.tags.is_empty() && !row.cloud {
+            meta = meta.child(mono_caption(
+                format!(
+                    "{} tag{}",
+                    row.tags.len(),
+                    if row.tags.len() == 1 { "" } else { "s" }
+                ),
+                p,
+            ));
+        }
+        let mut title = h_flex().gap(px(space::S2)).child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(SharedString::from(row.name.clone())),
+        );
+        if chip {
+            title = title.child(source_chip("Ollama", p));
+        }
+        result_card(
+            SharedString::from(format!("ollama-result-{i}")),
+            selected,
+            p,
+        )
+        .child(title.child(mono_caption(row.pulls.clone(), p)))
+        .child(meta)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if this.state.source == Source::All {
+                this.state.all_pick = Some(Pick::Ollama(name.clone()));
+            }
+            this.state.ollama_selected = Some(name.clone());
+            this.state.ollama_tag = None;
+            this.load_ollama_tags(cx);
+            cx.notify();
+        }))
     }
 
     /// The detail card: scrolls as a whole; its content never shrinks.
@@ -1224,6 +1553,731 @@ impl DiscoverView {
             .child(action)
     }
 
+    /// The Catalog header pill: enabled catalogs and a failed sync; opens Settings › Catalogs.
+    fn catalog_pill(&self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+        let (count, failure) = self
+            .catalogs
+            .read(cx)
+            .listing()
+            .map(discover_pill)
+            .unwrap_or_else(|| ("catalogs".into(), None));
+        let (fg, bg, d) = if failure.is_some() {
+            (p.text_primary, p.danger_subtle, p.danger_default)
+        } else {
+            (p.text_secondary, p.muted_subtle, p.muted_default)
+        };
+        let mut pill = h_flex()
+            .id("discover-catalog-pill")
+            .flex_shrink_0()
+            .items_center()
+            .gap(px(space::S2))
+            .px(px(10.0))
+            .py(px(space::S1))
+            .rounded(px(radius::FULL))
+            .bg(c(bg))
+            .text_color(c(fg))
+            .type_style(text::CAPTION)
+            .font_weight(FontWeight::SEMIBOLD)
+            .cursor_pointer()
+            .child(dot(c(d), 7.0))
+            .child(count);
+        if let Some(f) = failure {
+            pill = pill.child(
+                div()
+                    .text_color(c(p.danger_text))
+                    .child(format!("\u{b7} {f}")),
+            );
+        }
+        pill.on_click(cx.listener(|this, _, _, cx| {
+            this.catalogs.update(cx, |v, cx| v.request_open(cx));
+        }))
+    }
+
+    fn fits_button(&self, id: &'static str, on: bool, p: &Palette) -> Stateful<Div> {
+        filter_button(
+            id,
+            format!(
+                "{}{}",
+                self.state.hardware.fits_label(),
+                if on { " \u{2713}" } else { "" }
+            ),
+            on,
+            p,
+        )
+    }
+
+    fn all_toolbar(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+        h_flex()
+            .gap(px(space::S3))
+            .items_center()
+            .child(self.search_field(&self.search, p))
+            .child(
+                self.fits_button("discover-all-fits", self.state.hf.fits_only, p)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let on = !this.state.hf.fits_only;
+                        this.state.hf.fits_only = on;
+                        this.state.catalog.fits_only = on;
+                        cx.notify();
+                    })),
+            )
+    }
+
+    fn catalog_toolbar(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+        let enabled = self
+            .catalogs
+            .read(cx)
+            .listing()
+            .map(|l| selector_options(&l.catalogs).len())
+            .unwrap_or(0);
+        let mut row = h_flex()
+            .gap(px(space::S3))
+            .items_center()
+            .child(self.search_field(&self.catalog_search, p));
+        // The selector only makes sense with a choice to make.
+        if enabled > 1 {
+            row = row.child(self.dropdown(Menu::CatalogName, p, cx));
+        }
+        row.child(self.dropdown(Menu::CatalogFormat, p, cx)).child(
+            self.fits_button("discover-catalog-fits", self.state.catalog.fits_only, p)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.state.catalog.fits_only = !this.state.catalog.fits_only;
+                    cx.notify();
+                })),
+        )
+    }
+
+    fn variant_tag_el(t: &VariantTag, p: &Palette) -> Div {
+        let (border, fg) = if t.ternary {
+            (p.accent_default, p.accent_text)
+        } else if t.default {
+            (p.accent_border, p.accent_text)
+        } else if t.listed_only {
+            (p.line_dashed, p.text_muted)
+        } else {
+            (p.line_strong, p.text_secondary)
+        };
+        let mut el = div()
+            .flex_shrink_0()
+            .px(px(6.0))
+            .py(px(2.0))
+            .rounded(px(radius::XS))
+            .border_1()
+            .border_color(c(border))
+            .text_color(c(fg))
+            .type_style(text::MONO)
+            .text_size(px(text::CAPTION.size))
+            .whitespace_nowrap()
+            .child(SharedString::from(t.label.clone()));
+        if t.listed_only {
+            el = el.border_dashed();
+        }
+        el
+    }
+
+    /// One catalog result card (screen 11b).
+    fn catalog_card(
+        &self,
+        i: usize,
+        e: &CatalogEntry,
+        selected: bool,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let key = e.key.clone();
+        let title = h_flex()
+            .gap(px(space::S2))
+            .items_center()
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .type_style(text::MONO)
+                    .child(div().text_color(c(p.text_muted)).child("alkahest/"))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(SharedString::from(e.name.clone())),
+                    ),
+            )
+            .child(catalog_chip(&e.catalog, p));
+        let mut meta = h_flex()
+            .gap(px(space::S2))
+            .items_center()
+            .child(kind_badge(e.kind));
+        if !e.license.is_empty() {
+            meta = meta.child(mono_caption(e.license.clone(), p));
+        }
+        meta = meta.child(
+            div()
+                .min_w_0()
+                .truncate()
+                .type_style(text::CAPTION)
+                .text_color(c(p.text_muted))
+                .child(SharedString::from(e.meta())),
+        );
+        let mut tags = h_flex().gap(px(space::S2)).flex_wrap();
+        for t in e.variant_tags() {
+            tags = tags.child(Self::variant_tag_el(&t, p));
+        }
+        let mut card = result_card(
+            SharedString::from(format!("catalog-result-{i}")),
+            selected,
+            p,
+        )
+        .child(title);
+        if !e.description.is_empty() {
+            card = card.child(
+                div()
+                    .type_style(text::SMALL)
+                    .text_color(c(p.text_secondary))
+                    .child(SharedString::from(e.description.clone())),
+            );
+        }
+        card.child(meta)
+            .child(tags)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if this.state.source == Source::All {
+                    this.open_pick(Pick::Catalog(key.clone()), cx);
+                } else {
+                    this.select_catalog(&key, cx);
+                }
+            }))
+    }
+
+    /// The 17.18 block: no catalog snapshot (offline or never synced) or no catalog model.
+    fn catalog_empty(&self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+        let never = self
+            .catalogs
+            .read(cx)
+            .listing()
+            .map(|l| !never_fetched(l).is_empty())
+            .unwrap_or(false);
+        let syncing = self.catalogs.read(cx).any_syncing();
+        let mut sync = button(
+            "discover-catalog-sync",
+            if syncing {
+                "Syncing\u{2026}"
+            } else {
+                "Sync now"
+            },
+            ButtonKind::Secondary,
+            size::CONTROL_SMALL,
+            syncing || !self.connected,
+            p,
+        );
+        if !syncing && self.connected {
+            sync = sync.on_click(cx.listener(|this, _, _, cx| {
+                this.catalogs.update(cx, |v, cx| v.sync_all(cx));
+            }));
+        }
+        let settings = button(
+            "discover-catalog-settings",
+            "Catalog settings",
+            ButtonKind::Secondary,
+            size::CONTROL_SMALL,
+            false,
+            p,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.catalogs.update(cx, |v, cx| v.request_open(cx));
+        }));
+        empty_block(
+            "discover-catalog-empty",
+            icons::DISCOVER,
+            "No catalog models yet",
+            if never {
+                "Discover \u{203a} Catalog searches the local snapshots only, and a catalog has not \
+                 been fetched yet. Sync a catalog to see its models, or use Hugging Face and the \
+                 Ollama library meanwhile."
+            } else {
+                "Discover \u{203a} Catalog searches the local snapshots only. Sync a catalog to see \
+                 its models, or use Hugging Face and the Ollama library meanwhile."
+            },
+            vec![sync, settings],
+            None,
+            p,
+        )
+    }
+
+    fn catalog_body(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let hw = self.state.hardware;
+        let cat = &self.state.catalog;
+        let mut col = v_flex()
+            .id("catalog-results")
+            .w(px(RESULTS_WIDTH))
+            .flex_shrink_0()
+            .h_full()
+            .gap(px(space::S2))
+            .overflow_y_scroll();
+        match &cat.results {
+            Fetch::Idle => {
+                col = col.child(muted_line(
+                    if self.connected {
+                        "Type to search the catalogs."
+                    } else {
+                        "Connect to a server to search."
+                    },
+                    p,
+                ));
+            }
+            Fetch::Loading => col = col.child(muted_line("Searching\u{2026}", p)),
+            Fetch::Failed(e) => {
+                col = col.child(notice_line(format!("Search failed: {e}"), true, p));
+            }
+            Fetch::Ready(rows) => {
+                let entries = cat.entries(&hw);
+                if rows.is_empty() && cat.query.trim().is_empty() {
+                    // Nothing in any snapshot: the 17.18 block replaces both columns.
+                    return v_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .child(self.catalog_empty(p, cx))
+                        .into_any_element();
+                }
+                let tags: usize = entries.iter().map(|e| e.variants.len()).sum();
+                col = col.child(
+                    div()
+                        .type_style(text::SMALL)
+                        .text_color(c(p.text_secondary))
+                        .child(format!(
+                            "{} model{} \u{b7} {tags} tag{} \u{b7} from local snapshots",
+                            entries.len(),
+                            if entries.len() == 1 { "" } else { "s" },
+                            if tags == 1 { "" } else { "s" },
+                        )),
+                );
+                if entries.is_empty() {
+                    col = col.child(muted_line("No catalog models match.", p));
+                }
+                for (i, e) in entries.iter().enumerate() {
+                    let selected = cat.selected.as_deref() == Some(e.key.as_str());
+                    col = col.child(self.catalog_card(i, e, selected, p, cx));
+                }
+            }
+        }
+        h_flex()
+            .flex_1()
+            .min_h_0()
+            .gap(px(space::S5))
+            .items_start()
+            .child(col)
+            .child(self.catalog_detail(p, cx))
+            .into_any_element()
+    }
+
+    /// The detail panel of a catalog model (screen 11b): variants, the catalog entry's
+    /// defaults, the CLI equivalent and the brass Pull.
+    fn catalog_detail(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let cat = &self.state.catalog;
+        let panel = v_flex().flex_shrink_0().gap(px(space::S4));
+        let body = match (&cat.selected, &cat.detail) {
+            (None, _) => panel.child(muted_line("Pick a model to see its variants.", p)),
+            (Some(_), Fetch::Loading | Fetch::Idle) => {
+                panel.child(muted_line("Reading the catalog entry\u{2026}", p))
+            }
+            (Some(key), Fetch::Failed(e)) => panel
+                .child(
+                    div()
+                        .type_style(text::MONO)
+                        .child(SharedString::from(key.clone())),
+                )
+                .child(notice_line(
+                    format!("The catalog entry could not be read: {e}"),
+                    true,
+                    p,
+                )),
+            (Some(_), Fetch::Ready(d)) => self.catalog_detail_body(d, panel, p, cx),
+        };
+        card(p)
+            .id("catalog-detail")
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .overflow_y_scroll()
+            .child(body)
+            .into_any_element()
+    }
+
+    fn catalog_detail_body(
+        &self,
+        d: &alkahest_client::CatalogModelDetail,
+        panel: Div,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let cat = &self.state.catalog;
+        let (ns, model) = crate::catalog_models::split_name(&d.name);
+        let kind = crate::catalog_models::catalog_kind(&d.tags);
+        let chosen = cat.chosen_variant().cloned();
+        let mut facts = vec![];
+        if !d.license.is_empty() {
+            facts.push(d.license.clone());
+        }
+        facts.extend(d.tags.iter().cloned());
+        let mut facts_row = h_flex()
+            .gap(px(space::S2))
+            .flex_wrap()
+            .type_style(text::SMALL)
+            .text_color(c(p.text_secondary))
+            .child(facts.join(" \u{b7} "));
+        if let Some(h) = &d.homepage {
+            facts_row = facts_row.child(
+                div()
+                    .text_color(c(p.accent_text))
+                    .child(SharedString::from(h.clone())),
+            );
+        }
+        let top = h_flex()
+            .items_start()
+            .gap(px(space::S3))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(space::S1))
+                    .child(mono_caption(format!("alkahest / {ns}"), p))
+                    .child(
+                        div()
+                            .type_style(text::MONO_LARGE)
+                            .child(SharedString::from(model)),
+                    ),
+            )
+            .child(kind_badge(kind));
+        let mut panel = panel.child(top);
+        if !d.description.is_empty() {
+            panel = panel.child(
+                div()
+                    .type_style(text::SMALL)
+                    .child(SharedString::from(d.description.clone())),
+            );
+        }
+        panel = panel
+            .child(facts_row)
+            .child(column_label("CHOOSE A VARIANT", p));
+        let rows = variant_rows(d, &self.state.hardware);
+        let mut list = v_flex()
+            .rounded(px(radius::LG))
+            .border_1()
+            .border_color(c(p.line_default))
+            .overflow_hidden();
+        let last = rows.len().saturating_sub(1);
+        for (i, row) in rows.iter().enumerate() {
+            let on = chosen.as_ref().is_some_and(|v| v.tag == row.tag);
+            let (fit_fg, _) = fit_colors(row.fit, p);
+            let radio = div()
+                .size(px(16.0))
+                .flex_shrink_0()
+                .rounded_full()
+                .border_2()
+                .border_color(c(if on { p.accent_default } else { p.line_strong }))
+                .flex()
+                .items_center()
+                .justify_center()
+                .when_on(on, |d| {
+                    d.child(div().size(px(8.0)).rounded_full().bg(c(p.accent_default)))
+                });
+            let tag_name = row.tag.clone();
+            let mut el = h_flex()
+                .id(SharedString::from(format!("catalog-variant-{i}")))
+                .px(px(14.0))
+                .py(px(10.0))
+                .gap(px(space::S3))
+                .items_center()
+                .cursor_pointer()
+                .child(radio)
+                .child(
+                    div()
+                        .w(px(110.0))
+                        .truncate()
+                        .type_style(text::MONO)
+                        .text_color(c(if row.ternary {
+                            p.accent_text
+                        } else {
+                            p.text_primary
+                        }))
+                        .child(SharedString::from(row.tag.clone())),
+                )
+                .child(
+                    div()
+                        .w(px(150.0))
+                        .truncate()
+                        .type_style(text::MONO)
+                        .text_size(px(text::CAPTION.size))
+                        .text_color(c(p.text_secondary))
+                        .child(SharedString::from(row.format.clone())),
+                )
+                .child(
+                    h_flex()
+                        .w(px(70.0))
+                        .justify_end()
+                        .type_style(text::MONO)
+                        .child(SharedString::from(row.size.clone())),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .type_style(text::SMALL)
+                        .text_color(if row.listed_only {
+                            c(p.text_muted)
+                        } else {
+                            fit_fg
+                        })
+                        .child(if row.listed_only {
+                            "listed only \u{b7} pull refuses safetensors today".to_string()
+                        } else if row.pulled {
+                            format!("{} \u{b7} in Library", row.fit.label())
+                        } else {
+                            row.fit.label()
+                        }),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.state.catalog.chosen = Some(tag_name.clone());
+                    cx.notify();
+                }));
+            if row.default {
+                el = el.child(
+                    div()
+                        .type_style(text::SMALL)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(c(p.accent_text))
+                        .child("Default"),
+                );
+            }
+            if on {
+                el = el.bg(c(p.accent_subtle));
+            } else {
+                let hover = c(p.bg_overlay);
+                el = el.hover(move |s| s.bg(hover));
+            }
+            if i != last {
+                el = el.border_b_1().border_color(c(p.line_subtle));
+            }
+            list = list.child(el);
+        }
+        panel = panel.child(list);
+        let Some(v) = chosen else {
+            return panel;
+        };
+        let synced = self
+            .catalogs
+            .read(cx)
+            .listing()
+            .and_then(|l| l.catalogs.iter().find(|c| c.name == v.catalog))
+            .map(|c| relative(c.fetched_at.as_deref(), time::OffsetDateTime::now_utc()));
+        let (engine, installed) = engine_text(&v);
+        let cell = |label: &'static str, value: String, color: u32| {
+            v_flex()
+                .w(crate::ui::relative(0.5))
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .type_style(text::SMALL)
+                        .text_color(c(p.text_secondary))
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .pr(px(space::S3))
+                        .type_style(text::MONO)
+                        .text_size(px(text::SMALL.size))
+                        .text_color(c(color))
+                        .child(value),
+                )
+        };
+        let grid = div()
+            .flex()
+            .flex_wrap()
+            .gap_y(px(space::S3))
+            .child(cell(
+                "Engine",
+                engine,
+                if installed { p.ok_text } else { p.text_primary },
+            ))
+            .child(cell("Template", template_text(&v), p.text_primary))
+            .child(cell("Parameters", params_text(&v), p.text_primary))
+            .child(cell("Files", files_text(&v), p.text_primary))
+            .child(cell(
+                "Origin",
+                origin_text(&v, synced.as_deref()),
+                p.text_primary,
+            ));
+        panel = panel.child(
+            v_flex()
+                .p(px(14.0))
+                .gap(px(space::S3))
+                .rounded(px(radius::LG))
+                .border_1()
+                .border_color(c(p.line_default))
+                .child(
+                    h_flex()
+                        .child(
+                            div()
+                                .flex_1()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child("From the catalog entry"),
+                        )
+                        .child(
+                            div()
+                                .type_style(text::CAPTION)
+                                .text_color(c(p.text_muted))
+                                .child("become the model's defaults; your model settings win"),
+                        ),
+                )
+                .child(grid),
+        );
+        let req = pull_request(&v);
+        let size_text = if v.size > 0 {
+            format!(" \u{b7} {}", crate::present::format_bytes(v.size))
+        } else {
+            String::new()
+        };
+        let pulling = req
+            .as_ref()
+            .is_some_and(|r| self.downloads.is_pulling(&r.model));
+        let label = match (&req, pulling) {
+            (None, _) => "Listed only".to_string(),
+            (Some(_), true) => "Downloading\u{2026}".to_string(),
+            (Some(_), false) => format!("Pull {}{size_text}", v.tag),
+        };
+        let disabled = req.is_none() || pulling || !self.connected;
+        let mut b = button(
+            "catalog-pull",
+            label,
+            ButtonKind::Primary,
+            size::CONTROL_LARGE,
+            disabled,
+            p,
+        );
+        if let (Some(r), false) = (req, disabled) {
+            b = b.on_click(cx.listener(move |this, _, _, cx| this.pull(r.clone(), cx)));
+        }
+        panel.child(
+            h_flex()
+                .gap(px(space::S3))
+                .items_center()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .type_style(text::MONO)
+                        .text_size(px(text::CAPTION.size))
+                        .text_color(c(p.text_muted))
+                        .child(cli_line(&v, cat.catalog_chosen())),
+                )
+                .child(b),
+        )
+    }
+
+    /// The "All" list: catalog cards first, then Hugging Face, then Ollama, each with its
+    /// source chip; the detail panel follows the open row.
+    fn all_body(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+        let st = &self.state;
+        let mut col = v_flex()
+            .id("all-results")
+            .w(px(RESULTS_WIDTH))
+            .flex_shrink_0()
+            .h_full()
+            .gap(px(space::S2))
+            .overflow_y_scroll();
+        let loading = st.catalog.results.is_loading()
+            || st.hf_results.is_loading()
+            || st.ollama_results.is_loading();
+        let rows = st.all_rows();
+        col = col.child(
+            div()
+                .type_style(text::SMALL)
+                .text_color(c(p.text_secondary))
+                .child(format!(
+                    "{} result{}{}",
+                    rows.len(),
+                    if rows.len() == 1 { "" } else { "s" },
+                    if loading {
+                        " \u{b7} searching\u{2026}"
+                    } else {
+                        ""
+                    }
+                )),
+        );
+        for (label, fetch_err) in [
+            (
+                "Catalog",
+                match &st.catalog.results {
+                    Fetch::Failed(e) => Some(e),
+                    _ => None,
+                },
+            ),
+            (
+                "Hugging Face",
+                match &st.hf_results {
+                    Fetch::Failed(e) => Some(e),
+                    _ => None,
+                },
+            ),
+            (
+                "Ollama",
+                match &st.ollama_results {
+                    Fetch::Failed(e) => Some(e),
+                    _ => None,
+                },
+            ),
+        ] {
+            if let Some(e) = fetch_err {
+                col = col.child(notice_line(format!("{label} search failed: {e}"), true, p));
+            }
+        }
+        let entries = st.catalog.entries(&st.hardware);
+        for (i, e) in entries.iter().enumerate() {
+            let on = st.all_pick == Some(Pick::Catalog(e.key.clone()));
+            col = col.child(self.catalog_card(i, e, on, p, cx));
+        }
+        if let Some(list) = st.hf_results.ready() {
+            for (i, m) in list.iter().enumerate() {
+                let on = st.all_pick == Some(Pick::Hf(m.id.clone()));
+                col = col.child(self.hf_card(i, m, on, true, p, cx));
+            }
+        }
+        if let Some(list) = st.ollama_results.ready() {
+            for (i, m) in list.iter().enumerate() {
+                let on = st.all_pick == Some(Pick::Ollama(m.name.clone()));
+                col = col.child(self.ollama_card(i, m, on, true, p, cx));
+            }
+        }
+        if rows.is_empty() && !loading {
+            col = col.child(muted_line(
+                if self.connected {
+                    "Type to search every source."
+                } else {
+                    "Connect to a server to search."
+                },
+                p,
+            ));
+        }
+        let detail: AnyElement = match &st.all_pick {
+            Some(Pick::Catalog(_)) => self.catalog_detail(p, cx),
+            Some(Pick::Hf(_)) => self.detail_panel(p, cx),
+            Some(Pick::Ollama(_)) => self
+                .ollama_detail(st.ollama_row(), p, cx)
+                .into_any_element(),
+            None => card(p)
+                .flex_1()
+                .min_w_0()
+                .child(muted_line("Pick a result to see its files or tags.", p))
+                .into_any_element(),
+        };
+        h_flex()
+            .flex_1()
+            .min_h_0()
+            .gap(px(space::S5))
+            .items_start()
+            .child(col)
+            .child(detail)
+    }
+
     fn ollama_body(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
         let mut col = v_flex()
             .id("ollama-results")
@@ -1246,53 +2300,8 @@ impl DiscoverView {
                         .child(format!("{} models", rows.len())),
                 );
                 for (i, m) in rows.iter().enumerate() {
-                    let row = ollama_row(m);
-                    let selected = self.state.ollama_selected.as_deref() == Some(row.name.as_str());
-                    let name = row.name.clone();
-                    let mut meta = h_flex()
-                        .gap(px(space::S2))
-                        .items_center()
-                        .child(kind_badge(row.kind));
-                    for cap in &row.capabilities {
-                        meta = meta.child(mono_caption(cap.clone(), p));
-                    }
-                    if !row.tags.is_empty() && !row.cloud {
-                        meta = meta.child(mono_caption(
-                            format!(
-                                "{} tag{}",
-                                row.tags.len(),
-                                if row.tags.len() == 1 { "" } else { "s" }
-                            ),
-                            p,
-                        ));
-                    }
-                    col = col.child(
-                        result_card(
-                            SharedString::from(format!("ollama-result-{i}")),
-                            selected,
-                            p,
-                        )
-                        .child(
-                            h_flex()
-                                .gap(px(space::S2))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child(SharedString::from(row.name.clone())),
-                                )
-                                .child(mono_caption(row.pulls.clone(), p)),
-                        )
-                        .child(meta)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.state.ollama_selected = Some(name.clone());
-                            this.state.ollama_tag = None;
-                            this.load_ollama_tags(cx);
-                            cx.notify();
-                        })),
-                    );
+                    let selected = self.state.ollama_selected.as_deref() == Some(m.name.as_str());
+                    col = col.child(self.ollama_card(i, m, selected, false, p, cx));
                 }
             }
         }
@@ -1822,6 +2831,17 @@ impl DiscoverView {
 
 impl Render for DiscoverView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if std::mem::take(&mut self.sync_inputs) {
+            // The handlers ignore values equal to the state, so this starts no search.
+            let (q, cq) = (
+                self.state.ollama_query.clone(),
+                self.state.catalog.query.clone(),
+            );
+            self.ollama_search
+                .update(cx, |s, cx| s.set_value(q, window, cx));
+            self.catalog_search
+                .update(cx, |s, cx| s.set_value(cq, window, cx));
+        }
         let p = Theme::get(cx).palette;
         let mut content = v_flex()
             .size_full()
@@ -1831,6 +2851,18 @@ impl Render for DiscoverView {
             content = content.child(notice_line(n.clone(), true, p));
         }
         content = match self.state.source {
+            Source::All => content
+                .child(self.all_toolbar(p, cx))
+                .child(self.all_body(p, cx)),
+            Source::Catalog => {
+                let banner = self
+                    .catalogs
+                    .update(cx, |v, cx| v.banner_element("discover", p, cx));
+                content
+                    .children(banner)
+                    .child(self.catalog_toolbar(p, cx))
+                    .child(self.catalog_body(p, cx))
+            }
             Source::HuggingFace => content.child(self.hf_toolbar(p, cx)).child(
                 h_flex()
                     .flex_1()
@@ -1892,6 +2924,11 @@ fn filter_button(id: &'static str, label: String, on: bool, p: &Palette) -> Stat
         .cursor_pointer()
         .hover(move |s| s.border_color(hover))
         .child(label)
+}
+
+/// The source chip of a row in the "All" list.
+fn source_chip(label: &'static str, p: &Palette) -> Div {
+    tag(label, p)
 }
 
 /// A selectable result card; the selected one has the brass border.
@@ -2032,8 +3069,10 @@ mod tests {
     #[gpui_test]
     fn detail_renders_quants_and_completed_jobs_refresh_the_library(cx: &mut TestAppContext) {
         setup(cx);
-        let (view, cx) =
-            cx.add_window_view(|window, cx| DiscoverView::new(dead_client(), window, cx));
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let catalogs = cx.new(|cx| CatalogsView::new(dead_client(), window, cx));
+            DiscoverView::new(dead_client(), catalogs, window, cx)
+        });
         let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let seen = events.clone();
         view.update(cx, |_, cx| {

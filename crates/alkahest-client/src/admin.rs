@@ -251,6 +251,10 @@ pub struct PullRequest {
     /// Download even when the Ollama store has the model.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub force: bool,
+    /// Catalog models (`alkahest/<namespace>/<model>`): the configured catalog to take the
+    /// entry from when several define it (default: the highest layer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<String>,
 }
 
 /// Query of `GET /alkahest/v1/hf/search`.

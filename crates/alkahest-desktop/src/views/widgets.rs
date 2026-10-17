@@ -84,6 +84,75 @@ pub fn pill(pill: &Pill) -> Div {
     el
 }
 
+/// A status pill: dot and text on a subtle tint (catalog status, the Discover catalog pill).
+pub fn status_pill(text_: impl Into<SharedString>, fg: Hsla, bg: Hsla, dot_color: Hsla) -> Div {
+    h_flex()
+        .flex_shrink_0()
+        .items_center()
+        .gap(px(6.0))
+        .px(px(space::S2))
+        .py(px(2.0))
+        .rounded(px(radius::FULL))
+        .bg(bg)
+        .text_color(fg)
+        .type_style(text::CAPTION)
+        .font_weight(FontWeight::SEMIBOLD)
+        .whitespace_nowrap()
+        .child(dot(dot_color, 6.0))
+        .child(text_.into())
+}
+
+/// A section tab under a screen header (Settings: General / Catalogs). The selected tab has
+/// the brass underline and accent text; `count` follows the label and `alert` adds a cinnabar
+/// dot (a catalog's last sync failed). The caller adds the click handler.
+pub fn section_tab(
+    id: impl Into<ElementId>,
+    label: &'static str,
+    count: Option<usize>,
+    alert: bool,
+    selected: bool,
+    p: &Palette,
+) -> Stateful<Div> {
+    let mut el = h_flex()
+        .id(id)
+        .flex_shrink_0()
+        .items_center()
+        .gap(px(space::S2))
+        .px(px(space::S3))
+        .pb(px(space::S2))
+        .border_b_2()
+        .border_color(c(if selected {
+            p.accent_default
+        } else {
+            p.line_default
+        }))
+        .type_style(text::BODY)
+        .font_weight(if selected {
+            FontWeight::SEMIBOLD
+        } else {
+            FontWeight::MEDIUM
+        })
+        .text_color(c(if selected {
+            p.accent_text
+        } else {
+            p.text_primary
+        }))
+        .cursor_pointer()
+        .child(label);
+    if let Some(n) = count {
+        el = el.child(
+            div()
+                .type_style(text::CAPTION)
+                .text_color(c(p.text_muted))
+                .child(n.to_string()),
+        );
+    }
+    if alert {
+        el = el.child(dot(c(p.danger_default), 7.0));
+    }
+    el
+}
+
 /// A round status dot.
 pub fn dot(color: Hsla, diameter: f32) -> Div {
     div()
