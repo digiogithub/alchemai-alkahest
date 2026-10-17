@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Alkahest · Engines</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<script type="text/x-dc-template">
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#C9CDD1;text-decoration:none}a:hover{color:#E8E6E1}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #0F1214; color: #E8E6E1; font-family: 'Schibsted Grotesk', system-ui, sans-serif; display: flex; flex-wrap: wrap">
+
+  <nav aria-label="Main" style="flex: 1 0 232px; box-sizing: border-box; padding: 18px 14px; background: #121518; border-right: 1px solid #2A3036; display: flex; flex-direction: column; gap: 4px">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 6px 10px 20px">
+      <svg viewBox="0 0 64 64" width="26" height="26" fill="none" stroke="#E3A63B" stroke-width="6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M6 12 H58"></path><path d="M13 12 L32 52 L51 12"></path><circle cx="32" cy="27" r="7" fill="#E3A63B" stroke="none"></circle></svg>
+      <span style="font-size: 20px; font-weight: 600; letter-spacing: -0.04em">alkahest</span>
+    </div>
+    <a href="10-library.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l8-3 8 3-8 3z"></path><path d="M4 12l8 3 8-3"></path><path d="M4 18l8 3 8-3"></path></svg>Library<span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px">14</span></a>
+    <a href="11-discover.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>Discover<span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9CC4F0">2↓</span></a>
+    <a href="13-running.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"></path></svg>Running<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #6FD3BF"><span style="width: 7px; height: 7px; border-radius: 50%; background: #46B5A0"></span>4</span></a>
+    <a href="15-engines.html" aria-current="page" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; background: #2B2414; color: #F2C46E; font-size: 14px; font-weight: 600"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"></path></svg>Engines<span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9CC4F0">1↓</span></a>
+    <a href="14-api-keys.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"></circle><path d="M11 12l9-9M17 6l3 3M14 9l2 2"></path></svg>API keys</a>
+    <a href="16-settings.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"></path><circle cx="15" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg>Settings</a>
+    <div style="margin-top: auto; padding: 14px; border: 1px solid #2A3036; border-radius: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #A7ADB3">
+      <span style="display: flex; align-items: center; gap: 8px; color: #6FD3BF; font-weight: 600; font-size: 13px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #46B5A0"></span>Service running</span>
+      <span style="font-family: 'IBM Plex Mono', monospace">127.0.0.1:11435</span>
+      <span>systemd · alkahest.service</span>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 32px; display: flex; flex-direction: column; gap: 18px">
+    <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 4px; margin-right: auto">
+        <h1 style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em">Engines</h1>
+        <span style="font-size: 13px; color: #A7ADB3">3 engines · 4 builds installed · <span style="font-family: 'IBM Plex Mono', monospace">~/.local/share/alkahest/engines</span> · 1.9 GB</span>
+      </div>
+      <button type="button" style="height: 38px; padding: 0 16px; border-radius: 8px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 14px 'Schibsted Grotesk', sans-serif">Reload recipes</button>
+      <button type="button" style="display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 8px; border: none; background: #E3A63B; color: #1A1206; font: 600 14px 'Schibsted Grotesk', sans-serif"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>Install recommended builds</button>
+    </header>
+
+    <section aria-label="This machine" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; padding: 12px 16px; border: 1px solid #2A3036; border-radius: 12px; background: #161A1D; font-size: 13px">
+      <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB3">This machine</span>
+      <span style="display: inline-flex; align-items: center; gap: 8px"><span style="width: 7px; height: 7px; border-radius: 50%; background: #46B5A0"></span>NVIDIA RTX 4000 SFF Ada <span style="font-family: 'IBM Plex Mono', monospace; color: #A7ADB3">20 GB · driver 580.173 · CUDA ≤ 13.0</span></span>
+      <span style="display: inline-flex; align-items: center; gap: 8px"><span style="width: 7px; height: 7px; border-radius: 50%; background: #46B5A0"></span>Vulkan <span style="font-family: 'IBM Plex Mono', monospace; color: #A7ADB3">1.3</span></span>
+      <span style="display: inline-flex; align-items: center; gap: 8px"><span style="width: 7px; height: 7px; border-radius: 50%; background: #7C848C"></span>CPU <span style="font-family: 'IBM Plex Mono', monospace; color: #A7ADB3">x86_64 · AVX2 · 16 threads</span></span>
+      <span style="color: #A7ADB3">Preference: Metal › CUDA › ROCm › Vulkan › CPU</span>
+      <label style="margin-left: auto; display: inline-flex; align-items: center; gap: 10px; min-height: 32px; font-size: 13px; color: #C9CDD1">
+        <input type="checkbox" aria-label="Install missing engines automatically" style="accent-color: #46B5A0; width: 18px; height: 18px; margin: 0">Auto-install when a model needs one
+      </label>
+    </section>
+
+    <section aria-label="Install jobs" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid #2A3036; border-radius: 12px; background: #161A1D">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+        <span style="display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px; background: #17263A; color: #9CC4F0; font-size: 12px; font-weight: 600"><span style="width: 7px; height: 7px; border-radius: 50%; background: #6EA8E6"></span>Building from source</span>
+        <span style="font-size: 14px; font-weight: 600">prism llama.cpp</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #C9CDD1">prism-b10777-e3de715 · cuda13.3</span>
+        <span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #A7ADB3">cmake build 212 / 486 · 3:41 elapsed</span>
+        <button type="button" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 12px 'Schibsted Grotesk', sans-serif">Cancel</button>
+      </div>
+      <div style="height: 6px; border-radius: 3px; background: #2A3036"><div style="height: 6px; width: 44%; border-radius: 3px; background: #6EA8E6"></div></div>
+      <pre style="margin: 0; padding: 10px 12px; border-radius: 8px; background: #0B0D0F; font: 400 12px/1.55 'IBM Plex Mono', monospace; color: #A7ADB3; white-space: pre-wrap">[211/486] Building CUDA object ggml/src/ggml-cuda/CMakeFiles/ggml-cuda.dir/fattn-tile.cu.o
+[212/486] Building CUDA object ggml/src/ggml-cuda/CMakeFiles/ggml-cuda.dir/mmq.cu.o
+log: ~/.local/share/alkahest/engines/.logs/prism-llama-cpp-prism-b10777-e3de715-cuda13.3.log</pre>
+    </section>
+
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <sc-for list="{{engines}}" as="e" hint-placeholder-count="3">
+        <article style="background: #161A1D; border: 1px solid #2A3036; border-radius: 12px; overflow: hidden">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 14px 18px; border-bottom: 1px solid #2A3036">
+            <div style="display: flex; flex-direction: column; gap: 3px; margin-right: auto">
+              <span style="display: flex; align-items: center; gap: 10px"><span style="font-size: 16px; font-weight: 600">{{e.name}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #A7ADB3">{{e.id}}</span></span>
+              <span style="font-size: 12px; color: #A7ADB3">{{e.serves}}</span>
+            </div>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid #343B42; color: #C9CDD1">recipe {{e.version}}</span>
+            <button type="button" style="height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 13px 'Schibsted Grotesk', sans-serif">Override…</button>
+          </div>
+          <sc-if value="{{e.hasBuilds}}" hint-placeholder-val="{{ true }}">
+            <div style="overflow-x: auto">
+              <table style="width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13px">
+                <thead><tr style="text-align: left; color: #A7ADB3; font-size: 12px"><th style="padding: 8px 18px; font-weight: 600">Installed build</th><th style="padding: 8px; font-weight: 600">Origin</th><th style="padding: 8px; font-weight: 600; text-align: right">Size</th><th style="padding: 8px; font-weight: 600">Used by</th><th style="padding: 8px 18px"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Actions</span></th></tr></thead>
+                <tbody>
+                  <sc-for list="{{e.builds}}" as="b" hint-placeholder-count="2">
+                    <tr style="border-top: 1px solid #22272C">
+                      <td style="padding: 10px 18px"><span style="display: flex; align-items: center; gap: 10px"><span style="font-family: 'IBM Plex Mono', monospace; font-weight: 500">{{b.version}} · {{b.variant}}</span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: {{b.tagBg}}; color: {{b.tagFg}}">{{b.tag}}</span></span></td>
+                      <td style="padding: 10px 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #C9CDD1">{{b.origin}}</td>
+                      <td style="padding: 10px 8px; text-align: right; font-family: 'IBM Plex Mono', monospace">{{b.size}}</td>
+                      <td style="padding: 10px 8px; color: #C9CDD1">{{b.used}}</td>
+                      <td style="padding: 10px 18px; text-align: right; white-space: nowrap"><button type="button" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: transparent; color: #E8E6E1; font: 500 12px 'Schibsted Grotesk', sans-serif">Info</button><sc-if value="{{b.removable}}" hint-placeholder-val="{{ true }}"> <button type="button" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #6A2E25; background: transparent; color: #F08A75; font: 600 12px 'Schibsted Grotesk', sans-serif">Remove</button></sc-if></td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </sc-if>
+          <sc-if value="{{e.noBuilds}}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 12px 18px; font-size: 13px; color: #A7ADB3">Not installed. Models that need it fail with <span style="font-family: 'IBM Plex Mono', monospace; color: #C9CDD1">alkahest engines install {{e.id}}</span> until a build is installed.</div>
+          </sc-if>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid #22272C; background: #121518">
+            <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB3; margin-right: 6px">Variants</span>
+            <sc-for list="{{e.variants}}" as="v" hint-placeholder-count="5">
+              <button type="button" title="{{v.state}}" style="display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 7px; border: 1px {{v.style}} {{v.border}}; background: transparent; color: {{v.fg}}; font: 500 12px 'IBM Plex Mono', monospace">{{v.name}}<span style="font-family: 'Schibsted Grotesk', sans-serif; font-size: 11px; color: {{v.noteFg}}">{{v.note}}</span></button>
+            </sc-for>
+          </div>
+        </article>
+      </sc-for>
+    </div>
+    <span style="font-size: 12px; color: #A7ADB3">Models use the newest installed build unless pinned in model settings (<span style="font-family: 'IBM Plex Mono', monospace">engine = "llama-cpp@b11669"</span>). Recipes load from the binary's <span style="font-family: 'IBM Plex Mono', monospace">recipes/</span> and <span style="font-family: 'IBM Plex Mono', monospace">~/.local/share/alkahest/recipes</span>.</span>
+  </main>
+</div>
+</script>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = {
+      inUse: { tagBg: '#15302B', tagFg: '#6FD3BF' },
+      fallback: { tagBg: '#22272C', tagFg: '#C9CDD1' },
+      bundled: { tagBg: '#22272C', tagFg: '#C9CDD1' }
+    };
+    const b = (version, variant, tag, kind, origin, size, used) => ({ version, variant, tag, origin, size, used, removable: kind !== 'bundled', ...T[kind] });
+    const V = {
+      installed: { style: 'solid', border: '#46B5A0', fg: '#6FD3BF', noteFg: '#6FD3BF' },
+      recommended: { style: 'solid', border: '#6B5320', fg: '#F2C46E', noteFg: '#F2C46E' },
+      available: { style: 'solid', border: '#343B42', fg: '#C9CDD1', noteFg: '#A7ADB3' },
+      building: { style: 'solid', border: '#6EA8E6', fg: '#9CC4F0', noteFg: '#9CC4F0' },
+      source: { style: 'dashed', border: '#4A5157', fg: '#C9CDD1', noteFg: '#A7ADB3' },
+      unsupported: { style: 'dashed', border: '#2A3036', fg: '#7C848C', noteFg: '#7C848C' }
+    };
+    const v = (name, state, note) => ({ name, state, note, ...V[state] });
+    return {
+      engines: [
+        {
+          name: 'llama.cpp', id: 'llama-cpp', version: 'b11669', serves: 'GGUF chat, embeddings, rerank, vision · mainline ggml-org',
+          hasBuilds: true, noBuilds: false,
+          builds: [
+            b('b11669', 'cuda12.8', 'in use', 'inUse', 'prebuilt · sha256 verified', '612 MB', '11 models'),
+            b('b11669', 'cpu', 'bundled', 'bundled', 'shipped with alkahest', '38 MB', 'fallback')
+          ],
+          variants: [v('cuda12.8', 'installed', 'installed'), v('cuda13.4', 'unsupported', 'driver too old'), v('vulkan', 'available', ''), v('cpu', 'installed', 'installed'), v('rocm', 'unsupported', 'no AMD GPU'), v('sycl', 'source', 'on request')]
+        },
+        {
+          name: 'prism llama.cpp', id: 'prism-llama-cpp', version: 'prism-b10777-e3de715', serves: 'Ternary GGUF (PQ2_0, PTQ1_0) · Bonsai models · PrismML fork',
+          hasBuilds: true, noBuilds: false,
+          builds: [b('prism-b10777-e3de715', 'cuda12.8', 'in use', 'inUse', 'prebuilt · sha256 verified', '208 MB', '2 models')],
+          variants: [v('cuda12.8', 'installed', 'installed'), v('cuda13.3', 'building', 'building…'), v('cuda12.4', 'available', ''), v('vulkan', 'available', ''), v('cpu', 'available', '')]
+        },
+        {
+          name: 'vLLM', id: 'vllm', version: '0.11.0', serves: 'safetensors chat and embeddings · Linux + NVIDIA · needs uv or python3',
+          hasBuilds: false, noBuilds: true, builds: [],
+          variants: [v('cuda12.8', 'recommended', 'recommended · Python venv · ~10 GB'), v('metal', 'unsupported', 'macOS only')]
+        }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
