@@ -381,6 +381,17 @@ impl Engine for LlamaCppEngine {
         spec.prepend_library_dirs(&install.library_dirs);
         spec.flag("--host", req.host.to_string())
             .flag("--port", req.port.to_string());
+        // A CPU-only build cannot offload, whatever the platform or the settings say.
+        let cpu_only;
+        let req = if install.runs_on(req.accelerator) == req.accelerator {
+            req
+        } else {
+            let mut r = req.clone();
+            r.accelerator = install.runs_on(req.accelerator);
+            r.settings.gpu_layers = None;
+            cpu_only = r;
+            &cpu_only
+        };
         for a in Self::model_args(req)? {
             spec.arg(a);
         }
