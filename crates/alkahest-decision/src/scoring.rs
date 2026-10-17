@@ -258,12 +258,14 @@ impl DecisionEngine {
                 compiled.encoding
             )));
         };
-        // `buffered` keeps results in row order whatever the completion order.
-        let scores: Vec<RowScore> =
-            stream::iter(rows.iter().map(|row| self.score_row(row, system)))
-                .buffered(self.options.concurrency.max(1))
-                .try_collect()
-                .await?;
+        // `buffered` keeps results in row order whatever the completion order. The futures
+        // are collected first: a closure inside the stream type makes the whole future fail
+        // the higher-ranked `Send` check axum handlers need.
+        let rows: Vec<_> = rows.iter().map(|row| self.score_row(row, system)).collect();
+        let scores: Vec<RowScore> = stream::iter(rows)
+            .buffered(self.options.concurrency.max(1))
+            .try_collect()
+            .await?;
         let mut out = ScoreOutput::default();
         for s in scores {
             out.input_tokens += s.input_tokens;

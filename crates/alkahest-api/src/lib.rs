@@ -14,10 +14,12 @@
 //! * [`service`]: services handlers fetch from the state ([`alkahest_sched::Scheduler`],
 //!   `Arc<Catalog>`, [`pull::PullService`], [`service::UpstreamClient`]) and [`HttpError`].
 //! * [`pull`]: pull orchestration shared with `alkahest pull`.
+//! * [`decisions`]: `/v1/systemone` and `/v1/decisions` (ALK-SP-0007).
 
 pub mod admin;
 pub mod audit;
 pub mod auth;
+pub mod decisions;
 pub mod dialect;
 pub mod error;
 pub mod generation;
@@ -35,11 +37,12 @@ pub mod upstream;
 
 pub use service::{HttpError, UpstreamClient};
 
-/// Every inference and runtime route: Ollama native, OpenAI and the admin runtime routes
-/// plus `/metrics`. Handlers find the scheduler, catalog and pull service in the state.
+/// Every inference and runtime route: Ollama native, OpenAI, decisions and the admin runtime
+/// routes plus `/metrics`. Handlers find the scheduler, catalog and pull service in the state.
 pub fn inference_routes() -> axum::Router<AppState> {
     ollama::routes()
         .merge(openai::routes())
+        .merge(decisions::routes())
         .merge(admin::routes())
 }
 

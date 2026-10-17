@@ -25,7 +25,9 @@ pub enum Family {
     OpenAi,
     /// Anthropic Messages API, `/v1/messages`.
     Anthropic,
-    /// Decision API, `/v1/systemone`, `/v1/decisions`.
+    /// System One decision API, `/v1/systemone` (Ollama dialect: its clients are Ollama's).
+    SystemOne,
+    /// OpenAI / LocalAI Decisions API, `/v1/decisions` (OpenAI dialect).
     Decisions,
     /// Alkahest admin API, `/alkahest/*`.
     Admin,
@@ -40,6 +42,7 @@ impl fmt::Display for Family {
             Self::Ollama => "ollama",
             Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
+            Self::SystemOne => "systemone",
             Self::Decisions => "decisions",
             Self::Admin => "admin",
             Self::Other => "other",
@@ -60,7 +63,8 @@ impl Family {
             "/" | "/healthz" => Self::Base,
             p if under(p, "/api") => Self::Ollama,
             p if under(p, "/v1/messages") => Self::Anthropic,
-            p if under(p, "/v1/systemone") || under(p, "/v1/decisions") => Self::Decisions,
+            p if under(p, "/v1/systemone") => Self::SystemOne,
+            p if under(p, "/v1/decisions") => Self::Decisions,
             p if under(p, "/v1") => Self::OpenAi,
             p if under(p, "/alkahest") => Self::Admin,
             _ => Self::Other,
@@ -74,7 +78,7 @@ impl Family {
             Self::Ollama => endpoints.ollama,
             Self::OpenAi => endpoints.openai,
             Self::Anthropic => endpoints.anthropic,
-            Self::Decisions => endpoints.decisions,
+            Self::SystemOne | Self::Decisions => endpoints.decisions,
             Self::Base | Self::Admin | Self::Other => true,
         }
     }
@@ -191,7 +195,7 @@ impl ErrorRenderer for DefaultErrorRenderer {
                 };
                 json!({ "type": "error", "error": { "type": kind_name, "message": message } })
             }
-            Family::Base | Family::Ollama | Family::Admin | Family::Other => {
+            Family::Base | Family::Ollama | Family::SystemOne | Family::Admin | Family::Other => {
                 json!({ "error": message })
             }
         };
@@ -222,7 +226,7 @@ mod tests {
             Family::Anthropic
         );
         assert_eq!(Family::of_path("/v1/messagesx"), Family::OpenAi);
-        assert_eq!(Family::of_path("/v1/systemone"), Family::Decisions);
+        assert_eq!(Family::of_path("/v1/systemone"), Family::SystemOne);
         assert_eq!(Family::of_path("/v1/decisions/x"), Family::Decisions);
         assert_eq!(Family::of_path("/alkahest/v1/keys"), Family::Admin);
     }

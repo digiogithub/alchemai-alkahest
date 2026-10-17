@@ -69,6 +69,7 @@ name = "alkahest-api"
 version = "0.1.0"
 dependencies = [
  "alkahest-core",
+ "alkahest-decision",
  "alkahest-engine",
  "alkahest-fetch",
  "alkahest-gguf",

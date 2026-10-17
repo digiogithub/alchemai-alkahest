@@ -172,6 +172,9 @@ async fn completion(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
     log.requests
         .lock()
         .push(("/completion".into(), body.clone()));
+    if body.get("n_probs").is_some() {
+        return score_completion(&body);
+    }
     let timings: Value = serde_json::from_str(TIMINGS).unwrap();
     let stop_type = if body["n_predict"] == json!(1) {
         "limit"
@@ -203,6 +206,89 @@ async fn embeddings(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
     .into_response_body()
 }
 
+/// Raw logits of the decision scorer's candidate letters: A 2, B 0, C 1, others -50.
+fn letter_logit(id: i64) -> f64 {
+    match id {
+        65 => 2.0,
+        66 => 0.0,
+        67 => 1.0,
+        _ => -50.0,
+    }
+}
+
+/// llama-server `/completion` with `n_probs`: the softmax over the biased candidates.
+fn score_completion(body: &Value) -> Response {
+    let prompt = body["prompt"].as_array().map_or(0, Vec::len);
+    let mut scored: Vec<(i64, f64)> = body["logit_bias"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            let id = p[0].as_i64().unwrap();
+            (id, letter_logit(id) + p[1].as_f64().unwrap())
+        })
+        .collect();
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let peak = scored[0].1;
+    let sum: f64 = scored.iter().map(|(_, l)| (l - peak).exp()).sum();
+    let top: Vec<Value> = scored
+        .iter()
+        .map(|(id, l)| json!({"id": id, "token": "", "bytes": [], "prob": (l - peak).exp() / sum}))
+        .collect();
+    axum::Json(json!({
+        "content": "", "tokens_predicted": 1, "tokens_evaluated": prompt, "tokens_cached": 0,
+        "truncated": false,
+        "completion_probabilities": [{"id": top[0]["id"], "prob": top[0]["prob"], "top_probs": top}],
+    }))
+    .into_response_body()
+}
+
+async fn apply_template(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    log.requests
+        .lock()
+        .push(("/apply-template".into(), body.clone()));
+    let mut prompt = String::new();
+    for m in body["messages"].as_array().unwrap() {
+        let role = m["role"].as_str().unwrap();
+        prompt.push_str(&format!(
+            "<{role}>{}</{role}>",
+            m["content"].as_str().unwrap()
+        ));
+    }
+    prompt.push_str("<assistant>");
+    axum::Json(json!({ "prompt": prompt })).into_response_body()
+}
+
+/// One token per character, the code point as id.
+async fn tokenize(body: Bytes) -> Response {
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    let tokens: Vec<i64> = body["content"]
+        .as_str()
+        .unwrap()
+        .chars()
+        .map(|c| i64::from(u32::from(c)))
+        .collect();
+    axum::Json(json!({ "tokens": tokens })).into_response_body()
+}
+
+/// llama-server's native `/v1/systemone`: every noul question answers 0.75.
+async fn systemone(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    log.requests
+        .lock()
+        .push(("/v1/systemone".into(), body.clone()));
+    let mut answers = serde_json::Map::new();
+    for (id, _) in body["questions"].as_object().unwrap() {
+        answers.insert(id.clone(), json!({"type": "noul", "noul": 0.75}));
+    }
+    axum::Json(json!({
+        "model": "engine-name", "answers": answers,
+        "usage": {"input_tokens": 42, "output_tokens": 0}
+    }))
+    .into_response_body()
+}
+
 /// `into_response` for the handlers above without importing the trait everywhere.
 trait IntoBody {
     fn into_response_body(self) -> Response;
@@ -221,6 +307,9 @@ pub async fn fake_llama(log: Arc<LlamaLog>) -> u16 {
         .route("/v1/completions", post(completions))
         .route("/completion", post(completion))
         .route("/v1/embeddings", post(embeddings))
+        .route("/apply-template", post(apply_template))
+        .route("/tokenize", post(tokenize))
+        .route("/v1/systemone", post(systemone))
         .with_state(log);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -319,6 +408,39 @@ pub fn chat_model() -> FakeModel {
     }
 }
 
+pub fn decision_model() -> FakeModel {
+    FakeModel {
+        caps: Capabilities::of(&[
+            Capability::Decision,
+            Capability::Completion,
+            Capability::Logits,
+            Capability::Tokenize,
+        ]),
+        settings: ModelSettings::default(),
+    }
+}
+
+/// Bytes of a tiny GGUF header with string metadata `kv` (no tensors).
+pub fn gguf_with(kv: &[(&str, &str)]) -> Vec<u8> {
+    fn s(out: &mut Vec<u8>, v: &str) {
+        out.extend((v.len() as u64).to_le_bytes());
+        out.extend(v.as_bytes());
+    }
+    let mut o = b"GGUF".to_vec();
+    o.extend(3u32.to_le_bytes());
+    o.extend(0u64.to_le_bytes());
+    o.extend((kv.len() as u64).to_le_bytes());
+    for (k, v) in kv {
+        s(&mut o, k);
+        o.extend(8u32.to_le_bytes());
+        s(&mut o, v);
+    }
+    while !o.len().is_multiple_of(32) {
+        o.push(0);
+    }
+    o
+}
+
 pub fn embed_model() -> FakeModel {
     FakeModel {
         caps: Capabilities::of(&[Capability::Embeddings]),
@@ -412,6 +534,18 @@ impl ModelBackend for FakeBackend {
 
 /// Writes one model into a synthetic Ollama store (name `<name>:latest`).
 pub fn ollama_model(root: &Path, name: &str, config: &str) {
+    let weights = format!("weights of {name}");
+    ollama_model_with(root, name, config, weights.as_bytes(), None);
+}
+
+/// [`ollama_model`] with explicit weights bytes and an optional `system` layer.
+pub fn ollama_model_with(
+    root: &Path,
+    name: &str,
+    config: &str,
+    weights: &[u8],
+    system: Option<&str>,
+) {
     fs::create_dir_all(root.join("blobs")).unwrap();
     let put = |bytes: &[u8]| {
         let d = Digest::of(bytes);
@@ -419,17 +553,23 @@ pub fn ollama_model(root: &Path, name: &str, config: &str) {
         (d.to_string(), bytes.len())
     };
     let (cd, cn) = put(config.as_bytes());
-    let weights = format!("weights of {name}");
-    let (wd, wn) = put(weights.as_bytes());
+    let (wd, wn) = put(weights);
     let (td, tn) = put(b"{{ .Prompt }}");
+    let mut layers = vec![
+        json!({"mediaType": "application/vnd.ollama.image.model", "digest": wd, "size": wn}),
+        json!({"mediaType": "application/vnd.ollama.image.template", "digest": td, "size": tn}),
+    ];
+    if let Some(sys) = system {
+        let (sd, sn) = put(sys.as_bytes());
+        layers.push(
+            json!({"mediaType": "application/vnd.ollama.image.system", "digest": sd, "size": sn}),
+        );
+    }
     let manifest = json!({
         "schemaVersion": 2,
         "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
         "config": {"mediaType": "application/vnd.docker.container.image.v1+json", "digest": cd, "size": cn},
-        "layers": [
-            {"mediaType": "application/vnd.ollama.image.model", "digest": wd, "size": wn},
-            {"mediaType": "application/vnd.ollama.image.template", "digest": td, "size": tn},
-        ],
+        "layers": layers,
     });
     let p = root.join(format!(
         "manifests/registry.ollama.ai/library/{name}/latest"
