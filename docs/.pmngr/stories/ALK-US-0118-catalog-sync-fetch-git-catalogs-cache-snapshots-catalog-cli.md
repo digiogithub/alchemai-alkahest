@@ -2,7 +2,7 @@
 id: ALK-US-0118
 type: story
 title: "Catalog sync: fetch git catalogs, cache snapshots, catalog CLI"
-status: in_progress
+status: in_review
 priority: high
 parent: ALK-EP-0015
 milestone: ALK-M-0006
@@ -10,7 +10,7 @@ author: mcp
 labels: [catalog, security]
 estimate: 8
 created: 2026-10-17T18:30:04Z
-updated: 2026-10-17T18:43:22Z
+updated: 2026-10-17T19:26:22Z
 started: 2026-10-17T18:43:22Z
 links:
   - { kind: implements, target: ALK-SP-0011.R3 }
