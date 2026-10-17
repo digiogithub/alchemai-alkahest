@@ -2,12 +2,13 @@
 id: ALK-US-0087
 type: story
 title: "Ollama API gaps after ALK-US-0034: suffix (FIM), model SYSTEM layer, logprobs, blobs"
-status: backlog
+status: in_progress
 parent: ALK-EP-0007
 author: mcp
 labels: [api]
 created: 2026-10-17T01:45:13Z
-updated: 2026-10-17T01:46:40Z
+updated: 2026-10-17T06:43:09Z
+started: 2026-10-17T06:43:09Z
 inbox:
   status: accepted
   source: mcp

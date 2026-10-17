@@ -2,14 +2,14 @@
 id: ALK-US-0075
 type: story
 title: macOS packages
-status: in_progress
+status: in_review
 priority: high
 parent: ALK-EP-0014
 milestone: ALK-M-0006
 labels: [release, macos]
 estimate: 5
 created: 2026-10-16T22:43:26Z
-updated: 2026-10-17T06:16:00Z
+updated: 2026-10-17T06:42:55Z
 started: 2026-10-17T06:16:00Z
 ---
 

@@ -2,15 +2,16 @@
 id: ALK-US-0080
 type: story
 title: User documentation
-status: in_progress
+status: done
 priority: high
 parent: ALK-EP-0014
 milestone: ALK-M-0006
 labels: [docs]
 estimate: 3
 created: 2026-10-16T22:43:41Z
-updated: 2026-10-17T06:09:48Z
+updated: 2026-10-17T06:42:55Z
 started: 2026-10-17T06:09:48Z
+closed: 2026-10-17T06:42:55Z
 ---
 
 ## Description

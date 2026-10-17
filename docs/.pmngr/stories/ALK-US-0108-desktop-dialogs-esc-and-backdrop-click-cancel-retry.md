@@ -2,12 +2,13 @@
 id: ALK-US-0108
 type: story
 title: "Desktop dialogs: Esc and backdrop click cancel; retry countdown in connection-lost banner"
-status: backlog
+status: in_progress
 parent: ALK-EP-0013
 author: mcp
 labels: [desktop]
 created: 2026-10-17T05:56:00Z
-updated: 2026-10-17T06:09:39Z
+updated: 2026-10-17T06:43:09Z
+started: 2026-10-17T06:43:09Z
 inbox:
   status: accepted
   source: mcp

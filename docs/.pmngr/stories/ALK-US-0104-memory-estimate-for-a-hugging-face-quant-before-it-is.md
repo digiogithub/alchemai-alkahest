@@ -2,13 +2,14 @@
 id: ALK-US-0104
 type: story
 title: Memory estimate for a Hugging Face quant before it is downloaded
-status: backlog
+status: in_progress
 priority: low
 parent: ALK-EP-0006
 author: mcp
 labels: [api, desktop, sched]
 created: 2026-10-17T04:30:45Z
-updated: 2026-10-17T04:42:31Z
+updated: 2026-10-17T06:43:09Z
+started: 2026-10-17T06:43:09Z
 inbox:
   status: accepted
   source: mcp

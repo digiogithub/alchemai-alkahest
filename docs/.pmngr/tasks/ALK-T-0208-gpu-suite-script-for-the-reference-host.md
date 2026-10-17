@@ -2,14 +2,15 @@
 id: ALK-T-0208
 type: task
 title: GPU suite script for the reference host
-status: backlog
+status: done
 priority: critical
 parent: ALK-US-0079
 milestone: ALK-M-0006
 labels: [release]
 effort: 2
 created: 2026-10-16T22:43:40Z
-updated: 2026-10-16T22:43:40Z
+updated: 2026-10-17T06:40:30Z
+closed: 2026-10-17T06:40:30Z
 ---
 
 ## Description

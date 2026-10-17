@@ -2,12 +2,13 @@
 id: ALK-US-0098
 type: story
 title: "Runtime monitor data: GPU load, CPU utilisation and a live request feed"
-status: backlog
+status: in_progress
 parent: ALK-EP-0013
 author: mcp
 labels: [api, admin, desktop, observability]
 created: 2026-10-17T03:25:00Z
-updated: 2026-10-17T03:30:54Z
+updated: 2026-10-17T06:43:09Z
+started: 2026-10-17T06:43:09Z
 inbox:
   status: accepted
   source: mcp

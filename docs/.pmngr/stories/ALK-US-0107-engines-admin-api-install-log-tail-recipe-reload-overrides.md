@@ -2,12 +2,13 @@
 id: ALK-US-0107
 type: story
 title: "Engines admin API: install log tail, recipe reload, overrides, bundled flag and download size"
-status: backlog
+status: in_progress
 parent: ALK-EP-0007
 author: mcp
 labels: [api, recipes, desktop]
 created: 2026-10-17T05:56:00Z
-updated: 2026-10-17T06:09:39Z
+updated: 2026-10-17T06:43:09Z
+started: 2026-10-17T06:43:09Z
 inbox:
   status: accepted
   source: mcp

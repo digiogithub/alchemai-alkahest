@@ -2,13 +2,13 @@
 id: ALK-US-0105
 type: story
 title: Produce .rpm packages (cargo-packager has no rpm target)
-status: in_progress
+status: in_review
 parent: ALK-EP-0014
 milestone: ALK-M-0006
 author: mcp
 labels: [release, linux]
 created: 2026-10-17T05:15:37Z
-updated: 2026-10-17T06:16:00Z
+updated: 2026-10-17T06:42:55Z
 started: 2026-10-17T06:16:00Z
 inbox:
   status: accepted
