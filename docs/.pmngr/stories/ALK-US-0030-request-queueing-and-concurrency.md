@@ -2,14 +2,15 @@
 id: ALK-US-0030
 type: story
 title: Request queueing and concurrency
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0006
 milestone: ALK-M-0003
 labels: [sched]
 estimate: 3
 created: 2026-10-16T22:40:19Z
-updated: 2026-10-16T22:40:22Z
+updated: 2026-10-17T00:19:24Z
+started: 2026-10-17T00:19:24Z
 links:
   - { kind: implements, target: ALK-SP-0004.R4 }
 ---

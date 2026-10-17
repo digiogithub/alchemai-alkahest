@@ -5,18 +5,56 @@ title: Engines and recipes
 status: backlog
 labels: [engine, recipes]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-17T00:09:41Z
+updated: 2026-10-17T00:17:43Z
 requirements:
   R1:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-engine/src/engine.rs#Engine
+        - crates/alkahest-engine/src/capability.rs#Capabilities
+        - crates/alkahest-engine/src/capability.rs#kind_capabilities
+        - crates/alkahest-engine/src/launch.rs#LaunchSpec
+        - crates/alkahest-engine/src/builtin.rs#LlamaCppEngine
+        - crates/alkahest-engine/src/registry.rs#EngineRegistry
+        - crates/alkahest-engine/src/supervisor/mod.rs#EngineHandle
+      tests:
+        - crates/alkahest-engine/tests/registry.rs#capabilities_drive_routing
+        - crates/alkahest-engine/tests/registry.rs#registry_holds_every_builtin_engine
+        - crates/alkahest-engine/tests/registry.rs#llama_server_spec_from_request
+        - crates/alkahest-engine/tests/supervisor.rs#engine_becomes_ready_and_stops_cleanly
   R2:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-engine/src/select.rs#select_engine
+        - crates/alkahest-engine/src/select.rs#Platform
+        - crates/alkahest-engine/src/registry.rs#EngineRegistry::plan
+        - crates/alkahest-engine/src/error.rs#EngineError
+      tests:
+        - crates/alkahest-engine/tests/selection.rs#bonsai_routing
+        - crates/alkahest-engine/tests/selection.rs#rules_by_format_kind_and_quant
+        - crates/alkahest-engine/tests/selection.rs#per_model_override_wins
+        - crates/alkahest-engine/tests/selection.rs#vllm_only_where_supported
+        - crates/alkahest-engine/tests/selection.rs#not_installed_names_the_install_command
+        - crates/alkahest-engine/tests/selection.rs#agrees_with_the_catalog_default_engine
   R3:
     status: backlog
   R4:
     status: backlog
   R5:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-engine/src/locator.rs#FsLocator
+        - crates/alkahest-engine/src/locator.rs#split_install_dir
+        - crates/alkahest-engine/src/launch.rs#LaunchSpec::prepend_library_dirs
+        - crates/alkahest-engine/src/select.rs#parse_engine_setting
+      tests:
+        - crates/alkahest-engine/tests/registry.rs#two_versions_default_newest_and_pin
+        - crates/alkahest-engine/tests/registry.rs#variant_follows_accelerator
+        - crates/alkahest-engine/tests/supervisor.rs#library_path_reaches_the_child
+        - crates/alkahest-engine/tests/registry.rs#bundled_roots_are_searched_after_the_engines_dir
   R6:
     status: backlog
     trace:

@@ -2,14 +2,15 @@
 id: ALK-US-0032
 type: story
 title: Runtime metrics
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0006
 milestone: ALK-M-0003
 labels: [sched, observability]
 estimate: 3
 created: 2026-10-16T22:40:28Z
-updated: 2026-10-16T22:40:31Z
+updated: 2026-10-17T00:19:24Z
+started: 2026-10-17T00:19:24Z
 links:
   - { kind: implements, target: ALK-SP-0004.R7 }
 ---
