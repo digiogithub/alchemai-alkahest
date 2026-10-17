@@ -368,6 +368,62 @@ pub fn fit_for(size: Option<u64>, hw: &Hardware) -> Fit {
     }
 }
 
+/// The fit the server's remote estimate (`GET /alkahest/v1/hf/estimate`, ALK-US-0104) implies:
+/// weights, KV cache and compute graph for the quant's real GGUF header against the free memory.
+/// `None` when the document lacks the figures.
+pub fn fit_from_estimate(doc: &Value) -> Option<Fit> {
+    let est = doc.get("estimate")?;
+    let vram = est.get("vram_bytes")?.as_u64()?;
+    let ram = est.get("ram_bytes")?.as_u64()?;
+    let needed = vram.saturating_add(ram);
+    if !doc.get("fits")?.as_bool()? {
+        return Some(Fit::TooLarge { needed });
+    }
+    Some(if vram == 0 {
+        Fit::Ram { needed }
+    } else {
+        let layers = est.get("total_layers").and_then(Value::as_u64).unwrap_or(0);
+        let on_gpu = est.get("gpu_layers").and_then(Value::as_u64).unwrap_or(0);
+        let all =
+            on_gpu >= layers && est.get("output_on_gpu").and_then(Value::as_bool) == Some(true);
+        if all || ram == 0 {
+            Fit::Gpu { needed }
+        } else {
+            let pct = (vram as f64 / needed as f64 * 100.0).clamp(1.0, 99.0);
+            Fit::Partial {
+                gpu_percent: pct as u8,
+            }
+        }
+    })
+}
+
+/// A remote estimate of one quant of the selected repository.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EstimateState {
+    /// Requested, not answered.
+    Loading,
+    /// The server's figures as a fit.
+    Ready(Fit),
+    /// The server could not estimate it (the heuristic stays).
+    Failed,
+}
+
+/// What to ask `GET /alkahest/v1/hf/estimate` for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EstimateTarget {
+    /// Repository id.
+    pub repo: String,
+    /// Picker row label (the cache key).
+    pub label: String,
+    /// Quantisation to estimate.
+    pub quant: Option<String>,
+    /// File to estimate when the file has no quant name.
+    pub file: Option<String>,
+}
+
+/// Most quants estimated per repository (each one reads a GGUF header over the network).
+pub const MAX_ESTIMATES: usize = 24;
+
 /// `1_234_567` -> `1.2M`, `864_000` -> `864k`, `999` -> `999`.
 pub fn format_count(n: u64) -> String {
     if n >= 1_000_000 {
@@ -601,6 +657,8 @@ pub struct QuantRow {
     pub recommended: bool,
     /// What to send to `POST /alkahest/v1/pulls`.
     pub pull: PullRequest,
+    /// The fit comes from the server's estimate of the real GGUF header, not the size rule.
+    pub precise: bool,
     /// Ternary quant (prism engine).
     pub ternary: bool,
     /// Shard count when split.
@@ -630,16 +688,27 @@ const QUANT_PREFERENCE: [&str; 14] = [
 /// when there is one), each with its fit hint; the recommended row is the first of
 /// [`QUANT_PREFERENCE`] that fits on one device, else the smallest that runs.
 pub fn quant_rows(files: &HfFiles, hw: &Hardware) -> Vec<QuantRow> {
+    quant_rows_with(files, hw, &|_| None)
+}
+
+/// [`quant_rows`] with `precise` fits (by row label) replacing the size rule where available.
+pub fn quant_rows_with(
+    files: &HfFiles,
+    hw: &Hardware,
+    precise: &dyn Fn(&str) -> Option<Fit>,
+) -> Vec<QuantRow> {
     let mut rows: Vec<QuantRow> = files
         .gguf
         .iter()
         .map(|q| {
             let label = q.quant.clone().unwrap_or_else(|| file_label(q));
+            let exact = precise(&label);
             QuantRow {
                 ternary: is_ternary(&label),
                 size: q.size.map_or_else(|| "\u{2014}".to_string(), format_bytes),
                 bytes: q.size,
-                fit: fit_for(q.size, hw),
+                precise: exact.is_some(),
+                fit: exact.unwrap_or_else(|| fit_for(q.size, hw)),
                 recommended: false,
                 pull: PullRequest {
                     model: q.pull.clone(),
@@ -665,6 +734,7 @@ pub fn quant_rows(files: &HfFiles, hw: &Hardware) -> Vec<QuantRow> {
                 .map_or_else(|| "\u{2014}".to_string(), format_bytes),
             bytes: files.safetensors.size,
             fit: fit_for(files.safetensors.size, hw),
+            precise: false,
             recommended: false,
             pull: PullRequest {
                 model: pull.clone(),
@@ -1113,6 +1183,8 @@ pub struct DiscoverState {
     pub ollama_selected: Option<String>,
     /// Tag chosen for it.
     pub ollama_tag: Option<String>,
+    /// Remote estimates by (repository, row label), filled lazily for the picker rows.
+    pub estimates: HashMap<(String, String), EstimateState>,
     /// Every tag of the selected library model (`ollama_tags_for`).
     pub ollama_tags: Fetch<Vec<LibraryTag>>,
     /// The model `ollama_tags` belongs to.
@@ -1206,6 +1278,9 @@ impl DiscoverState {
             return None;
         }
         self.selected = Some(repo.to_string());
+        // Requests in flight are aborted with the view's tasks; forget them so they are asked
+        // again when the repository comes back.
+        self.estimates.retain(|_, v| *v != EstimateState::Loading);
         self.chosen_quant = None;
         self.detail = Fetch::Loading;
         self.files = Fetch::Loading;
@@ -1238,12 +1313,59 @@ impl DiscoverState {
         let Some(files) = self.files.ready() else {
             return Vec::new();
         };
-        let rows = quant_rows(files, &self.hardware);
+        let repo = self.selected.clone().unwrap_or_default();
+        let rows = quant_rows_with(files, &self.hardware, &|label| match self
+            .estimates
+            .get(&(repo.clone(), label.to_string()))
+        {
+            Some(EstimateState::Ready(fit)) => Some(*fit),
+            _ => None,
+        });
         if self.hf.fits_only {
             rows.into_iter().filter(|r| r.fit.fits()).collect()
         } else {
             rows
         }
+    }
+
+    /// The quants of the selected repository whose remote estimate was not asked yet (marked
+    /// as loading), at most [`MAX_ESTIMATES`] per repository. Safetensors need none.
+    pub fn estimates_wanted(&mut self) -> Vec<EstimateTarget> {
+        let (Some(repo), Some(files)) = (self.selected.clone(), self.files.ready()) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for q in files.gguf.iter().take(MAX_ESTIMATES) {
+            let label = q.quant.clone().unwrap_or_else(|| file_label(q));
+            if self.estimates.contains_key(&(repo.clone(), label.clone())) {
+                continue;
+            }
+            out.push(EstimateTarget {
+                repo: repo.clone(),
+                quant: q.quant.clone(),
+                file: q
+                    .quant
+                    .is_none()
+                    .then(|| q.files.first().map(|f| f.path.clone()))
+                    .flatten(),
+                label,
+            });
+        }
+        for t in &out {
+            self.estimates
+                .insert((t.repo.clone(), t.label.clone()), EstimateState::Loading);
+        }
+        out
+    }
+
+    /// Stores the server's answer for one quant.
+    pub fn finish_estimate(&mut self, repo: &str, label: &str, result: Result<Value, String>) {
+        let state = match result.ok().as_ref().and_then(fit_from_estimate) {
+            Some(fit) => EstimateState::Ready(fit),
+            None => EstimateState::Failed,
+        };
+        self.estimates
+            .insert((repo.to_string(), label.to_string()), state);
     }
 
     /// The row the download button pulls: the chosen one, else the recommended one, else
@@ -1451,6 +1573,83 @@ mod tests {
         assert_eq!(rows.iter().find(|r| r.recommended).unwrap().label, "Q4_K_M");
         assert!(matches!(rows[1].fit, Fit::Partial { .. }));
         assert!(matches!(rows[0].fit, Fit::TooLarge { .. }));
+    }
+
+    #[test]
+    fn remote_estimates_replace_the_size_rule_once_they_arrive() {
+        let ok = |vram: u64, ram: u64, fits: bool, on_gpu: u64| {
+            json!({
+                "estimate": {"vram_bytes": vram, "ram_bytes": ram, "total_layers": 36,
+                             "gpu_layers": on_gpu, "output_on_gpu": on_gpu == 36},
+                "fits": fits
+            })
+        };
+        assert_eq!(
+            fit_from_estimate(&ok(6_000_000_000, 400_000_000, true, 36)),
+            Some(Fit::Gpu {
+                needed: 6_400_000_000
+            })
+        );
+        assert!(matches!(
+            fit_from_estimate(&ok(0, 9_000_000_000, true, 0)),
+            Some(Fit::Ram { .. })
+        ));
+        assert!(matches!(
+            fit_from_estimate(&ok(5_000_000_000, 5_000_000_000, true, 20)),
+            Some(Fit::Partial { gpu_percent: 50 })
+        ));
+        assert!(matches!(
+            fit_from_estimate(&ok(30_000_000_000, 0, false, 36)),
+            Some(Fit::TooLarge { .. })
+        ));
+        assert_eq!(fit_from_estimate(&json!({})), None);
+
+        let mut s = DiscoverState {
+            hardware: hw24(),
+            ..DiscoverState::default()
+        };
+        let g = s.select("Qwen/Qwen3-8B-GGUF").unwrap();
+        assert!(
+            s.estimates_wanted().is_empty(),
+            "nothing before the files arrive"
+        );
+        s.finish_detail(g, Err("x".into()), Ok(files()));
+        let wanted = s.estimates_wanted();
+        assert_eq!(wanted.len(), 4);
+        assert!(s.estimates_wanted().is_empty(), "each quant is asked once");
+        assert!(s.quant_rows().iter().all(|r| !r.precise));
+        let t = wanted.iter().find(|t| t.label == "Q4_K_M").unwrap();
+        assert_eq!(t.quant.as_deref(), Some("Q4_K_M"));
+        s.finish_estimate(&t.repo, &t.label, Ok(ok(30_000_000_000, 0, false, 36)));
+        let rows = s.quant_rows();
+        let q4 = rows.iter().find(|r| r.label == "Q4_K_M").unwrap();
+        assert!(q4.precise && matches!(q4.fit, Fit::TooLarge { .. }));
+        assert!(
+            !q4.recommended,
+            "the recommendation follows the precise fit"
+        );
+        // A failed estimate keeps the heuristic.
+        let other = wanted.iter().find(|t| t.label == "Q8_0").unwrap();
+        s.finish_estimate(&other.repo, &other.label, Err("502".into()));
+        assert!(
+            !s.quant_rows()
+                .iter()
+                .find(|r| r.label == "Q8_0")
+                .unwrap()
+                .precise
+        );
+        // In-flight requests are forgotten when the selection moves away.
+        s.estimates
+            .insert(("x".into(), "y".into()), EstimateState::Loading);
+        s.select("other/repo");
+        assert!(
+            !s.estimates
+                .contains_key(&("x".to_string(), "y".to_string()))
+        );
+        assert!(
+            s.estimates
+                .contains_key(&("Qwen/Qwen3-8B-GGUF".to_string(), "Q4_K_M".to_string()))
+        );
     }
 
     #[test]

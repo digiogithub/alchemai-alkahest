@@ -10,6 +10,7 @@
 use std::time::{Duration, Instant};
 
 use alkahest_client::Client;
+use alkahest_client::HfQuant;
 use alkahest_client::admin::{Job, PullRequest};
 use futures::StreamExt;
 
@@ -38,6 +39,10 @@ use crate::views::widgets::{
 
 /// Typing pause before a search runs.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(450);
+/// Rest on a repository this long before its quants are estimated.
+const ESTIMATE_DEBOUNCE: Duration = Duration::from_millis(600);
+/// Estimate requests in flight at once.
+const ESTIMATE_PARALLEL: usize = 3;
 /// Delay before the job feed reconnects after the event stream ended.
 const FEED_RETRY: Duration = Duration::from_secs(2);
 /// Width of the results column (design: 490 px of 1144).
@@ -87,6 +92,10 @@ pub struct DiscoverView {
     menu: Option<Menu>,
     search_task: Option<Task<()>>,
     tags_task: Option<Task<()>>,
+    /// Debounce before the quant estimates of a freshly opened repository are asked.
+    estimate_debounce: Option<Task<()>>,
+    /// Estimate requests in flight (dropping them aborts the requests).
+    estimate_tasks: Vec<Task<()>>,
     debounce: Option<Task<()>>,
     detail_task: Option<Task<()>>,
     feed: Option<Task<()>>,
@@ -185,6 +194,8 @@ impl DiscoverView {
             menu: None,
             search_task: None,
             tags_task: None,
+            estimate_debounce: None,
+            estimate_tasks: Vec::new(),
             debounce: None,
             detail_task: None,
             feed: None,
@@ -355,6 +366,9 @@ impl DiscoverView {
         let Some(generation) = self.state.select(repo) else {
             return;
         };
+        // Estimates of the previous repository are no longer wanted.
+        self.estimate_debounce = None;
+        self.estimate_tasks.clear();
         let client = self.client.clone();
         let repo = repo.to_string();
         let call = tokio_bridge::spawn(cx, async move {
@@ -370,10 +384,62 @@ impl DiscoverView {
             };
             let _ = this.update(cx, |view, cx| {
                 view.state.finish_detail(generation, detail, files);
+                view.schedule_estimates(cx);
                 cx.notify();
             });
         }));
         cx.notify();
+    }
+
+    /// Asks for the memory estimates of the picker rows once the user rests on a repository
+    /// (a quick click-through never reads a GGUF header).
+    fn schedule_estimates(&mut self, cx: &mut Context<Self>) {
+        self.estimate_debounce = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(ESTIMATE_DEBOUNCE).await;
+            let _ = this.update(cx, |view, cx| view.run_estimates(cx));
+        }));
+    }
+
+    /// Sends the estimate requests of the quants not asked yet, a few at a time: each one makes
+    /// the server read a GGUF header from the Hub.
+    fn run_estimates(&mut self, cx: &mut Context<Self>) {
+        self.estimate_debounce = None;
+        if !self.connected {
+            return;
+        }
+        let wanted = self.state.estimates_wanted();
+        if wanted.is_empty() {
+            return;
+        }
+        cx.notify();
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(ESTIMATE_PARALLEL));
+        for target in wanted {
+            let client = self.client.clone();
+            let gate = gate.clone();
+            let t = target.clone();
+            let call = tokio_bridge::spawn(cx, async move {
+                let _permit = gate.acquire().await;
+                client
+                    .hf_estimate(
+                        HfQuant {
+                            repo: &t.repo,
+                            file: t.file.as_deref(),
+                            quant: t.quant.as_deref(),
+                            revision: None,
+                        },
+                        &[],
+                    )
+                    .await
+            });
+            self.estimate_tasks.push(cx.spawn(async move |this, cx| {
+                let result = flatten(call.await);
+                let _ = this.update(cx, |view, cx| {
+                    view.state
+                        .finish_estimate(&target.repo, &target.label, result);
+                    cx.notify();
+                });
+            }));
+        }
     }
 
     /// Fetches the tags of the selected Ollama library model (once per selection).
@@ -1056,7 +1122,11 @@ impl DiscoverView {
                     .truncate()
                     .type_style(text::SMALL)
                     .text_color(fit_fg)
-                    .child(row.fit.label()),
+                    .child(if row.precise {
+                        format!("{} \u{b7} from header", row.fit.label())
+                    } else {
+                        row.fit.label()
+                    }),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.state.chosen_quant = Some(label.clone());
