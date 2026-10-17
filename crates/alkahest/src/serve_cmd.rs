@@ -16,14 +16,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use alkahest_api::UpstreamClient;
+use alkahest_api::admin::{AdminContext, RecipeEngineManager};
 use alkahest_api::audit::{AuditLog, UsageTracker, usage_path};
 use alkahest_api::keys::{FileKeyVerifier, KeyStore, KeyVerifier};
 use alkahest_api::pull::PullService;
 use alkahest_api::{
     ApiRouter, ApiSettings, AppState, Exposure, ServeOptions, ServerInfo, check_exposure,
 };
+use alkahest_core::Source;
 use alkahest_core::config::Loaded;
 use alkahest_engine::{EngineRegistry, Platform, ProcessLedger, SpawnOptions};
+use alkahest_fetch::FetchConfig;
 use alkahest_sched::{CatalogBackend, Scheduler, SchedulerOptions};
 use alkahest_store::{Catalog, ModelSettings};
 use anyhow::{Context, Result};
@@ -78,9 +81,10 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         eprintln!("alkahest serve: warning: {warning}");
     }
     let catalog = Arc::new(catalog);
-    let platform = tokio::task::spawn_blocking(|| Platform::current(&alkahest_sysinfo::detect()))
+    let system = tokio::task::spawn_blocking(alkahest_sysinfo::detect)
         .await
         .context("detecting the hardware")?;
+    let platform = Platform::current(&system);
     tracing::info!(?platform, "platform");
     // Engines a killed predecessor left behind (ALK-US-0092): stop them before starting ours.
     // Only processes recorded in the ledger by a server that is gone are touched.
@@ -118,6 +122,29 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
     )
     .context("starting the scheduler")?;
     let pulls = Arc::new(PullService::new(config.clone(), paths.clone()));
+    // The admin API saves network settings where the operator's settings live: the
+    // `--config` file when one was given, else the user configuration file.
+    let config_file = loaded
+        .sources
+        .iter()
+        .find_map(|s| match s {
+            Source::ExplicitFile(p) => Some(p.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| loaded.paths.user_config_file());
+    let engines = Arc::new(RecipeEngineManager::new(
+        &paths.engines_dir,
+        &paths.data_dir,
+        FetchConfig {
+            max_bytes_per_sec: config.pull.bandwidth_cap(),
+            ..FetchConfig::default()
+        },
+        system.clone(),
+    ));
+    let admin = AdminContext::builder(config.clone(), paths.clone(), config_file)
+        .engines(engines)
+        .system(system)
+        .build();
 
     let usage = Arc::new(UsageTracker::open(usage_path(&paths.key_store)));
     let mut builder = AppState::builder(ServerInfo::default())
@@ -126,6 +153,8 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         .service(scheduler.clone())
         .service(catalog)
         .service(pulls)
+        .service(admin)
+        .service(usage.clone())
         .service(UpstreamClient::new());
     if config.auth.audit_log {
         let audit = AuditLog::start(

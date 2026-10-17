@@ -2,14 +2,15 @@
 id: ALK-US-0069
 type: story
 title: Model settings editor
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0013
 milestone: ALK-M-0005
 labels: [desktop, config]
 estimate: 5
 created: 2026-10-16T22:43:04Z
-updated: 2026-10-16T22:52:11Z
+updated: 2026-10-17T03:51:28Z
+started: 2026-10-17T03:51:28Z
 links:
   - { kind: implements, target: ALK-SP-0008.R5 }
   - { kind: implements, target: ALK-SP-0010.R3 }

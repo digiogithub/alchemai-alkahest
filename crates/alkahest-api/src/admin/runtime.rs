@@ -1,46 +1,38 @@
-//! Runtime admin routes (ALK-SP-0005.R6 subset, ALK-SP-0004.R5, R7):
+//! Runtime admin routes (ALK-SP-0004.R5, R7):
 //!
 //! * `GET /alkahest/v1/ps`: the scheduler snapshot (every runtime field of
 //!   [`alkahest_sched::SchedulerSnapshot`]).
-//! * `GET /alkahest/v1/events`: server-sent `status` events carrying the snapshot, sent on
-//!   connect and whenever the scheduler reports a change (load, unload, request start/end,
-//!   usage, crash), at most every 250 ms; the desktop app's live view (ALK-T-0100).
+//! * `GET /alkahest/v1/events`: server-sent events: `status` carrying the scheduler snapshot,
+//!   sent on connect and whenever the scheduler reports a change (load, unload, request
+//!   start/end, usage, crash), at most every 250 ms; and `job` carrying a [`Job`] on every
+//!   job state change and throttled progress (pulls, engine installs). The desktop app's live
+//!   view (ALK-T-0100).
 //! * `POST /alkahest/v1/unload` `{"model": ".."}` or `{"all": true}`: stops models now.
 //! * `GET /metrics`: Prometheus text exposition.
-//!
-//! All of them need the admin scope for non-loopback callers (`dialect::requires_admin`).
 
 use std::convert::Infallible;
 use std::time::Duration;
 
 use alkahest_sched::Scheduler;
 use axum::Json;
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::State;
 use axum::http::{HeaderValue, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Router, body::Body};
-use futures::Stream;
+use futures::stream::{BoxStream, Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
+use tokio::sync::broadcast;
 
+use super::context::admin;
+use super::jobs::Job;
 use crate::dialect::Family;
 use crate::service::{self, HttpError, blocking, respond};
 use crate::state::AppState;
 
 /// Minimum spacing of status events.
 const EVENT_INTERVAL: Duration = Duration::from_millis(250);
-
-/// The admin runtime routes and `/metrics`.
-pub fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/alkahest/v1/ps", get(snapshot))
-        .route("/alkahest/v1/events", get(events))
-        .route("/alkahest/v1/unload", post(unload))
-        .route("/metrics", get(metrics))
-}
 
 async fn fresh_snapshot(s: &Scheduler) -> Result<alkahest_sched::SchedulerSnapshot, HttpError> {
     let s = s.clone();
@@ -51,7 +43,8 @@ async fn fresh_snapshot(s: &Scheduler) -> Result<alkahest_sched::SchedulerSnapsh
     .await
 }
 
-async fn snapshot(State(state): State<AppState>) -> Response {
+/// `GET /alkahest/v1/ps`.
+pub(super) async fn snapshot(State(state): State<AppState>) -> Response {
     let r = async {
         let s = service::scheduler(&state)?;
         Ok(Json(fresh_snapshot(&s).await?).into_response())
@@ -60,12 +53,26 @@ async fn snapshot(State(state): State<AppState>) -> Response {
     respond(&state, Family::Admin, r)
 }
 
-async fn events(State(state): State<AppState>) -> Response {
-    let s = match service::scheduler(&state) {
-        Ok(s) => s,
-        Err(e) => return respond(&state, Family::Admin, Err(e)),
-    };
-    Sse::new(status_events(s))
+/// `GET /alkahest/v1/events`. Needs a scheduler or an admin context; streams whichever
+/// sources exist.
+pub(super) async fn events(State(state): State<AppState>) -> Response {
+    let scheduler = state.service::<Scheduler>();
+    let jobs = admin(&state).ok().map(|c| c.jobs.subscribe());
+    if scheduler.is_none() && jobs.is_none() {
+        return respond(
+            &state,
+            Family::Admin,
+            service::scheduler(&state).map(|_| Response::default()),
+        );
+    }
+    let mut streams: Vec<BoxStream<'static, Result<Event, Infallible>>> = Vec::new();
+    if let Some(s) = scheduler {
+        streams.push(status_events(s).boxed());
+    }
+    if let Some(rx) = jobs {
+        streams.push(job_events(rx).boxed());
+    }
+    Sse::new(futures::stream::select_all(streams))
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
         .into_response()
 }
@@ -88,6 +95,22 @@ fn status_events(s: Scheduler) -> impl Stream<Item = Result<Event, Infallible>> 
     }
 }
 
+fn job_events(mut rx: broadcast::Receiver<Job>) -> impl Stream<Item = Result<Event, Infallible>> {
+    async_stream::stream! {
+        loop {
+            match rx.recv().await {
+                Ok(job) => match Event::default().event("job").json_data(&job) {
+                    Ok(ev) => yield Ok(ev),
+                    Err(e) => tracing::warn!(error = %e, "cannot encode a job event"),
+                },
+                // A slow client missed some progress; the next event carries the full state.
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct UnloadRequest {
     #[serde(default, alias = "name")]
@@ -96,7 +119,8 @@ struct UnloadRequest {
     all: bool,
 }
 
-async fn unload(State(state): State<AppState>, body: Bytes) -> Response {
+/// `POST /alkahest/v1/unload`.
+pub(super) async fn unload(State(state): State<AppState>, body: Bytes) -> Response {
     let r = async {
         let req: UnloadRequest = if body.is_empty() {
             UnloadRequest::default()
@@ -122,7 +146,8 @@ async fn unload(State(state): State<AppState>, body: Bytes) -> Response {
     respond(&state, Family::Admin, r)
 }
 
-async fn metrics(State(state): State<AppState>) -> Response {
+/// `GET /metrics`.
+pub(super) async fn metrics(State(state): State<AppState>) -> Response {
     let r = async {
         let s = service::scheduler(&state)?;
         let s2 = s.clone();

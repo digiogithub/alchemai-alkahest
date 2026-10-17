@@ -397,3 +397,58 @@ async fn real_llama_server_embeddings() {
     );
     handle.stop().await;
 }
+
+fn spec_args(req: &LaunchRequest, inst: &EngineInstall) -> Vec<String> {
+    LlamaCppEngine::mainline()
+        .prepare(req, inst)
+        .unwrap()
+        .args
+        .iter()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// Found in the vision tests: a CUDA machine with only the CPU build installed got `-ngl 999`.
+#[test]
+fn cpu_only_build_never_offloads() {
+    let mut gpu = chat();
+    gpu.accelerator = Accelerator::Cuda {
+        major: 12,
+        minor: 4,
+    };
+    gpu.settings.gpu_layers = Some(-1);
+    let cpu_build = install(&[]);
+    let a = spec_args(&gpu, &cpu_build);
+    assert!(pair(&a, "-ngl").is_none(), "{a:?}");
+
+    let mut cuda_build = install(&[]);
+    cuda_build.variant = Some("cuda12.4".into());
+    assert_eq!(
+        pair(&spec_args(&gpu, &cuda_build), "-ngl").as_deref(),
+        Some("999")
+    );
+
+    // macOS archives labelled `cpu` carry Metal.
+    let mut metal = chat();
+    metal.accelerator = Accelerator::Metal;
+    assert_eq!(
+        pair(&spec_args(&metal, &cpu_build), "-ngl").as_deref(),
+        Some("999")
+    );
+}
+
+#[test]
+fn runs_on_follows_the_build_variant() {
+    let cuda = Accelerator::Cuda {
+        major: 12,
+        minor: 4,
+    };
+    let mut i = install(&[]);
+    assert_eq!(i.runs_on(cuda), Accelerator::Cpu);
+    assert_eq!(i.runs_on(Accelerator::Vulkan), Accelerator::Cpu);
+    assert_eq!(i.runs_on(Accelerator::Metal), Accelerator::Metal);
+    i.variant = Some("cuda12.4".into());
+    assert_eq!(i.runs_on(cuda), cuda);
+    i.variant = None;
+    assert_eq!(i.runs_on(cuda), cuda);
+}
