@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use alkahest_fetch::FetchConfig;
 use alkahest_hf::pull::{HfPullError, RECOMMENDED_MEDIA_TYPE, pull_hf};
 use alkahest_hf::{HfClient, HfError, Token};
-use alkahest_ollama::{PullEvent, Transfer};
-use alkahest_store::{AlkahestStore, Digest, HfRef, LayerKind, media_type};
+use alkahest_pull::{PullEvent, Transfer};
+use alkahest_store::{AlkahestStore, Digest, HfRef, LayerKind, ModelOverlays, media_type};
 use tokio_util::sync::CancellationToken;
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
@@ -165,7 +165,7 @@ async fn quant_selection_downloads_only_that_file_and_the_projector() {
     let (t, events) = transfer(&store);
     let hf: HfRef = "hf.co/org/repo:Q8_0".parse().unwrap();
 
-    let out = pull_hf(&t, &hub.client(None), &hf).await.unwrap();
+    let out = pull_hf(&t, &hub.client(None), &hf, None).await.unwrap();
 
     assert_eq!(out.name.to_string(), "hf.co/org/repo:Q8_0");
     assert_eq!(out.revision, REVISION);
@@ -204,7 +204,7 @@ async fn default_pull_picks_q4_k_m_and_names_the_model_after_it() {
     let (t, _) = transfer(&store);
     let hf: HfRef = "hf.co/org/repo".parse().unwrap();
 
-    let out = pull_hf(&t, &hub.client(None), &hf).await.unwrap();
+    let out = pull_hf(&t, &hub.client(None), &hf, None).await.unwrap();
 
     assert_eq!(out.name.to_string(), "hf.co/org/repo:Q4_K_M");
     assert_eq!(
@@ -221,7 +221,7 @@ async fn token_is_sent_to_the_hub_but_not_to_the_cdn_host() {
     let (t, _) = transfer(&store);
     let hf: HfRef = "hf.co/org/repo:Q8_0".parse().unwrap();
 
-    pull_hf(&t, &hub.client(Some("hf_secret")), &hf)
+    pull_hf(&t, &hub.client(Some("hf_secret")), &hf, None)
         .await
         .unwrap();
 
@@ -245,7 +245,7 @@ async fn unknown_quant_is_an_error_listing_the_available_ones() {
     let (t, _) = transfer(&store);
     let hf: HfRef = "hf.co/org/repo:Q6_K".parse().unwrap();
 
-    let err = pull_hf(&t, &hub.client(None), &hf).await.unwrap_err();
+    let err = pull_hf(&t, &hub.client(None), &hf, None).await.unwrap_err();
 
     let msg = err.to_string();
     assert!(matches!(err, HfPullError::NotFound { .. }), "{msg}");
@@ -267,7 +267,7 @@ async fn gated_repository_without_token_explains_how_to_authenticate() {
     let client = HfClient::new(&server.uri(), None).unwrap();
     let hf: HfRef = "hf.co/org/gated".parse().unwrap();
 
-    let err = pull_hf(&t, &client, &hf).await.unwrap_err();
+    let err = pull_hf(&t, &client, &hf, None).await.unwrap_err();
 
     assert!(matches!(
         err,
@@ -295,7 +295,7 @@ async fn recommended_params_are_stored_as_an_extra_layer() {
     let (t, _) = transfer(&store);
     let hf: HfRef = "hf.co/org/repo:Q8_0".parse().unwrap();
 
-    let out = pull_hf(&t, &hub2.client(None), &hf).await.unwrap();
+    let out = pull_hf(&t, &hub2.client(None), &hf, None).await.unwrap();
 
     let stored = store.read_manifest(&out.name).unwrap().unwrap();
     let layer = stored
@@ -306,6 +306,34 @@ async fn recommended_params_are_stored_as_an_extra_layer() {
         .expect("recommended layer");
     let text = std::fs::read_to_string(store.blob_path(&layer.digest)).unwrap();
     assert!(text.contains("0.6"), "{text}");
+}
+
+#[tokio::test]
+async fn recommended_params_are_persisted_in_the_model_overlay_directory() {
+    let hub = Hub::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/org/repo/resolve/{REVISION}/generation_config.json"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "temperature": 0.6, "top_k": 20
+        })))
+        .with_priority(1)
+        .mount(&hub.server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = AlkahestStore::open(dir.path().join("store")).unwrap();
+    let overlays = ModelOverlays::new(dir.path().join("overlays"));
+    let (t, _) = transfer(&store);
+    let hf: HfRef = "hf.co/org/repo:Q8_0".parse().unwrap();
+
+    let out = pull_hf(&t, &hub.client(None), &hf, Some(&overlays))
+        .await
+        .unwrap();
+
+    let layer = overlays.recommended(&out.name).unwrap().expect("persisted");
+    assert_eq!(layer.sampling.temperature, Some(0.6));
+    assert_eq!(layer.sampling.top_k, Some(20));
 }
 
 /// Real Hub; opt in with ALKAHEST_TEST_NET=1. Uses a small public GGUF repository.
@@ -321,6 +349,6 @@ async fn real_hub_pull_of_a_tiny_gguf() {
     let dir = tempfile::tempdir().unwrap();
     let store = AlkahestStore::open(dir.path()).unwrap();
     let (t, _) = transfer(&store);
-    let out = pull_hf(&t, &client, &hf).await.unwrap();
+    let out = pull_hf(&t, &client, &hf, None).await.unwrap();
     assert!(store.read_manifest(&out.name).unwrap().is_some());
 }

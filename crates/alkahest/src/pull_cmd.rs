@@ -15,8 +15,9 @@ use alkahest_core::paths::process_env;
 use alkahest_fetch::FetchConfig;
 use alkahest_hf::pull::pull_hf;
 use alkahest_hf::{HfClient, KeyringStore};
-use alkahest_ollama::{PullEvent, PullOptions, PullOutcome, RegistryClient, Transfer, pull_ollama};
-use alkahest_store::{AlkahestStore, ModelRef, OllamaStore, ScopedRef};
+use alkahest_ollama::{PullOptions, PullOutcome, RegistryClient, pull_ollama};
+use alkahest_pull::{PullEvent, Transfer};
+use alkahest_store::{AlkahestStore, ModelOverlays, ModelRef, OllamaStore, ScopedRef};
 use anyhow::{Context, Result, bail};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde_json::json;
@@ -65,6 +66,11 @@ async fn run_async(
             ctrl_c.cancel();
         }
     });
+    // `[pull] max_bytes_per_sec` / `ALKAHEST_PULL_MAX_BPS`.
+    let fetch_config = FetchConfig {
+        max_bytes_per_sec: loaded.config.pull.bandwidth_cap(),
+        ..FetchConfig::default()
+    };
     let renderer = Arc::new(Renderer::new(json));
     let progress = {
         let r = renderer.clone();
@@ -75,13 +81,8 @@ async fn run_async(
     match reference {
         ModelRef::Name { name, .. } => {
             let registry = RegistryClient::for_name(&name, insecure)?;
-            let transfer = Transfer::new(
-                store,
-                registry.http().clone(),
-                FetchConfig::default(),
-                cancel,
-            )
-            .with_progress(progress);
+            let transfer = Transfer::new(store, registry.http().clone(), fetch_config, cancel)
+                .with_progress(progress);
             let ollama = OllamaStore::discover(&paths).context("opening the Ollama store")?;
             let outcome = pull_ollama(
                 &transfer,
@@ -123,9 +124,10 @@ async fn run_async(
         }
         ModelRef::HuggingFace(hf) => {
             let client = HfClient::from_config(&loaded.config.hf, &process_env, &KeyringStore)?;
-            let transfer = Transfer::new(store, reqwest_client()?, FetchConfig::default(), cancel)
+            let transfer = Transfer::new(store, reqwest_client()?, fetch_config, cancel)
                 .with_progress(progress);
-            let outcome = pull_hf(&transfer, &client, &hf)
+            let overlays = ModelOverlays::in_data_dir(&paths.data_dir);
+            let outcome = pull_hf(&transfer, &client, &hf, Some(&overlays))
                 .await
                 .with_context(|| format!("pulling {hf}"))?;
             renderer.finish();

@@ -18,10 +18,10 @@
 //!
 //! No chat template layer is written: the engine reads the Jinja template embedded in the GGUF.
 
-use alkahest_ollama::{BlobSpec, PullEvent, Transfer, TransferError};
+use alkahest_pull::{BlobSpec, PullEvent, Transfer, TransferError};
 use alkahest_store::{
-    Descriptor, Digest, HfRef, HfSelector, Manifest, ModelConfig, ModelName, RefError, SourceInfo,
-    SourceKind, StoreError, media_type,
+    Descriptor, Digest, HfRef, HfSelector, Manifest, ModelConfig, ModelName, ModelOverlays,
+    RefError, SourceInfo, SourceKind, StoreError, media_type,
 };
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -33,8 +33,9 @@ use crate::{
 
 /// Media type of the layer holding [`crate::RecommendedParams`] as JSON.
 ///
-/// TODO(ALK-T-0073): move to `alkahest_store::media_type` once the store exposes recommended
-/// parameters natively; the layer content stays the same.
+/// The same JSON is also persisted as the model's machine-written "recommended defaults" file
+/// ([`ModelOverlays::set_recommended_json`], ALK-T-0073); the layer keeps the advice with the
+/// manifest so it travels with a copied model.
 pub const RECOMMENDED_MEDIA_TYPE: &str = "application/vnd.alkahest.recommended.v1+json";
 
 /// How a Hugging Face pull ended.
@@ -168,11 +169,13 @@ fn digest_of(file: &RepoFile) -> Result<Digest, HfPullError> {
         })
 }
 
-/// Pulls `hf` into the store behind `transfer`, downloading from `client`'s Hub.
+/// Pulls `hf` into the store behind `transfer`, downloading from `client`'s Hub. When
+/// `overlays` is given, the recommended parameters are also persisted there (ALK-T-0073).
 pub async fn pull_hf(
     transfer: &Transfer,
     client: &HfClient,
     hf: &HfRef,
+    overlays: Option<&ModelOverlays>,
 ) -> Result<HfPullOutcome, HfPullError> {
     let repo = hf.repo_id();
     let info = client.model_info(&repo, None).await?;
@@ -243,9 +246,11 @@ pub async fn pull_hf(
     layers.push(store.put_json_blob(media_type::ALKAHEST_SOURCE, &source)?);
 
     // Recommended parameters are advice, never a reason to fail the pull.
+    let mut recommended_json = None;
     match client.recommended_params(&repo, revision.as_deref()).await {
         Ok(params) if !params.is_empty() => {
             layers.push(store.put_json_blob(RECOMMENDED_MEDIA_TYPE, &params)?);
+            recommended_json = serde_json::to_string(&params).ok();
         }
         Ok(_) => {}
         Err(e) => tracing::warn!(repo = %repo, error = %e, "recommended parameters unavailable"),
@@ -269,6 +274,12 @@ pub async fn pull_hf(
     transfer.emit(PullEvent::Installing);
     let manifest = Manifest::new(config_desc, layers);
     let manifest_digest = store.write_manifest(&name, &manifest)?;
+    // After the manifest, so a failed pull leaves no orphan overlay file. Also advice only.
+    if let (Some(o), Some(json)) = (overlays, &recommended_json)
+        && let Err(e) = o.set_recommended_json(&name, json)
+    {
+        tracing::warn!(model = %name, error = %e, "could not persist recommended defaults");
+    }
     transfer.emit(PullEvent::Done);
     Ok(HfPullOutcome {
         name,

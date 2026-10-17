@@ -254,10 +254,16 @@ pub enum EnginesAction {
     /// List installed and available engines.
     #[command(visible_alias = "list")]
     Ls,
-    /// Install an engine from its recipe.
+    /// Download and install an engine from its recipe.
     Install {
-        /// Engine id.
+        /// Engine id (`alkahest engines ls` lists them).
         engine: String,
+        /// Accelerator build; the CPU build when omitted.
+        #[arg(long)]
+        variant: Option<String>,
+        /// Reinstall even when the engine is already installed.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -322,12 +328,12 @@ impl Command {
             Self::Serve => "ALK-US-0033",
             Self::Desktop => "ALK-US-0064",
             Self::Keys { .. } => "ALK-US-0041",
-            Self::Engines { .. } => "ALK-US-0049",
             Self::Service { .. } => "ALK-US-0045",
             Self::Pull { .. }
             | Self::Config { .. }
             | Self::Completions { .. }
             | Self::Sysinfo
+            | Self::Engines { .. }
             | Self::Hf { .. } => {
                 return None;
             }

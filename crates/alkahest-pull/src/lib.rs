@@ -1,8 +1,9 @@
 //! Shared plumbing of pulls: the progress events and the step that brings one blob into the
 //! Alkahest store (download with `alkahest-fetch` into the staging directory, verify, adopt).
 //!
-//! Both the Ollama registry pull ([`crate::pull`]) and the Hugging Face pull use it, so the
-//! CLI renders one event vocabulary whatever the source.
+//! Both the Ollama registry pull (`alkahest-ollama`) and the Hugging Face pull (`alkahest-hf`)
+//! use it, so the CLI renders one event vocabulary whatever the source and the two source
+//! crates stay independent of each other.
 
 use std::sync::Arc;
 

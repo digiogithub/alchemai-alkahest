@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::duration::KeepAlive;
 use crate::error::{Error, Result};
 use crate::paths::{AlkahestPaths, EnvFn, detect_ollama_store, process_env};
+use crate::pull::PullConfig;
 
 /// Default API port (Ollama uses 11434; Alkahest sits next to it).
 pub const DEFAULT_PORT: u16 = 11435;
@@ -49,6 +50,8 @@ pub struct Config {
     pub hf: HfConfig,
     /// Log output.
     pub logging: LoggingConfig,
+    /// Model downloads.
+    pub pull: PullConfig,
 }
 
 /// HTTP listener settings.
@@ -417,7 +420,7 @@ impl Config {
     /// Recognised: `ALKAHEST_HOST`, `ALKAHEST_MODELS`, `ALKAHEST_OLLAMA_MODELS`,
     /// `ALKAHEST_OLLAMA_ENABLED`, `ALKAHEST_KEEP_ALIVE`, `ALKAHEST_MAX_LOADED_MODELS`,
     /// `ALKAHEST_NUM_PARALLEL`, `ALKAHEST_MAX_QUEUE`, `ALKAHEST_ENGINES_DIR`,
-    /// `ALKAHEST_HF_ENDPOINT`, `ALKAHEST_LOG`, `ALKAHEST_LOG_FORMAT`, `ALKAHEST_LOG_DIR`.
+    /// `ALKAHEST_HF_ENDPOINT`, `ALKAHEST_PULL_MAX_BPS`, `ALKAHEST_LOG`, `ALKAHEST_LOG_FORMAT`, `ALKAHEST_LOG_DIR`.
     /// (`ALKAHEST_HOME` and `ALKAHEST_CONFIG` are consumed earlier, by path discovery and
     /// [`load`].)
     pub fn apply_env(&mut self, env: EnvFn<'_>) -> Result<Vec<String>> {
@@ -475,6 +478,16 @@ impl Config {
         }
         if let Some(v) = get("ALKAHEST_HF_ENDPOINT") {
             self.hf.endpoint = v;
+        }
+        if let Some(v) = get("ALKAHEST_PULL_MAX_BPS") {
+            let n: u64 = v.trim().parse().map_err(|_| {
+                invalid(
+                    "ALKAHEST_PULL_MAX_BPS",
+                    &v,
+                    "expected a non-negative integer (bytes per second, 0 = unlimited)",
+                )
+            })?;
+            self.pull.max_bytes_per_sec = Some(n);
         }
         if let Some(v) = get("ALKAHEST_LOG") {
             self.logging.level = v;
@@ -761,6 +774,18 @@ mod tests {
         s.apply_host_spec("::").unwrap();
         assert_eq!(s.client_url(), "http://[::1]:7000");
         assert!(s.apply_host_spec("host:notaport").is_err());
+    }
+
+    #[test]
+    fn pull_bandwidth_cap_comes_from_the_environment() {
+        let mut c = Config::default();
+        c.apply_env(&fake(&[("ALKAHEST_PULL_MAX_BPS", "2500000")]))
+            .unwrap();
+        assert_eq!(c.pull.bandwidth_cap(), Some(2_500_000));
+        let err = c
+            .apply_env(&fake(&[("ALKAHEST_PULL_MAX_BPS", "fast")]))
+            .unwrap_err();
+        assert!(err.to_string().contains("ALKAHEST_PULL_MAX_BPS"));
     }
 
     #[test]

@@ -1,0 +1,20 @@
+[package]
+name = "alkahest-pull"
+description = "Alkahest: Shared pull plumbing: blob transfer into the store and the progress event vocabulary."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+alkahest-fetch.workspace = true
+alkahest-store.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+tokio-util.workspace = true

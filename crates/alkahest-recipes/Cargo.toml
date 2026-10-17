@@ -13,3 +13,19 @@ publish = false
 workspace = true
 
 [dependencies]
+alkahest-fetch.workspace = true
+flate2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+wiremock.workspace = true

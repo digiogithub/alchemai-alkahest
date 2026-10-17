@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 alkahest-core.workspace = true
-alkahest-ollama.workspace = true
+alkahest-pull.workspace = true
 alkahest-store.workspace = true
 keyring.workspace = true
 regex.workspace = true
