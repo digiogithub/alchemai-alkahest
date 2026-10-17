@@ -6,10 +6,12 @@
 mod cli;
 mod engines_cmd;
 mod hf_cmd;
+mod keys_cmd;
 mod model_config_cmd;
 mod models_cmd;
 mod pull_cmd;
 mod search_cmd;
+mod serve_cmd;
 mod sysinfo_cmd;
 // The renderer is consumed by the listing commands (`ls`, `ps`, ...) of ALK-US-0012/0031.
 #[allow(dead_code)]
@@ -69,7 +71,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
     }
 
     // Only the long-running server writes log files; short commands stay on stderr.
-    let is_serve = matches!(cli.command, Command::Serve);
+    let is_serve = matches!(cli.command, Command::Serve { .. });
     let _log_guard = logging::init(
         &loaded.config.logging,
         &loaded.config.resolve_paths(&loaded.paths).log_dir,
@@ -102,6 +104,10 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             force,
         } => pull_cmd::run(model, *insecure, *force, &loaded, cli.global.json),
         Command::Engines { action } => engines_cmd::run(action, &loaded, cli.global.json),
+        Command::Serve {
+            allow_unauthenticated,
+        } => serve_cmd::run(&loaded, *allow_unauthenticated),
+        Command::Keys { action } => keys_cmd::run(action, &loaded, cli.global.json),
         Command::Desktop => desktop(),
         other => Ok(not_implemented(other)),
     }

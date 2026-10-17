@@ -62,13 +62,63 @@ pub struct ServerConfig {
     pub host: String,
     /// TCP port.
     pub port: u16,
+    /// Largest accepted request body in bytes. Generous by default because Ollama and OpenAI
+    /// requests may carry base64 images; it still stops a client from exhausting memory.
+    pub max_body_bytes: u64,
+    /// Whole-request timeout in seconds; `0` disables it. Off by default because a streamed
+    /// generation legitimately runs for minutes.
+    pub request_timeout_secs: u64,
+    /// Seconds in-flight requests may keep running after a stop signal before the server
+    /// stops waiting for them and tears engines down (ALK-SP-0009.R4).
+    pub shutdown_timeout_secs: u64,
+    /// Browser origins allowed by CORS (`https://app.example`, or `*` for any). Empty, the
+    /// default, sends no CORS headers at all, so browsers block cross-origin calls.
+    pub cors_origins: Vec<String>,
+    /// Which API families are served (ALK-SP-0006.R7); a disabled family answers 404.
+    pub endpoints: EndpointsConfig,
 }
+
+/// Switches for the API families (ALK-SP-0006.R7). All enabled by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EndpointsConfig {
+    /// Ollama native API, `/api/*`.
+    pub ollama: bool,
+    /// OpenAI-compatible API, `/v1/*` except the Anthropic and decision routes.
+    pub openai: bool,
+    /// Anthropic Messages API, `/v1/messages`.
+    pub anthropic: bool,
+    /// Decision API, `/v1/systemone` and `/v1/decisions`.
+    pub decisions: bool,
+}
+
+impl Default for EndpointsConfig {
+    fn default() -> Self {
+        Self {
+            ollama: true,
+            openai: true,
+            anthropic: true,
+            decisions: true,
+        }
+    }
+}
+
+/// Default drain budget on shutdown, in seconds.
+pub const DEFAULT_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
+
+/// Default request body limit: 64 MiB.
+pub const DEFAULT_MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             host: DEFAULT_HOST.to_string(),
             port: DEFAULT_PORT,
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            request_timeout_secs: 0,
+            shutdown_timeout_secs: DEFAULT_SHUTDOWN_TIMEOUT_SECS,
+            cors_origins: Vec::new(),
+            endpoints: EndpointsConfig::default(),
         }
     }
 }
@@ -221,17 +271,30 @@ pub struct EngineOverride {
 #[serde(default, deny_unknown_fields)]
 pub struct AuthConfig {
     /// Require an API key for requests that do not come from loopback (`ALK-SP-0006`).
+    /// Turning it off on a non-loopback bind also needs `serve --allow-unauthenticated`.
     pub require_key_for_remote: bool,
+    /// Require an API key from loopback clients too (ALK-SP-0006.R1), for hosts where other
+    /// local users or a local reverse proxy must not get free access.
+    pub require_on_loopback: bool,
+    /// Reverse proxies whose `X-Forwarded-For` is believed. Empty by default: the client is
+    /// the socket peer, and forwarding headers from anyone else are never trusted.
+    pub trusted_proxies: Vec<IpAddr>,
     /// Key store file. Default: `<data_dir>/keys.db`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_store: Option<PathBuf>,
+    /// Append one JSON line per key-authenticated or refused request to
+    /// `<log_dir>/audit.jsonl` (ALK-SP-0006.R5). Never contains keys or bodies.
+    pub audit_log: bool,
 }
 
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             require_key_for_remote: true,
+            require_on_loopback: false,
+            trusted_proxies: Vec::new(),
             key_store: None,
+            audit_log: true,
         }
     }
 }
@@ -352,6 +415,11 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         if self.server.host.trim().is_empty() {
             return Err(Error::InvalidConfig("server.host must not be empty".into()));
+        }
+        if self.server.max_body_bytes == 0 {
+            return Err(Error::InvalidConfig(
+                "server.max_body_bytes must be at least 1".into(),
+            ));
         }
         if self.scheduler.max_queue == 0 {
             return Err(Error::InvalidConfig(
@@ -678,6 +746,32 @@ mod tests {
     fn write(path: &Path, text: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn api_exposure_settings_parse() {
+        let c = Config::from_toml_str(
+            r#"
+            [server]
+            max_body_bytes = 1024
+            cors_origins = ["https://app.example"]
+            [server.endpoints]
+            anthropic = false
+            [auth]
+            require_on_loopback = true
+            trusted_proxies = ["10.0.0.2", "::1"]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(c.server.max_body_bytes, 1024);
+        assert_eq!(c.server.cors_origins, vec!["https://app.example"]);
+        assert!(!c.server.endpoints.anthropic && c.server.endpoints.openai);
+        assert!(c.auth.require_on_loopback);
+        assert_eq!(c.auth.trusted_proxies.len(), 2);
+        let d = Config::default();
+        assert!(!d.auth.require_on_loopback);
+        assert!(d.auth.trusted_proxies.is_empty() && d.server.cors_origins.is_empty());
+        assert!(Config::from_toml_str("[server]\nmax_body_bytes = 0\n").is_err());
     }
 
     #[test]
