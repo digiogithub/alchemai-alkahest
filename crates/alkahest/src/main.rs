@@ -17,6 +17,7 @@ mod search_cmd;
 mod serve_cmd;
 mod service_cmd;
 mod service_launchd;
+mod service_windows;
 mod sysinfo_cmd;
 // The renderer is consumed by the listing commands (`ls`, `ps`, ...) of ALK-US-0012/0031.
 #[allow(dead_code)]
@@ -125,7 +126,8 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Command::Engines { action } => engines_cmd::run(action, &loaded, cli.global.json),
         Command::Serve {
             allow_unauthenticated,
-        } => serve_cmd::run(&loaded, *allow_unauthenticated),
+            service,
+        } => serve_cmd::run(&loaded, *allow_unauthenticated, *service),
         Command::Keys { action } => keys_cmd::run(action, &loaded, cli.global.json),
         Command::Service { action } => service_cmd::run(action, &loaded, cli.global.json),
         Command::Certs { action } => certs_cmd::run(action, &loaded, cli.global.json),

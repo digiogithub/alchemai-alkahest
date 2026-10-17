@@ -236,3 +236,56 @@ fn another_platforms_manager_needs_dry_run_or_root() {
         .failure()
         .stderr(contains("only works with --dry-run or --root"));
 }
+
+// Windows service manager (ALK-US-0048), through `--manager windows --dry-run`.
+
+#[test]
+fn windows_dry_run_prints_the_sc_commands() {
+    let home = tempfile::tempdir().unwrap();
+    alkahest(home.path())
+        .args([
+            "service",
+            "install",
+            "--manager",
+            "windows",
+            "--dry-run",
+            "--bin",
+            r"C:\Program Files\Alkahest\alkahest.exe",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            contains(r#"# would run: sc.exe create alkahest binPath= "\"C:\Program Files\Alkahest\alkahest.exe\" serve --service" start= delayed-auto obj= "NT AUTHORITY\LocalService""#)
+                .and(contains(r"ALKAHEST_HOME=C:\ProgramData\Alkahest"))
+                .and(contains("EventCreate.exe"))
+                .and(contains("# would run: sc.exe start alkahest")),
+        );
+    alkahest(home.path())
+        .args(["service", "uninstall", "--manager", "windows", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(contains("# would run: sc.exe delete alkahest"));
+    alkahest(home.path())
+        .args([
+            "service",
+            "install",
+            "--manager",
+            "windows",
+            "--user",
+            "--dry-run",
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("machine-wide"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn service_entry_is_windows_only() {
+    let home = tempfile::tempdir().unwrap();
+    alkahest(home.path())
+        .args(["serve", "--service"])
+        .assert()
+        .failure()
+        .stderr(contains("Windows service entry"));
+}

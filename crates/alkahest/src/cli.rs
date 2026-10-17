@@ -220,6 +220,10 @@ pub enum Command {
         /// (`auth.require_key_for_remote = false`) or no API key exists yet.
         #[arg(long)]
         allow_unauthenticated: bool,
+        /// Run under the Windows service control manager (what `alkahest service install`
+        /// registers); not for interactive use.
+        #[arg(long, hide = true)]
+        service: bool,
     },
     /// Open the desktop app (needs a build with the `desktop` feature).
     Desktop(DesktopArgs),

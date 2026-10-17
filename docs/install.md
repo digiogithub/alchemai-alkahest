@@ -109,6 +109,12 @@ platform would get.
 |---|---|---|
 | Linux | systemd unit, user `alkahest`, data `/var/lib/alkahest` | `~/.config/systemd/user/alkahest.service` |
 | macOS | LaunchDaemon `/Library/LaunchDaemons/es.digio.alkahest.plist`, hidden user `_alkahest`, data `/Library/Application Support/Alkahest`, output `/Library/Logs/Alkahest/` | LaunchAgent `~/Library/LaunchAgents/es.digio.alkahest.plist`, output `~/Library/Logs/Alkahest/` |
+| Windows | service `alkahest` (`sc.exe`, delayed auto start, `NT AUTHORITY\LocalService`, restart on failure), data `%ProgramData%\Alkahest`, events in the Application log (source `Alkahest`) | not available (services are machine-wide) |
 
 On macOS `service stop` unloads the job (`launchctl bootout`), so `KeepAlive` does not restart it;
 it loads again at the next boot or login, or with `service start`.
+
+Engines never outlive a killed server: Linux uses the parent-death signal, Windows a job object
+per engine (closing it kills the engine's process tree), macOS a small watchdog per engine that
+stops the engine within about a second of the server's death. Each start also sweeps engines a
+previous server left behind.

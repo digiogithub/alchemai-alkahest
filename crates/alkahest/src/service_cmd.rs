@@ -1,5 +1,6 @@
 //! `alkahest service install|uninstall|start|stop|status` (ALK-SP-0009.R1 to R3): the
-//! dispatcher and systemd (ALK-US-0045). launchd lives in [`crate::service_launchd`].
+//! dispatcher and systemd (ALK-US-0045). launchd lives in [`crate::service_launchd`], the
+//! Windows service manager in [`crate::service_windows`].
 //!
 //! Everything is planned first ([`plan_install`] and friends return the files to write and the
 //! commands to run) and only then applied, so `--dry-run` prints exactly what a real run does
@@ -228,7 +229,7 @@ pub(crate) fn shell_line(cmd: &[String]) -> String {
     cmd.iter()
         .map(|w| {
             if w.is_empty() || w.contains(char::is_whitespace) {
-                format!("\"{w}\"")
+                format!("\"{}\"", w.replace('"', "\\\""))
             } else {
                 w.clone()
             }
@@ -370,7 +371,7 @@ pub fn run(action: &ServiceAction, loaded: &Loaded, json: bool) -> Result<ExitCo
     match manager {
         ServiceManager::Systemd => systemd(action, loaded, json),
         ServiceManager::Launchd => crate::service_launchd::run(action, loaded, json),
-        ServiceManager::Windows => bail!("the Windows service manager is not supported yet"),
+        ServiceManager::Windows => crate::service_windows::run(action, loaded, json),
     }
 }
 

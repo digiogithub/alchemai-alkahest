@@ -11,6 +11,8 @@
 //! instead, Linux engines get SIGTERM from the kernel (parent-death signal) and every engine
 //! is in the runtime ledger (`<data_dir>/run/engines.json`) that the next start sweeps.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,17 +43,55 @@ const AUDIT_KEEP: usize = 5;
 /// Time an orphaned engine gets to exit after SIGTERM before the startup sweep kills it.
 const ORPHAN_GRACE: Duration = Duration::from_secs(5);
 
-/// Runs `alkahest serve`.
-pub fn run(loaded: &Loaded, allow_unauthenticated: bool) -> Result<ExitCode> {
+/// How a server run is told to stop and reports that it listens: OS signals for a foreground
+/// `alkahest serve`, service control events for the Windows service.
+pub(crate) struct ServeControl {
+    /// Resolves with a reason when the server should stop (drain, then hooks).
+    pub stop: Pin<Box<dyn Future<Output = &'static str> + Send>>,
+    /// Resolves when the stop must not wait any longer ([`Server::force_stop`]).
+    pub force: Pin<Box<dyn Future<Output = ()> + Send>>,
+    /// Called once with the base URL when the listener is bound.
+    pub on_listening: Box<dyn FnOnce(&str) + Send>,
+}
+
+/// Runs `alkahest serve`, or the Windows service entry with `--service`.
+pub fn run(loaded: &Loaded, allow_unauthenticated: bool, service: bool) -> Result<ExitCode> {
+    if service {
+        return crate::service_windows::run_service(loaded, allow_unauthenticated);
+    }
+    run_with(loaded, allow_unauthenticated, signal_control)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Runs the server on a new runtime until `control` (built inside the runtime, before the
+/// listener is bound, so an early stop request is not lost) says stop.
+pub(crate) fn run_with(
+    loaded: &Loaded,
+    allow_unauthenticated: bool,
+    control: impl FnOnce() -> Result<ServeControl>,
+) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("starting the async runtime")?;
-    runtime.block_on(serve(loaded, allow_unauthenticated))?;
-    Ok(ExitCode::SUCCESS)
+    runtime.block_on(serve(loaded, allow_unauthenticated, control))
 }
 
-async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
+/// The foreground control: SIGINT/SIGTERM (Windows console events) stop the server.
+fn signal_control() -> Result<ServeControl> {
+    let stop = alkahest_api::stop_signal().context("installing stop-signal handlers")?;
+    Ok(ServeControl {
+        stop: Box::pin(stop),
+        force: Box::pin(std::future::pending()),
+        on_listening: Box::new(|_| {}),
+    })
+}
+
+async fn serve(
+    loaded: &Loaded,
+    allow_unauthenticated: bool,
+    control: impl FnOnce() -> Result<ServeControl>,
+) -> Result<()> {
     let config = &loaded.config;
     let paths = config.resolve_paths(&loaded.paths);
     let settings = ApiSettings::from_config(config);
@@ -197,7 +237,11 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         scheduler.shutdown().await;
     });
     // Installed before binding so an early stop signal is not lost.
-    let stop = alkahest_api::stop_signal().context("installing stop-signal handlers")?;
+    let ServeControl {
+        stop,
+        force,
+        on_listening,
+    } = control()?;
     let options = ServeOptions::from_config(config);
     let app = ApiRouter::new(state, settings)
         .merge(alkahest_api::inference_routes())
@@ -222,10 +266,12 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         tracing::warn!("plain HTTP on a network address");
     }
     tracing::info!(%addr, ?exposure, tls = tls.is_some(), "server started");
+    on_listening(&format!("{scheme}://{addr}"));
     let report = Server::new(listener, app)
         .tls(tls)
         .options(options)
         .hooks(hooks)
+        .force_stop(force)
         .run(async move {
             let signal = stop.await;
             tracing::info!(signal, "stop signal received");
