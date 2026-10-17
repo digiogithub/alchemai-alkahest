@@ -24,6 +24,7 @@ pub mod decisions;
 pub mod dialect;
 pub mod error;
 pub mod generation;
+pub mod images;
 pub mod keys;
 pub mod ollama;
 pub mod openai;

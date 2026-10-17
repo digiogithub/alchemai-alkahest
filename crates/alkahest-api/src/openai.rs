@@ -148,6 +148,11 @@ async fn proxy(
     service::require(&lease, &model, cap)?;
     if images {
         service::require(&lease, &model, Capability::Vision)?;
+        // Remote image URLs are fetched here (SSRF-checked) and inline ones validated.
+        if let Some(Value::Array(msgs)) = body.get_mut("messages") {
+            crate::images::normalize_messages(msgs, &crate::images::ImageFetchPolicy::of(state))
+                .await?;
+        }
     }
     if has_tools && lease.settings().tools_enabled == Some(false) {
         return Err(HttpError::bad_request(format!(

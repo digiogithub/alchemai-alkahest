@@ -95,6 +95,12 @@ async fn prepare(
         )));
     }
     let mut body = translated.body.clone();
+    if translated.images
+        && let Some(Value::Array(msgs)) = body.get_mut("messages")
+    {
+        crate::images::normalize_messages(msgs, &crate::images::ImageFetchPolicy::of(state))
+            .await?;
+    }
     body.insert("model".into(), json!(lease.model()));
     if !translated.has_system
         && let Some(system) = service::model_system(state, &model).await

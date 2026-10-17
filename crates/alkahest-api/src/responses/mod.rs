@@ -167,6 +167,13 @@ async fn create_inner(
         }
     }
     messages.extend(translated.conversation.iter().cloned());
+    if translated.images {
+        crate::images::normalize_messages(
+            &mut messages,
+            &crate::images::ImageFetchPolicy::of(state),
+        )
+        .await?;
+    }
     let mut body = translated.params.clone();
     body.insert("model".into(), json!(lease.model()));
     body.insert("messages".into(), Value::Array(messages));
