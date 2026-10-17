@@ -16,6 +16,7 @@ pub mod backend;
 pub mod error;
 pub mod memory;
 pub mod metrics;
+pub mod safetensors;
 pub mod scheduler;
 
 pub use admission::{Accounted, MemoryProbe, MemorySnapshot, StaticMemoryProbe, SystemMemoryProbe};

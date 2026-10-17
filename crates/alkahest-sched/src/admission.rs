@@ -203,6 +203,18 @@ pub fn placement(
             estimate(profile, &cfg)
         }
         None => {
+            // vLLM on a GPU: weights plus KV cache from the snapshot's config.json.
+            if policy != GpuLayers::None
+                && model.dialect == ApiDialect::VllmOpenAi
+                && let Some(p) =
+                    crate::safetensors::SafetensorsProfile::from_dir(&model.request.model_path)
+            {
+                return crate::safetensors::estimate_vllm(
+                    &p,
+                    context_length(model, opts),
+                    opts.parallel(),
+                );
+            }
             let bytes = model
                 .weights_bytes
                 .saturating_add(model.projector_bytes.unwrap_or(0));

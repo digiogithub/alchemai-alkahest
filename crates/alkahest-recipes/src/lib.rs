@@ -38,7 +38,8 @@ pub use install::{
     remove_installed,
 };
 pub use recipe::{
-    AcceleratorKind, ArchiveFormat, Asset, Host, Recipe, SourceBuild, parse_recipes, select_variant,
+    AcceleratorKind, ArchiveFormat, Asset, Host, Recipe, SourceBuild, VenvBuild, parse_recipes,
+    select_variant,
 };
 
 /// The built-in recipe for `id` and `variant` (`None` means the CPU variant, the default that
@@ -49,15 +50,15 @@ pub use recipe::{
 /// [`RecipeError::UnknownEngine`] or [`RecipeError::UnknownVariant`].
 pub fn find_recipe(id: &str, variant: Option<&str>) -> Result<Recipe> {
     let catalog = Catalog::builtin();
-    catalog
-        .resolve(
-            id,
-            None,
-            Some(variant.unwrap_or("cpu")),
-            None,
-            &Host::current(),
-        )
-        .cloned()
+    let host = Host::current();
+    match variant {
+        Some(v) => catalog.resolve(id, None, Some(v), None, &host).cloned(),
+        // Engines with a CPU build default to it; the others (vLLM) follow the hardware.
+        None => catalog
+            .resolve(id, None, Some("cpu"), None, &host)
+            .or_else(|_| catalog.resolve(id, None, None, Some(&alkahest_sysinfo::detect()), &host))
+            .cloned(),
+    }
 }
 
 /// The recipes compiled into the binary, one per engine, version and variant.

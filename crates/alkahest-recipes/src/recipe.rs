@@ -21,7 +21,8 @@
 //! [variants."cuda12.4"]
 //! accelerator = "cuda"
 //! cuda = "12.4"            # the CUDA runtime the build needs
-//! # ... assets, or a `[variants."cuda12.4".source]` table to build from source
+//! # ... assets, or a `[variants."cuda12.4".source]` table to build from source, or a
+//! # `[variants."cuda12.4".venv]` table (`packages = ["vllm==0.11.0"]`) for Python engines
 //! ```
 //!
 //! [`parse_recipes`] turns a file into one flat [`Recipe`] per variant, which is the unit that
@@ -166,6 +167,42 @@ fn default_bin_dir() -> String {
     "build/bin".into()
 }
 
+/// How to install a Python engine into a virtual environment (`pip install vllm==0.11.0`).
+///
+/// The environment lives in the install directory itself (virtual environments are not
+/// relocatable, so it is never built elsewhere and moved). `uv` is used when it is on `PATH`,
+/// otherwise `python3 -m venv` plus `pip`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VenvBuild {
+    /// Python version or interpreter request handed to `uv venv --python` (`3.12`). Ignored by
+    /// the `python3 -m venv` fallback, which uses whatever `python3` is.
+    #[serde(default)]
+    pub python: Option<String>,
+    /// Requirements to install; every one must be pinned with `==`.
+    pub packages: Vec<String>,
+    /// Replaces the default package index (https).
+    #[serde(default)]
+    pub index_url: Option<String>,
+    /// Additional package indexes (https), searched next to the default one.
+    #[serde(default)]
+    pub extra_index_urls: Vec<String>,
+    /// Operating systems the environment can be created on; any when empty.
+    #[serde(default)]
+    pub os: Vec<String>,
+    /// CPU architectures the environment can be created on; any when empty.
+    #[serde(default)]
+    pub arch: Vec<String>,
+}
+
+impl VenvBuild {
+    /// Whether the environment can be created on `host`.
+    pub fn supports(&self, host: &Host) -> bool {
+        (self.os.is_empty() || self.os.contains(&host.os))
+            && (self.arch.is_empty() || self.arch.contains(&host.arch))
+    }
+}
+
 /// One recipe variant as written in the file.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -179,6 +216,8 @@ struct VariantDef {
     assets: Vec<Asset>,
     #[serde(default)]
     source: Option<SourceBuild>,
+    #[serde(default)]
+    venv: Option<VenvBuild>,
 }
 
 /// A recipe file as written.
@@ -232,6 +271,8 @@ pub struct Recipe {
     pub assets: Vec<Asset>,
     /// Source build steps, when the variant can be built locally.
     pub source: Option<SourceBuild>,
+    /// Python virtual environment steps, for engines distributed as Python packages (vLLM).
+    pub venv: Option<VenvBuild>,
 }
 
 /// Parses a recipe file into one [`Recipe`] per variant, validating every rule of the format.
@@ -287,8 +328,11 @@ pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
             (_, Some(_)) => return Err(vbad("`cuda` is only valid for cuda variants".into())),
             (_, None) => None,
         };
-        if v.assets.is_empty() && v.source.is_none() {
-            return Err(vbad("needs `assets` or a `source` table".into()));
+        if v.assets.is_empty() && v.source.is_none() && v.venv.is_none() {
+            return Err(vbad("needs `assets`, a `source` or a `venv` table".into()));
+        }
+        if let Some(venv) = &v.venv {
+            check_venv(venv).map_err(|r| vbad(format!("venv: {r}")))?;
         }
         for a in &v.assets {
             let at = format!("asset for {}/{}", a.os, a.arch);
@@ -349,9 +393,45 @@ pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
             library_dirs: file.library_dirs.clone(),
             assets: v.assets,
             source: v.source,
+            venv: v.venv,
         });
     }
     Ok(out)
+}
+
+/// Validates a `venv` table: pinned requirements, https indexes, nothing that `pip` would read
+/// as an option.
+fn check_venv(v: &VenvBuild) -> std::result::Result<(), String> {
+    if v.packages.is_empty() {
+        return Err("`packages` is empty".into());
+    }
+    for p in &v.packages {
+        let ok_chars = p.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '=' | '+' | '[' | ']' | ',')
+        });
+        if p.starts_with('-') || !ok_chars || !p.contains("==") {
+            return Err(format!(
+                "package `{p}` must be a requirement pinned with `==` (for example `vllm==0.11.0`)"
+            ));
+        }
+    }
+    for url in v.index_url.iter().chain(&v.extra_index_urls) {
+        if !url.starts_with("https://") {
+            return Err(format!("index `{url}` must be an https URL"));
+        }
+    }
+    if let Some(py) = &v.python
+        && (py.is_empty()
+            || py.starts_with('-')
+            || !py
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')))
+    {
+        return Err(format!(
+            "python `{py}` is not a version or interpreter name"
+        ));
+    }
+    Ok(())
 }
 
 /// A relative path that stays inside its base directory.
@@ -396,7 +476,9 @@ impl Recipe {
     /// Whether this variant can be installed on `host`: a prebuilt asset exists, or it can be
     /// built from source.
     pub fn installable_on(&self, host: &Host) -> bool {
-        self.asset_for(host).is_some() || self.source.is_some()
+        self.asset_for(host).is_some()
+            || self.source.is_some()
+            || self.venv.as_ref().is_some_and(|v| v.supports(host))
     }
 
     /// Directory name of this recipe's installation below `<engines_dir>/<id>/`.

@@ -206,6 +206,10 @@ fn builtin_recipes_all_parse_and_have_a_cpu_variant() {
     let all = builtin_recipes();
     assert!(!all.is_empty());
     for id in Catalog::builtin().engine_ids() {
+        // Python packages (vLLM) have no CPU build; they follow the hardware instead.
+        if all.iter().filter(|r| r.id == id).all(|r| r.venv.is_some()) {
+            continue;
+        }
         assert!(
             all.iter().any(|r| r.id == id && r.variant == "cpu"),
             "{id} has no cpu variant"
@@ -361,7 +365,11 @@ fn fake_tools(dir: &Path, fail_build: bool) -> BuildTools {
     for p in [&git, &cmake] {
         std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    BuildTools { git, cmake }
+    BuildTools {
+        git,
+        cmake,
+        ..BuildTools::default()
+    }
 }
 
 fn source_recipe() -> alkahest_recipes::Recipe {

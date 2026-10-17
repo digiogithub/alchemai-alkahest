@@ -48,6 +48,12 @@ pub struct LaunchRequest {
     /// `TEMPLATE` layer by [`crate::llama_cpp::builtin_template_for_go`], used only when the
     /// GGUF carries no template (ADR 0001, case 3).
     pub builtin_template: Option<String>,
+    /// vLLM: fraction of the GPU's memory the engine may pre-allocate (`--gpu-memory-utilization`).
+    /// vLLM claims `fraction * total VRAM` at start whatever the model needs, so the scheduler
+    /// sets it from its estimate; `None` leaves vLLM's own default (0.9).
+    pub gpu_memory_utilization: Option<f64>,
+    /// vLLM: GPUs to shard the model over (`--tensor-parallel-size`); `None` or 1 is one GPU.
+    pub tensor_parallel_size: Option<u32>,
     /// Address the engine binds; always loopback, the API server is the only client.
     pub host: IpAddr,
     /// Port the engine binds; `0` until the supervisor allocates one.
@@ -75,6 +81,8 @@ impl LaunchRequest {
             num_parallel: None,
             threads: None,
             builtin_template: None,
+            gpu_memory_utilization: None,
+            tensor_parallel_size: None,
             host: IpAddr::V4(Ipv4Addr::LOCALHOST),
             port: 0,
         }
@@ -91,13 +99,19 @@ impl LaunchRequest {
         port: u16,
     ) -> Result<Self> {
         let model = entry.entry.name.display_short();
-        let model_path = entry
-            .entry
-            .model_path()
-            .ok_or_else(|| EngineError::MissingModelPath {
-                model: model.clone(),
-            })?
-            .to_path_buf();
+        let model_path =
+            entry
+                .entry
+                .weights_path()
+                .ok_or_else(|| EngineError::MissingModelPath {
+                    model: model.clone(),
+                })?;
+        // A safetensors snapshot is loaded as a directory. Pull builds it; a model copied
+        // with `cp` or restored without it gets it rebuilt here (symlinks inside the
+        // Alkahest store only).
+        if entry.entry.is_snapshot() && !model_path.join("config.json").exists() {
+            ensure_snapshot(&entry.entry, &model_path)?;
+        }
         Ok(Self {
             model,
             model_path,
@@ -111,6 +125,8 @@ impl LaunchRequest {
             num_parallel: None,
             threads: None,
             builtin_template: None,
+            gpu_memory_utilization: None,
+            tensor_parallel_size: None,
             host: IpAddr::V4(Ipv4Addr::LOCALHOST),
             port,
         })
@@ -121,6 +137,30 @@ impl LaunchRequest {
         self.port = port;
         self
     }
+}
+
+/// Rebuilds the snapshot directory of a safetensors model in its own store.
+fn ensure_snapshot(entry: &alkahest_store::ModelEntry, dir: &Path) -> Result<()> {
+    // `<store>/snapshots/<digest>`: the store root is two levels up.
+    let root =
+        dir.parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| EngineError::MissingModelPath {
+                model: entry.name.display_short(),
+            })?;
+    let store = alkahest_store::AlkahestStore::open(root).map_err(|e| {
+        EngineError::SnapshotUnavailable {
+            model: entry.name.display_short(),
+            reason: e.to_string(),
+        }
+    })?;
+    store
+        .materialise_snapshot(&entry.manifest_digest, &entry.manifest)
+        .map(|_| ())
+        .map_err(|e| EngineError::SnapshotUnavailable {
+            model: entry.name.display_short(),
+            reason: e.to_string(),
+        })
 }
 
 /// When a health response means "ready to serve".
