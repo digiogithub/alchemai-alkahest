@@ -67,6 +67,8 @@ axum = { version = "=0.8.9", features = ["macros", "multipart"] }
 tower = { version = "=0.5.3", features = ["util", "timeout", "limit"] }
 tower-http = { version = "=0.7.1", features = ["trace", "cors", "limit", "timeout", "request-id", "sensitive-headers", "catch-panic"] }
 hyper = { version = "=1.12.0", features = ["full"] }
+# Body trait for response wrappers (request feed); already in the lock through axum and hyper.
+http-body = "=1.1.0"
 # Custom accept loop (TLS, connection tracking); already in the lock through axum and reqwest.
 hyper-util = { version = "=0.1.21", features = ["server-auto", "server-graceful", "tokio", "service"] }
 # HTTPS listener (ALK-SP-0006.R6); aws-lc-rs is the provider reqwest already uses.

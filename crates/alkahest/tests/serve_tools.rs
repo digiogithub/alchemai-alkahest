@@ -153,4 +153,51 @@ async fn forced_tool_calls_parse_on_a_small_hermes_model() {
     assert!(!lp.is_empty(), "{v}");
     assert!(lp[0]["logprob"].as_f64().unwrap() <= 0.0, "{v}");
     assert_eq!(lp[0]["top_logprobs"].as_array().unwrap().len(), 2, "{v}");
+
+    // Runtime monitor data (ALK-US-0098): the requests above are in the feed with tokens,
+    // `ps` carries utilisation and engine CPU, and a forced kill removes the model.
+    let feed: Value = reqwest::get(format!("{base}/alkahest/v1/requests?last=10m"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let rows = feed["requests"].as_array().unwrap();
+    assert!(rows.len() >= 4, "{feed}");
+    assert!(
+        rows.iter()
+            .any(|r| r["route"] == "/v1/messages" && r["completion_tokens"].as_u64() > Some(0)),
+        "{feed}"
+    );
+    let ps: Value = reqwest::get(format!("{base}/alkahest/v1/ps"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        ps["utilization"]["cpu"]["logical_cores"].as_u64() > Some(0),
+        "{ps}"
+    );
+    let pid = ps["models"][0]["pid"].as_u64().unwrap();
+    assert!(ps["models"][0].get("cpu_percent").is_some(), "{ps}");
+    let resp = reqwest::Client::new()
+        .post(format!("{base}/alkahest/v1/models/{chat}/kill"))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "{}", resp.text().await.unwrap());
+    let ps: Value = reqwest::get(format!("{base}/alkahest/v1/ps"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(ps["models"].as_array().unwrap().is_empty(), "{ps}");
+    assert!(
+        !std::path::Path::new(&format!("/proc/{pid}")).exists()
+            || std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .is_ok_and(|s| s.contains(") Z ")),
+        "engine {pid} still running"
+    );
 }

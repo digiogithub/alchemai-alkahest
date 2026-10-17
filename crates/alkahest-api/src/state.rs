@@ -45,6 +45,7 @@ struct Inner {
     usage: Option<Arc<dyn UsageRecorder>>,
     audit: Option<Arc<dyn AuditSink>>,
     shutdown: ShutdownHooks,
+    requests: Arc<crate::feed::RequestFeed>,
 }
 
 impl fmt::Debug for AppState {
@@ -79,6 +80,11 @@ impl AppState {
     /// Per-key usage recorder; handlers report token counts here.
     pub fn usage(&self) -> Option<Arc<dyn UsageRecorder>> {
         self.inner.usage.clone()
+    }
+
+    /// The recent-requests feed of the runtime monitor (always present).
+    pub fn requests(&self) -> Arc<crate::feed::RequestFeed> {
+        self.inner.requests.clone()
     }
 
     /// Audit sink used by the authentication middleware.
@@ -171,6 +177,7 @@ impl AppStateBuilder {
                 usage: self.usage,
                 audit: self.audit,
                 shutdown: ShutdownHooks::default(),
+                requests: Arc::new(crate::feed::RequestFeed::new()),
             }),
         }
     }

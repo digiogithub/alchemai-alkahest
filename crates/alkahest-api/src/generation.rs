@@ -100,6 +100,9 @@ pub async fn acquire(
         return Err(HttpError::bad_request("model is required"));
     }
     service::check_model_access(state, ctx, model).await?;
+    if let Some(entry) = crate::feed::current() {
+        entry.set_model(model);
+    }
     let scheduler: Scheduler = service::scheduler(state)?;
     let started = Instant::now();
     let lease = scheduler

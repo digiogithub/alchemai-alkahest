@@ -125,6 +125,11 @@ impl ApiRouter {
             usage: self.state.usage(),
             audit: self.state.audit(),
         };
+        // Inside authentication, so the feed sees who called (RequestContext).
+        router = router.layer(middleware::from_fn_with_state(
+            self.state.clone(),
+            crate::feed::feed_layer,
+        ));
         router = router
             .layer(middleware::from_fn_with_state(auth, authenticate))
             .layer(CatchPanicLayer::new())

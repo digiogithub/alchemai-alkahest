@@ -82,6 +82,9 @@ routes! {
     get "/alkahest/v1/ps" "runtime" "Scheduler snapshot: loaded models, memory, requests" => runtime::snapshot;
     get "/alkahest/v1/events" "runtime" "Server-sent events: `status` (scheduler) and `job` (pulls, engine installs)" => runtime::events;
     post "/alkahest/v1/unload" "runtime" "Unload one model (`model`) or all (`all: true`)" => runtime::unload;
+    post "/alkahest/v1/models/{name}/kill" "runtime" "Kill a model's engine at once (SIGKILL), for hung engines" => runtime::kill;
+    get "/alkahest/v1/requests" "runtime" "Recent inference requests: time, route, model, key, tokens, duration, status (last, limit)" => runtime::requests;
+    get "/alkahest/v1/utilization" "runtime" "CPU load (machine and per loaded model) and GPU load and temperature" => runtime::utilization;
     get "/metrics" "runtime" "Prometheus metrics" => runtime::metrics;
     get "/alkahest/v1/models" "models" "Merged catalog with kind, format, source, engine, context, paths and runtime state; store paths" => models::list;
     get "/alkahest/v1/models/{name}" "models" "One model: summary, template, system prompt, licence, default parameters" => models::detail;

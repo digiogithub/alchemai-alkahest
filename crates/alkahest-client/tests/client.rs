@@ -259,3 +259,49 @@ async fn job_log_reload_and_engine_override() {
     assert!(doc.restart_required);
     assert_eq!(doc.saved.extra_args, ["--mlock"]);
 }
+
+/// ALK-US-0098: request feed, utilisation, kill and `request` events.
+#[tokio::test]
+async fn monitor_feed_utilization_and_kill() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/requests"))
+        .and(wiremock::matchers::query_param("last", "60s"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"requests": [
+                {"id": 1, "at": "2026-10-17T07:00:00Z", "method": "POST", "route": "/api/chat",
+                 "family": "ollama", "model": "llama3.2", "caller": "key", "key_id": "k1",
+                 "key_name": "laptop", "prompt_tokens": 6, "completion_tokens": 2, "status": 200,
+                 "duration_ms": 30, "aborted": false}
+            ]})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/utilization"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "cpu": {"usage_percent": 12.5, "logical_cores": 24, "physical_cores": 12},
+            "gpus": [{"index": 0, "vendor": "nvidia", "gpu_percent": 40, "memory_percent": 10, "temperature_c": 61}],
+            "models": [{"name": "llama3.2", "pid": 7, "cpu_percent": 95.0}]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/alkahest/v1/models/hf.co%2Fa%2Fb%3AQ4/kill"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "killed"})))
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    let rows = c.recent_requests(Some("60s"), None).await.unwrap();
+    assert_eq!(rows[0].key_name.as_deref(), Some("laptop"));
+    assert_eq!(rows[0].completion_tokens, 2);
+    let u = c.utilization().await.unwrap();
+    assert_eq!(u.gpus[0].temperature_c, Some(61));
+    assert_eq!(u.models[0].cpu_percent, Some(95.0));
+    c.kill_model("hf.co/a/b:Q4").await.unwrap();
+    let ev = alkahest_client::ServerEvent {
+        event: "request".into(),
+        data: r#"{"id": 3, "route": "/v1/messages", "status": 200}"#.into(),
+    };
+    assert_eq!(ev.request().unwrap().unwrap().route, "/v1/messages");
+    assert!(ev.status().is_none());
+}

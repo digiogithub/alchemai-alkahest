@@ -77,6 +77,11 @@ pub trait EngineInstance: Send + Sync + fmt::Debug {
     fn executable(&self) -> Option<PathBuf> {
         None
     }
+    /// Kills the process at once (no graceful stop) and resolves with its exit. Defaults to
+    /// [`EngineInstance::stop`] for instances without a process.
+    fn kill(&self) -> BoxFuture<'static, ExitInfo> {
+        self.stop()
+    }
 }
 
 impl EngineInstance for EngineHandle {
@@ -130,6 +135,12 @@ impl EngineInstance for EngineHandle {
 
     fn executable(&self) -> Option<PathBuf> {
         Some(self.spec().program.clone())
+    }
+
+    fn kill(&self) -> BoxFuture<'static, ExitInfo> {
+        let h = self.clone();
+        // Zero grace: SIGTERM and SIGKILL to the process group back to back.
+        Box::pin(async move { h.stop_with_grace(std::time::Duration::ZERO).await })
     }
 }
 

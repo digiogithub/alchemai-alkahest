@@ -116,7 +116,7 @@ Under `/alkahest/v1/`, described by an OpenAPI 3.1 document served at
 
 | Area | Routes |
 |---|---|
-| System | `GET info`, `GET ps` (with an estimated `load_progress` while a model loads), `GET events` (server-sent events: scheduler and job updates), `POST unload` |
+| System | `GET info`, `GET ps` (with an estimated `load_progress` while a model loads, CPU and GPU `utilization`, engine `cpu_percent`), `GET events` (server-sent events: scheduler, job and `request` updates), `POST unload`, `POST models/{name}/kill` (SIGKILL a hung engine), `GET requests` (recent inference requests: route, model, key, tokens, duration, status; never content), `GET utilization` |
 | Models | `GET models`, `GET/DELETE models/{name}`, `POST copy`, `GET/PUT/DELETE models/{name}/settings`, `GET models/{name}/recommended`, `GET models/{name}/estimate` (memory estimate) |
 | Downloads | `POST/GET pulls`, `DELETE pulls/{id}`, `GET jobs`, `GET jobs/{id}`, `GET jobs/{id}/log` (output tail, source build log), `POST jobs/{id}/cancel`, `DELETE jobs/{id}` |
 | Discovery | `GET hf/search`, `GET hf/model`, `GET hf/files`, `GET/PUT/DELETE hf/token`, `GET ollama/search`, `GET ollama/tags` (tags of a library model) |

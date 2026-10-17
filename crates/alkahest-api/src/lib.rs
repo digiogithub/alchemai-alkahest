@@ -28,6 +28,7 @@ pub mod auth;
 pub mod decisions;
 pub mod dialect;
 pub mod error;
+pub mod feed;
 pub mod generation;
 pub mod imagegen;
 pub mod images;

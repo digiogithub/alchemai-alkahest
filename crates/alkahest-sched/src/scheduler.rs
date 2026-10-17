@@ -186,6 +186,8 @@ pub enum StopReason {
     Reloaded,
     /// Server shutdown.
     Shutdown,
+    /// Killed on request (SIGKILL, no graceful stop): a hung engine.
+    Killed,
 }
 
 impl std::fmt::Display for StopReason {
@@ -196,6 +198,7 @@ impl std::fmt::Display for StopReason {
             StopReason::Evicted => "evicted to free memory",
             StopReason::Reloaded => "reloading with other settings",
             StopReason::Shutdown => "server shutting down",
+            StopReason::Killed => "killed on request",
         })
     }
 }
@@ -259,7 +262,13 @@ impl Runner {
         }
         self.slots.close();
         tracing::info!(model = %self.model.name, ?reason, "unloading model");
-        self.engine.get().map(|e| e.stop())
+        self.engine.get().map(|e| {
+            if reason == StopReason::Killed {
+                e.kill()
+            } else {
+                e.stop()
+            }
+        })
     }
 
     /// The error a request sees when this runner is gone.
@@ -1276,6 +1285,24 @@ impl Scheduler {
                 model: model.to_string(),
             })?;
             st.remove(&key, StopReason::Requested)
+        };
+        self.inner.wake();
+        if let Some(stop) = stop {
+            stop.await;
+        }
+        Ok(())
+    }
+
+    /// Kills the engine of `model` at once (SIGKILL to its process group, no grace period)
+    /// and forgets the model; requests in flight fail with "killed on request". For engines
+    /// that hang and ignore a normal unload. A model still loading is cancelled.
+    pub async fn kill(&self, model: &str) -> Result<()> {
+        let stop = {
+            let mut st = self.inner.state.lock();
+            let key = st.find_key(model).ok_or_else(|| SchedError::NotLoaded {
+                model: model.to_string(),
+            })?;
+            st.remove(&key, StopReason::Killed)
         };
         self.inner.wake();
         if let Some(stop) = stop {

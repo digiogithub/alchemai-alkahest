@@ -16,6 +16,7 @@ mod memory;
 mod metal;
 mod nvidia;
 mod probe;
+mod utilization;
 mod vulkan;
 
 pub use accelerator::Accelerator;
@@ -24,3 +25,4 @@ pub use cpu::{CpuInfo, MemoryInfo};
 pub use memory::{MemoryMonitor, MemoryPools, fdinfo_vram};
 pub use metal::{MetalInfo, parse_sysctl_bytes};
 pub use probe::{GpuInfo, GpuVendor, HardwareProbe, SystemInfo, SystemProbe, detect, detect_with};
+pub use utilization::{CpuLoad, GpuLoad, Utilization, UtilizationMonitor};
