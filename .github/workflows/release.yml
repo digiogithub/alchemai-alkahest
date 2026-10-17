@@ -290,7 +290,24 @@ jobs:
           if (-not (Test-Path "$dir\alkahest.ico")) { throw 'icon missing' }
           $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
           if ($machinePath -notlike "*$dir*") { throw 'PATH entry missing' }
-          if ((Get-Service alkahest -ErrorAction Stop).Status -ne 'Running') { throw 'service is not running' }
+          # The service is delayed-auto and its start is asynchronous: wait for it, and on
+          # failure dump what the service manager and the service itself logged.
+          $deadline = (Get-Date).AddSeconds(60)
+          while ((Get-Service alkahest -ErrorAction Stop).Status -ne 'Running' -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 2
+          }
+          if ((Get-Service alkahest).Status -ne 'Running') {
+            & sc.exe query alkahest
+            & sc.exe qc alkahest
+            & sc.exe qfailure alkahest
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Alkahest' } -MaxEvents 30 -ErrorAction SilentlyContinue |
+              Format-List TimeCreated, LevelDisplayName, Message
+            Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager' } -MaxEvents 15 -ErrorAction SilentlyContinue |
+              Where-Object { $_.Message -match 'lkahest' } | Format-List TimeCreated, Id, Message
+            Get-ChildItem C:\ProgramData\Alkahest -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
+            & "$dir\alkahest.exe" service status
+            throw 'service is not running'
+          }
           $p = Start-Process -FilePath "$dir\uninstall.exe" -ArgumentList '/S', "_?=$dir" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "uninstaller exit code $($p.ExitCode)" }
           Start-Sleep -Seconds 3
