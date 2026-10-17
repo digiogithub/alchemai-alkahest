@@ -2,14 +2,15 @@
 id: ALK-US-0040
 type: story
 title: Admin API
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0007
 milestone: ALK-M-0004
 labels: [api, admin]
 estimate: 5
 created: 2026-10-16T22:41:03Z
-updated: 2026-10-16T22:41:07Z
+updated: 2026-10-17T03:19:07Z
+started: 2026-10-17T03:19:07Z
 links:
   - { kind: implements, target: ALK-SP-0005.R6 }
 ---

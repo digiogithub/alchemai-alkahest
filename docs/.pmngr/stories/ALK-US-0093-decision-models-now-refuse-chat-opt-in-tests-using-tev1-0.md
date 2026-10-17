@@ -2,14 +2,15 @@
 id: ALK-US-0093
 type: story
 title: "Decision models now refuse chat: opt-in tests using tev1:0.8b as chat model need another model"
-status: in_progress
+status: done
 priority: low
 parent: ALK-EP-0007
 author: mcp
 labels: [test, decision]
 created: 2026-10-17T02:26:49Z
-updated: 2026-10-17T02:30:36Z
+updated: 2026-10-17T03:19:00Z
 started: 2026-10-17T02:30:36Z
+closed: 2026-10-17T03:19:00Z
 inbox:
   status: accepted
   source: mcp

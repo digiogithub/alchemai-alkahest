@@ -2,14 +2,15 @@
 id: ALK-US-0092
 type: story
 title: Engine processes are orphaned when `alkahest serve` is SIGKILLed
-status: in_progress
+status: done
 priority: high
 parent: ALK-EP-0005
 author: mcp
 labels: [engine, bug]
 created: 2026-10-17T02:26:49Z
-updated: 2026-10-17T02:30:36Z
+updated: 2026-10-17T03:19:00Z
 started: 2026-10-17T02:30:36Z
+closed: 2026-10-17T03:19:00Z
 inbox:
   status: accepted
   source: mcp

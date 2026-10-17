@@ -2,15 +2,16 @@
 id: ALK-US-0036
 type: story
 title: OpenAI Responses API
-status: in_progress
+status: done
 priority: medium
 parent: ALK-EP-0007
 milestone: ALK-M-0004
 labels: [api, openai]
 estimate: 3
 created: 2026-10-16T22:40:48Z
-updated: 2026-10-17T02:30:48Z
+updated: 2026-10-17T03:19:00Z
 started: 2026-10-17T02:30:48Z
+closed: 2026-10-17T03:19:00Z
 links:
   - { kind: implements, target: ALK-SP-0005.R2 }
   - { kind: duplicated_by, target: ALK-US-0088 }
