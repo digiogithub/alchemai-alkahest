@@ -17,7 +17,7 @@ use crate::manifest::{LayerKind, ModelConfig};
 use crate::source::ModelEntry;
 
 /// Bump when [`GgufFacts`] changes shape or meaning; older cache files are then recomputed.
-const FACTS_SCHEMA: u32 = 1;
+const FACTS_SCHEMA: u32 = 2;
 
 /// What Alkahest keeps from a GGUF header: enough to describe and classify the model without
 /// reopening the file.
@@ -47,6 +47,18 @@ pub struct GgufFacts {
     pub kind: String,
     /// Tensors need the PrismML llama.cpp fork (PQ2_0, PTQ1_0).
     pub needs_prism: bool,
+    /// Non-empty `decision.type`.
+    #[serde(default)]
+    pub decision_type: Option<String>,
+    /// The header has a `tokenizer.chat_template.systemone` template.
+    #[serde(default)]
+    pub has_systemone_template: bool,
+    /// `general.tags`.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// `general.basename`, else `general.name`.
+    #[serde(default)]
+    pub basename: Option<String>,
 }
 
 impl GgufFacts {
@@ -74,6 +86,10 @@ impl GgufFacts {
             chat_template: g.chat_template().map(str::to_owned),
             kind: kind.id().to_owned(),
             needs_prism: g.quant_family() == QuantFamily::PrismMl,
+            decision_type: g.decision_type().map(str::to_owned),
+            has_systemone_template: g.has_systemone_template(),
+            tags: g.tags().into_iter().map(str::to_owned).collect(),
+            basename: g.basename().map(str::to_owned),
         }
     }
 }
@@ -160,6 +176,24 @@ pub struct ModelInfo {
     pub needs_prism: bool,
     /// The chat template stored in the GGUF, used when the manifest has no template layer.
     pub gguf_chat_template: Option<String>,
+    /// Decision-model metadata, which the decision API turns into a serving plan.
+    pub decision: DecisionInfo,
+}
+
+/// What the GGUF header and the Ollama config say about decision serving (ALK-SP-0007.R4).
+/// Filled for every model; only decision models use it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DecisionInfo {
+    /// GGUF `decision.type`.
+    pub decision_type: Option<String>,
+    /// The GGUF carries a `systemone` chat template (llama-server serves `/v1/systemone`).
+    pub has_systemone_template: bool,
+    /// Ollama config `renderer` (`tev1`, `kev`, `clef`, `strands`, ...).
+    pub renderer: Option<String>,
+    /// GGUF `general.tags`.
+    pub tags: Vec<String>,
+    /// GGUF `general.basename` or `general.name` (`Tev1`).
+    pub basename: Option<String>,
 }
 
 impl ModelInfo {
@@ -180,7 +214,10 @@ impl ModelInfo {
             ModelFormat::Gguf
         };
 
+        let decision_cap = cfg.capabilities.iter().any(|c| c == "decision");
         let kind = match facts.and_then(|f| ModelKind::from_id(&f.kind)) {
+            // Mirrors `classify`: the Ollama `decision` capability lives outside the header.
+            Some(_) if decision_cap => ModelKind::Decision,
             Some(k) => {
                 // Mirrors `classify`: a projector or the Ollama `vision` capability upgrades
                 // plain text generation. Both live outside the GGUF header.
@@ -237,6 +274,13 @@ impl ModelInfo {
             loadable,
             needs_prism: facts.is_some_and(|f| f.needs_prism),
             gguf_chat_template: facts.and_then(|f| f.chat_template.clone()),
+            decision: DecisionInfo {
+                decision_type: facts.and_then(|f| f.decision_type.clone()),
+                has_systemone_template: facts.is_some_and(|f| f.has_systemone_template),
+                renderer: cfg.renderer.clone().filter(|r| !r.is_empty()),
+                tags: facts.map(|f| f.tags.clone()).unwrap_or_default(),
+                basename: facts.and_then(|f| f.basename.clone()),
+            },
         }
     }
 
@@ -285,6 +329,9 @@ fn capabilities_of(
         ModelKind::Embeddings => add("embedding"),
         ModelKind::Rerank => add("rerank"),
         _ => {}
+    }
+    if kind == ModelKind::Decision {
+        add("decision");
     }
     if kind == ModelKind::Vision || has_projector {
         add("vision");
