@@ -7,6 +7,8 @@
 //! rest of the crate; fields this client does not model stay reachable through the `extra`
 //! maps or the raw [`Value`]s.
 
+use std::collections::BTreeMap;
+
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -627,6 +629,64 @@ pub struct NetworkPatch {
     pub confirm_unauthenticated: bool,
 }
 
+/// Server settings of the Settings screen (`config.toml`), flattened.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServerSettings {
+    /// `store.models_dir`; `None` = default (`<data_dir>/models`).
+    pub models_dir: Option<String>,
+    /// `store.ollama.enabled`: reuse the Ollama store read-only.
+    pub ollama_enabled: bool,
+    /// `store.ollama.path`; `None` = detected.
+    pub ollama_path: Option<String>,
+    /// `engines.dir`; `None` = default.
+    pub engines_dir: Option<String>,
+    /// `engines.auto_install`.
+    pub auto_install: bool,
+    /// `scheduler.keep_alive` (Ollama duration: `5m`, `0`, `-1`).
+    pub keep_alive: String,
+    /// `scheduler.max_loaded`; `0` = automatic.
+    pub max_loaded: u32,
+    /// `scheduler.num_parallel`; `0` = automatic.
+    pub num_parallel: u32,
+    /// `scheduler.max_queue`.
+    pub max_queue: u32,
+    /// `logging.level`.
+    pub log_level: String,
+    /// `logging.format`: `text`, `json`.
+    pub log_format: String,
+    /// `logging.file`.
+    pub log_file: bool,
+    /// `logging.dir`; `None` = platform default.
+    pub log_dir: Option<String>,
+    /// `logging.rotation`: `daily`, `hourly`, `never`.
+    pub log_rotation: String,
+    /// `logging.max_files`.
+    pub log_max_files: usize,
+}
+
+/// `GET|PUT /alkahest/v1/settings/server`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServerSettingsDoc {
+    /// Values the server runs with.
+    pub running: ServerSettings,
+    /// Values saved for the next start.
+    pub saved: ServerSettings,
+    /// The saved values differ from the running ones.
+    pub restart_required: bool,
+    /// Fields whose saved value differs from the running one.
+    pub changed: Vec<String>,
+    /// File the settings are saved to.
+    pub file: String,
+    /// Fields set by an environment variable of the server: `{field: "ALKAHEST_..."}`.
+    pub locked: BTreeMap<String, String>,
+    /// Configuration sources, lowest precedence first.
+    pub sources: Vec<String>,
+    /// Resolved folders: `data_dir`, `models_dir`, `ollama_store`, `engines_dir`, `log_dir`.
+    pub paths: Map<String, Value>,
+}
+
 /// `GET /alkahest/v1/info`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -1060,6 +1120,27 @@ impl Client {
         .await
     }
 
+    /// `GET /alkahest/v1/settings/server`.
+    pub async fn server_settings(&self) -> Result<ServerSettingsDoc> {
+        self.admin_get("/alkahest/v1/settings/server", &[]).await
+    }
+
+    /// `PUT /alkahest/v1/settings/server`: `{field: value}` (`null` resets a field), saved for
+    /// the next start ([`ServerSettingsDoc::restart_required`]).
+    pub async fn update_server_settings(
+        &self,
+        patch: &Map<String, Value>,
+    ) -> Result<ServerSettingsDoc> {
+        let body = Value::Object(patch.clone());
+        self.admin_json(
+            reqwest::Method::PUT,
+            "/alkahest/v1/settings/server",
+            &[],
+            Some(&body),
+        )
+        .await
+    }
+
     /// `GET /alkahest/v1/info`; `refresh` re-detects the hardware (free memory).
     pub async fn server_info(&self, refresh: bool) -> Result<ServerInfoDoc> {
         let q = if refresh {
@@ -1217,6 +1298,31 @@ mod tests {
         assert!(started.created);
         assert_eq!(started.job.fraction(), Some(0.5));
         assert!(!started.job.is_finished());
+    }
+
+    #[tokio::test]
+    async fn server_settings_round_trip() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/alkahest/v1/settings/server"))
+            .and(body_json(json!({"max_loaded": 2, "models_dir": null})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "running": {"max_loaded": 0, "keep_alive": "5m"},
+                "saved": {"max_loaded": 2, "keep_alive": "5m"},
+                "restart_required": true, "changed": ["max_loaded"],
+                "locked": {"max_queue": "ALKAHEST_MAX_QUEUE"},
+                "sources": ["built-in defaults"],
+            })))
+            .mount(&server)
+            .await;
+        let c = Client::new(&server.uri()).unwrap();
+        let mut patch = Map::new();
+        patch.insert("max_loaded".into(), json!(2));
+        patch.insert("models_dir".into(), Value::Null);
+        let doc = c.update_server_settings(&patch).await.unwrap();
+        assert!(doc.restart_required);
+        assert_eq!(doc.saved.max_loaded, 2);
+        assert_eq!(doc.locked["max_queue"], "ALKAHEST_MAX_QUEUE");
     }
 
     #[tokio::test]

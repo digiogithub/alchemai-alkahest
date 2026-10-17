@@ -165,7 +165,10 @@ fn apply(base: &NetworkSettings, patch: &NetworkPatch) -> Result<NetworkSettings
 
 /// `parent[key]` as a standard `[table]` (indexing a missing key would create an inline table,
 /// which reads badly in a file people edit by hand).
-fn ensure_table<'a>(parent: &'a mut toml_edit::Item, key: &str) -> &'a mut toml_edit::Item {
+pub(crate) fn ensure_table<'a>(
+    parent: &'a mut toml_edit::Item,
+    key: &str,
+) -> &'a mut toml_edit::Item {
     if parent.get(key).is_none_or(|i| !i.is_table_like()) {
         parent[key] = toml_edit::table();
     }
@@ -174,6 +177,37 @@ fn ensure_table<'a>(parent: &'a mut toml_edit::Item, key: &str) -> &'a mut toml_
 
 /// Writes `s` into the TOML file at `path`, keeping comments and every other key.
 pub(crate) fn write_settings(path: &Path, s: &NetworkSettings) -> Result<(), HttpError> {
+    write_document(path, |doc| {
+        {
+            let server = ensure_table(doc.as_item_mut(), "server");
+            server["host"] = toml_edit::value(s.host.as_str());
+            server["port"] = toml_edit::value(i64::from(s.port));
+            server["cors_origins"] = toml_edit::value(
+                s.cors_origins
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<toml_edit::Array>(),
+            );
+            let ep = ensure_table(server, "endpoints");
+            ep["ollama"] = toml_edit::value(s.endpoints.ollama);
+            ep["openai"] = toml_edit::value(s.endpoints.openai);
+            ep["anthropic"] = toml_edit::value(s.endpoints.anthropic);
+            ep["decisions"] = toml_edit::value(s.endpoints.decisions);
+        }
+        let auth = ensure_table(doc.as_item_mut(), "auth");
+        auth["require_key_for_remote"] = toml_edit::value(s.require_key_for_remote);
+        auth["require_on_loopback"] = toml_edit::value(s.require_on_loopback);
+        Ok(())
+    })
+}
+
+/// Edits the TOML file at `path` with `edit` (comments and other keys kept), checks that the
+/// result still loads and validates, and replaces the file atomically (temp + rename).
+/// A missing file starts empty.
+pub(crate) fn write_document(
+    path: &Path,
+    edit: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<(), HttpError>,
+) -> Result<(), HttpError> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -190,27 +224,7 @@ pub(crate) fn write_settings(path: &Path, s: &NetworkSettings) -> Result<(), Htt
             path.display()
         ))
     })?;
-    {
-        let server = ensure_table(doc.as_item_mut(), "server");
-        server["host"] = toml_edit::value(s.host.as_str());
-        server["port"] = toml_edit::value(i64::from(s.port));
-        server["cors_origins"] = toml_edit::value(
-            s.cors_origins
-                .iter()
-                .map(String::as_str)
-                .collect::<toml_edit::Array>(),
-        );
-        let ep = ensure_table(server, "endpoints");
-        ep["ollama"] = toml_edit::value(s.endpoints.ollama);
-        ep["openai"] = toml_edit::value(s.endpoints.openai);
-        ep["anthropic"] = toml_edit::value(s.endpoints.anthropic);
-        ep["decisions"] = toml_edit::value(s.endpoints.decisions);
-    }
-    {
-        let auth = ensure_table(doc.as_item_mut(), "auth");
-        auth["require_key_for_remote"] = toml_edit::value(s.require_key_for_remote);
-        auth["require_on_loopback"] = toml_edit::value(s.require_on_loopback);
-    }
+    edit(&mut doc)?;
     let out = doc.to_string();
     // The result must still load: never leave a file the next start refuses.
     let parsed = Config::from_toml_str(&out)

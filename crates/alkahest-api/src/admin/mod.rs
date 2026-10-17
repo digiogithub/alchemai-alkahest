@@ -1,5 +1,6 @@
 //! The admin API under `/alkahest/v1/` (ALK-SP-0005.R6): runtime, catalog, model settings,
-//! pulls, discovery proxies, engines, API keys, network settings, server info and logs.
+//! pulls, discovery proxies, engines, API keys, network and server settings, server info and
+//! logs.
 //!
 //! Every route needs the `admin` scope for non-loopback callers (and on loopback once keys
 //! are required there): the authentication middleware enforces it for the whole
@@ -20,6 +21,7 @@ pub mod keys;
 pub mod models;
 pub mod pulls;
 pub mod runtime;
+pub mod server_settings;
 pub mod settings;
 pub mod system;
 
@@ -37,6 +39,7 @@ pub use engines::{
 };
 pub use jobs::{Job, JobHandle, JobKind, JobManager, JobState};
 pub use pulls::PullRunner;
+pub use server_settings::ServerSettings;
 pub use settings::NetworkSettings;
 
 use crate::dialect::Family;
@@ -111,6 +114,8 @@ routes! {
     delete "/alkahest/v1/keys/{id}" "keys" "Revoke an API key" => keys::revoke;
     get "/alkahest/v1/settings/network" "settings" "Running and saved network settings, restart flag" => settings::get_network;
     put "/alkahest/v1/settings/network" "settings" "Save network settings to the config file (applied on restart)" => settings::put_network;
+    get "/alkahest/v1/settings/server" "settings" "Running and saved server settings (stores, loading, engines, logging), environment locks, sources" => server_settings::get_server;
+    put "/alkahest/v1/settings/server" "settings" "Save server settings to the config file (applied on restart; `null` resets a field)" => server_settings::put_server;
     get "/alkahest/v1/logs/engines" "logs" "Engine log files" => system::engine_logs;
     get "/alkahest/v1/logs/engines/{name}" "logs" "Tail of one engine log (lines)" => system::engine_log;
     get "/alkahest/v1/logs/server" "logs" "Tail of the newest server log (lines)" => system::server_log;
