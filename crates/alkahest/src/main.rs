@@ -4,6 +4,7 @@
 //! with code 2. Exit codes: 0 success, 1 runtime error, 2 not implemented or usage error.
 
 mod cli;
+mod engines_cmd;
 mod hf_cmd;
 mod model_config_cmd;
 mod models_cmd;
@@ -100,6 +101,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             insecure,
             force,
         } => pull_cmd::run(model, *insecure, *force, &loaded, cli.global.json),
+        Command::Engines { action } => engines_cmd::run(action, &loaded, cli.global.json),
         Command::Desktop => desktop(),
         other => Ok(not_implemented(other)),
     }

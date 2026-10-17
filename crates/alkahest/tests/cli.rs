@@ -48,7 +48,6 @@ fn unbuilt_commands_name_their_story_and_exit_2() {
         (&["run", "m"], "ALK-US-0039"),
         (&["serve"], "ALK-US-0033"),
         (&["keys", "ls"], "ALK-US-0041"),
-        (&["engines", "ls"], "ALK-US-0049"),
     ];
     for (args, story) in cases {
         alkahest(tmp.path())
