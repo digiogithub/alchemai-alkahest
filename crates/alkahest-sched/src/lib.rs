@@ -6,13 +6,16 @@
 //!   [`Scheduler::shutdown`] (ALK-SP-0004.R1, R2, R5, R6).
 //! * [`ModelBackend`]: resolution and launching; [`CatalogBackend`] wires the catalog, the
 //!   overlay settings and the engine registry and supervisor.
-//! * [`memory`]: the RAM/VRAM estimator used for admission.
+//! * [`admission`]: free memory probes, placement (GPU layers) and LRU eviction
+//!   (ALK-SP-0004.R3); [`memory`]: the RAM/VRAM estimator it uses.
 
+pub mod admission;
 pub mod backend;
 pub mod error;
 pub mod memory;
 pub mod scheduler;
 
+pub use admission::{Accounted, MemoryProbe, MemorySnapshot, StaticMemoryProbe, SystemMemoryProbe};
 pub use backend::{CatalogBackend, EngineInstance, ModelBackend, ResolvedModel};
 pub use error::{Result, SchedError};
 pub use memory::{

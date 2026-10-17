@@ -33,8 +33,13 @@ use tokio::sync::{Notify, mpsc, watch};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
+use crate::admission::{
+    Accounted, Candidate, MemoryProbe, MemorySnapshot, SystemMemoryProbe, launch_gpu_layers,
+    max_loaded, pick_victim, placement, usable,
+};
 use crate::backend::{EngineInstance, ModelBackend, ResolvedModel};
 use crate::error::{Result, SchedError};
+use crate::memory::{DEFAULT_VRAM_FRACTION, MemoryEstimate};
 
 /// Context length per slot when neither the request nor the model sets one (Ollama's default).
 pub const DEFAULT_CONTEXT_LENGTH: u64 = 4096;
@@ -58,6 +63,8 @@ pub struct SchedulerOptions {
     pub load_timeout: Duration,
     /// Crash-loop guard consulted before reloading a crashed model.
     pub restart: RestartPolicy,
+    /// Share of free RAM and VRAM a load may use (Ollama-style 80% rule).
+    pub memory_fraction: f64,
 }
 
 impl Default for SchedulerOptions {
@@ -77,6 +84,7 @@ impl SchedulerOptions {
             default_context: DEFAULT_CONTEXT_LENGTH,
             load_timeout: DEFAULT_LOAD_TIMEOUT,
             restart: RestartPolicy::default(),
+            memory_fraction: DEFAULT_VRAM_FRACTION,
         }
     }
 
@@ -201,6 +209,8 @@ struct Runner {
     key: String,
     model: ResolvedModel,
     launch: LaunchRequest,
+    /// The request actually launched (GPU layers decided by admission).
+    launched: OnceLock<LaunchRequest>,
     fingerprint: LoadFingerprint,
     status: watch::Sender<RunnerStatus>,
     engine: OnceLock<Arc<dyn EngineInstance>>,
@@ -268,6 +278,8 @@ struct Entry {
     last_used: Instant,
     /// A request with other load settings is waiting: take no new leases, unload when idle.
     stale: bool,
+    /// Memory charged to this model once admitted.
+    memory: Option<Accounted>,
 }
 
 impl Entry {
@@ -350,7 +362,10 @@ impl State {
 #[derive(Debug)]
 struct Inner {
     backend: Arc<dyn ModelBackend>,
+    probe: Arc<dyn MemoryProbe>,
     opts: SchedulerOptions,
+    /// Serialises admission and launch: memory is measured with the previous load finished.
+    load_gate: tokio::sync::Mutex<()>,
     state: Mutex<State>,
     /// Woken on every state change that may unblock a waiting request.
     changed: Notify,
@@ -469,11 +484,180 @@ async fn load(inner: &Arc<Inner>, runner: &Arc<Runner>) -> Result<Arc<dyn Engine
         tracing::info!(model = %runner.model.name, ?delay, "waiting before reloading a crashed engine");
         tokio::time::sleep(delay).await;
     }
-    tracing::info!(model = %runner.model.name, engine = %runner.model.engine, "loading model");
-    inner
-        .backend
-        .launch(&runner.model, runner.launch.clone())
-        .await
+    let _gate = inner.load_gate.lock().await;
+    let estimate = admit(inner, runner).await?;
+    let mut req = runner.launch.clone();
+    req.settings.gpu_layers = launch_gpu_layers(&runner.model, &estimate);
+    let _ = runner.launched.set(req.clone());
+    tracing::info!(
+        model = %runner.model.name,
+        engine = %runner.model.engine,
+        ram = estimate.ram_bytes,
+        vram = estimate.vram_bytes,
+        gpu_layers = estimate.gpu_layers,
+        "loading model"
+    );
+    let engine = inner.backend.launch(&runner.model, req).await?;
+    // Measured-usage feedback: charge the larger of estimate and measurement from now on.
+    let measured_ram = engine.resource_usage().map(|u| u.rss_bytes);
+    let measured_vram = engine.pid().and_then(|pid| inner.probe.process_vram(pid));
+    if let Some(m) = inner
+        .state
+        .lock()
+        .current(runner)
+        .and_then(|e| e.memory.as_mut())
+    {
+        m.measured_ram = measured_ram;
+        m.measured_vram = measured_vram;
+    }
+    Ok(engine)
+}
+
+/// What admission decided in one round.
+enum Admission {
+    Admit(MemoryEstimate),
+    Evict(Option<BoxFuture<'static, ExitInfo>>),
+    Wait,
+    Fail(SchedError),
+}
+
+/// Memory-aware admission (ALK-SP-0004.R3), called with the load gate held.
+///
+/// Fits when the model limit allows one more and the estimate fits the configured fraction of
+/// usable memory. Otherwise evicts the least recently used idle model and tries again; with
+/// only busy models left it waits for one to become idle (up to the load timeout); when even
+/// unloading everything would not help, or nothing is left to wait for, it fails with the
+/// estimate in the error.
+async fn admit(inner: &Arc<Inner>, runner: &Arc<Runner>) -> Result<MemoryEstimate> {
+    let started = Instant::now();
+    let deadline = started + inner.opts.load_timeout;
+    let fraction = inner.opts.memory_fraction;
+    let model = &runner.model.name;
+    loop {
+        let notified = inner.changed.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        let snap = inner.probe.snapshot();
+        let step = {
+            let mut st = inner.state.lock();
+            if st.current(runner).is_none() {
+                return Err(SchedError::Unloaded {
+                    model: model.clone(),
+                    reason: StopReason::Requested,
+                });
+            }
+            let others: Vec<(&String, &Entry)> = st
+                .entries
+                .iter()
+                .filter(|(_, e)| e.runner.id != runner.id && e.memory.is_some())
+                .collect();
+            let (charged_ram, charged_vram) = others
+                .iter()
+                .filter_map(|(_, e)| e.memory.as_ref())
+                .fold((0u64, 0u64), |(r, v), m| {
+                    (r.saturating_add(m.ram()), v.saturating_add(m.vram()))
+                });
+            let (usable_ram, usable_vram) = usable(&snap, charged_ram, charged_vram);
+            let est = placement(&runner.model, &inner.opts, usable_vram);
+            let limit = max_loaded(&inner.opts, &snap);
+            let count_ok = others.len() < limit;
+            if count_ok && est.fits(usable_ram, usable_vram, fraction) {
+                Admission::Admit(est)
+            } else {
+                let victim =
+                    pick_victim(others.iter().filter(|(_, e)| e.phase == Phase::Ready).map(
+                        |(k, e)| Candidate {
+                            id: *k,
+                            idle: e.is_idle(),
+                            last_used: e.last_used,
+                        },
+                    ))
+                    .cloned();
+                // Memory if every other model were gone: what is free plus what they hold.
+                let empty = MemorySnapshot {
+                    free_ram: snap
+                        .free_ram
+                        .saturating_add(charged_ram)
+                        .min(snap.total_ram),
+                    free_vram: snap
+                        .free_vram
+                        .saturating_add(charged_vram)
+                        .min(snap.total_vram),
+                    ..snap
+                };
+                let est_empty = placement(&runner.model, &inner.opts, empty.free_vram);
+                let could_fit = est_empty.fits(empty.free_ram, empty.free_vram, fraction);
+                let fail = |reason: String| {
+                    if count_ok {
+                        SchedError::InsufficientMemory {
+                            model: model.clone(),
+                            need_ram: est.ram_bytes,
+                            need_vram: est.vram_bytes,
+                            usable_ram,
+                            usable_vram,
+                            fraction,
+                            reason,
+                        }
+                    } else {
+                        SchedError::TooManyModels {
+                            model: model.clone(),
+                            max: limit,
+                            waited: started.elapsed(),
+                        }
+                    }
+                };
+                if !could_fit {
+                    Admission::Fail(SchedError::InsufficientMemory {
+                        model: model.clone(),
+                        need_ram: est_empty.ram_bytes,
+                        need_vram: est_empty.vram_bytes,
+                        usable_ram: empty.free_ram,
+                        usable_vram: empty.free_vram,
+                        fraction,
+                        reason: "it would not fit even with every other model unloaded".into(),
+                    })
+                } else if let Some(key) = victim {
+                    tracing::info!(%model, victim = %key, "evicting an idle model");
+                    Admission::Evict(st.remove(&key, StopReason::Evicted))
+                } else if others.is_empty() {
+                    Admission::Fail(fail("no other model is loaded".into()))
+                } else if Instant::now() >= deadline {
+                    Admission::Fail(fail(format!(
+                        "every loaded model stayed busy for {}s",
+                        started.elapsed().as_secs()
+                    )))
+                } else {
+                    Admission::Wait
+                }
+            }
+        };
+        match step {
+            Admission::Admit(est) => {
+                if let Some(e) = inner.state.lock().current(runner) {
+                    e.memory = Some(Accounted {
+                        estimate: est.clone(),
+                        measured_ram: None,
+                        measured_vram: None,
+                    });
+                }
+                return Ok(est);
+            }
+            Admission::Evict(stop) => {
+                inner.wake();
+                if let Some(stop) = stop {
+                    stop.await;
+                }
+            }
+            Admission::Wait => {
+                tracing::debug!(%model, "waiting for a loaded model to become idle");
+                tokio::select! {
+                    () = &mut notified => {}
+                    () = tokio::time::sleep_until(deadline) => {}
+                }
+            }
+            Admission::Fail(e) => return Err(e),
+        }
+    }
 }
 
 fn finish_load(inner: &Arc<Inner>, runner: &Arc<Runner>, result: Result<Arc<dyn EngineInstance>>) {
@@ -598,13 +782,24 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    /// A scheduler over `backend`. Must be called from within a tokio runtime (it starts the
-    /// keep-alive reaper task).
+    /// A scheduler over `backend` measuring the real machine's memory. Must be called from
+    /// within a tokio runtime (it starts the keep-alive reaper task).
     pub fn new(backend: Arc<dyn ModelBackend>, opts: SchedulerOptions) -> Result<Self> {
+        Self::with_probe(backend, Arc::new(SystemMemoryProbe), opts)
+    }
+
+    /// A scheduler with an explicit memory probe (tests, embedding).
+    pub fn with_probe(
+        backend: Arc<dyn ModelBackend>,
+        probe: Arc<dyn MemoryProbe>,
+        opts: SchedulerOptions,
+    ) -> Result<Self> {
         let rt = Handle::try_current().map_err(|_| SchedError::NoRuntime)?;
         let (tx, rx) = mpsc::channel(1);
         let inner = Arc::new(Inner {
             backend,
+            probe,
+            load_gate: tokio::sync::Mutex::new(()),
             opts,
             state: Mutex::new(State::default()),
             changed: Notify::new(),
@@ -729,6 +924,7 @@ impl Scheduler {
                             id: st.next_id,
                             key: key.clone(),
                             launch: launch_request(&resolved, &inner.opts),
+                            launched: OnceLock::new(),
                             model: resolved.clone(),
                             fingerprint: fingerprint.clone(),
                             status: watch::Sender::new(RunnerStatus::Loading),
@@ -746,6 +942,7 @@ impl Scheduler {
                                 expires_at: None,
                                 last_used: now,
                                 stale: false,
+                                memory: None,
                             },
                         );
                         guard = Some(WaitGuard {
@@ -921,7 +1118,7 @@ impl Lease {
 
     /// The request that launched the engine (context, slots and GPU layers filled in).
     pub fn launch_request(&self) -> &LaunchRequest {
-        &self.runner.launch
+        self.runner.launched.get().unwrap_or(&self.runner.launch)
     }
 
     /// `Ok` while the engine serves; [`SchedError::EngineCrashed`] (502) after a crash,

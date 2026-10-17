@@ -99,6 +99,19 @@ pub enum SchedError {
         /// Why waiting does not help (`no idle model to evict`, `timed out after 300s`).
         reason: String,
     },
+    /// The loaded-model limit is reached and every loaded model is busy (503).
+    #[error(
+        "cannot load `{model}`: {max} models are loaded (the limit) and none became idle within {}s",
+        waited.as_secs()
+    )]
+    TooManyModels {
+        /// Model that was refused.
+        model: String,
+        /// The effective `max_loaded`.
+        max: usize,
+        /// How long the load waited for a model to become idle.
+        waited: Duration,
+    },
     /// The model is not loaded (for `unload` and lookups by name).
     #[error("`{model}` is not loaded")]
     NotLoaded {
@@ -165,6 +178,7 @@ impl SchedError {
             | SchedError::CrashLoop { .. } => 502,
             SchedError::ServerBusy { .. }
             | SchedError::InsufficientMemory { .. }
+            | SchedError::TooManyModels { .. }
             | SchedError::ShuttingDown
             | SchedError::Unloaded { .. }
             | SchedError::Timeout { .. } => 503,

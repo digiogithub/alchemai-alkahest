@@ -25,6 +25,8 @@ pub struct FakeModel {
     pub profile: Option<ModelProfile>,
     /// Weights size on disk.
     pub weights_bytes: u64,
+    /// Run on a CUDA GPU instead of the CPU.
+    pub gpu: bool,
 }
 
 /// Backend over a map of fake models.
@@ -37,6 +39,8 @@ pub struct FakeBackend {
     pub engines: Mutex<Vec<Arc<FakeEngine>>>,
     pub requests: Mutex<Vec<LaunchRequest>>,
     pub next_port: AtomicU16,
+    /// RSS the next engines report.
+    pub rss: Mutex<Option<u64>>,
 }
 
 impl FakeBackend {
@@ -116,6 +120,12 @@ impl ModelBackend for FakeBackend {
                 ModelKind::Chat,
             );
             req.settings = overlay(&m.settings, &request);
+            if m.gpu {
+                req.accelerator = alkahest_sysinfo::Accelerator::Cuda {
+                    major: 12,
+                    minor: 4,
+                };
+            }
             Ok(ResolvedModel {
                 key: format!("alkahest:{model}"),
                 name: model.clone(),
@@ -143,6 +153,7 @@ impl ModelBackend for FakeBackend {
         let fail = self.fail_launch.lock().clone();
         let port = self.next_port.fetch_add(1, Ordering::SeqCst);
         let engine = Arc::new(FakeEngine::new(port));
+        *engine.rss.lock() = *self.rss.lock();
         self.engines.lock().push(Arc::clone(&engine));
         Box::pin(async move {
             if !delay.is_zero() {

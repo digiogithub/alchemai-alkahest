@@ -11,12 +11,26 @@ use std::time::Duration;
 
 use alkahest_core::KeepAlive;
 use alkahest_engine::RestartPolicy;
-use alkahest_sched::{SchedError, Scheduler, SchedulerOptions, StopReason};
+use alkahest_sched::{
+    MemorySnapshot, SchedError, Scheduler, SchedulerOptions, StaticMemoryProbe, StopReason,
+};
 use alkahest_store::ModelSettings;
 use common::{FakeBackend, FakeModel, settle};
 
+/// A scheduler on a roomy fake machine (memory never limits these tests).
+fn sched_with(backend: &Arc<FakeBackend>, opts: SchedulerOptions) -> Scheduler {
+    let probe = StaticMemoryProbe::new(MemorySnapshot {
+        total_ram: 64 << 30,
+        free_ram: 64 << 30,
+        total_vram: 0,
+        free_vram: 0,
+        gpu_count: 0,
+    });
+    Scheduler::with_probe(backend.clone(), Arc::new(probe), opts).unwrap()
+}
+
 fn sched(backend: &Arc<FakeBackend>) -> Scheduler {
-    Scheduler::new(backend.clone(), SchedulerOptions::default()).unwrap()
+    sched_with(backend, SchedulerOptions::default())
 }
 
 fn none() -> ModelSettings {
@@ -202,7 +216,7 @@ async fn launch_request_has_explicit_context_and_slots() {
         num_parallel: 2,
         ..SchedulerOptions::default()
     };
-    let s = Scheduler::new(b.clone(), opts).unwrap();
+    let s = sched_with(&b, opts);
     let _l = s.acquire("m", &none(), None).await.unwrap();
     let req = b.last_request();
     // llama-server splits its context over the slots.
@@ -249,7 +263,7 @@ async fn crash_loop_gives_up() {
         },
         ..SchedulerOptions::default()
     };
-    let s = Scheduler::new(b.clone(), opts).unwrap();
+    let s = sched_with(&b, opts);
     for _ in 0..2 {
         let l = s.acquire("m", &none(), None).await.unwrap();
         b.last_engine().crash(1);

@@ -224,7 +224,7 @@ impl Default for EstimateConfig {
 }
 
 /// Result of [`estimate`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct MemoryEstimate {
     /// All weights.
     pub weights_bytes: u64,

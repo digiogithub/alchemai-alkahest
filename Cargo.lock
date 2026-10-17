@@ -219,6 +219,7 @@ dependencies = [
  "alkahest-sysinfo",
  "futures",
  "parking_lot",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

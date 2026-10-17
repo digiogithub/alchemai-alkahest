@@ -17,14 +17,15 @@ alkahest-core.workspace = true
 alkahest-engine.workspace = true
 alkahest-gguf.workspace = true
 alkahest-store.workspace = true
+alkahest-sysinfo.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-alkahest-sysinfo.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
