@@ -35,8 +35,8 @@ pub use build::BuildTools;
 pub use catalog::{Catalog, DiscoveryIssue};
 pub use error::{RecipeError, Result};
 pub use install::{
-    InstallOptions, InstalledEngine, MARKER_FILE, bundled_roots, install, list_installed, locate,
-    remove_installed,
+    ENGINE_LICENSE_FILE, InstallOptions, InstalledEngine, MARKER_FILE, bundled_roots,
+    engine_license_text, install, list_installed, locate, remove_installed,
 };
 pub use recipe::{
     AcceleratorKind, ArchiveFormat, Asset, Companion, Host, Recipe, SourceBuild, VenvBuild,

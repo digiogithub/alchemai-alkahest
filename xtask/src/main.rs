@@ -10,6 +10,7 @@
 
 mod deps;
 mod icons;
+mod notice;
 mod tokens;
 
 use std::path::{Path, PathBuf};
@@ -18,7 +19,7 @@ use std::process::ExitCode;
 use anyhow::{Result, anyhow};
 
 /// Subcommands that exist but are implemented by later stories.
-const PLANNED: &[&str] = &["notice", "bundle"];
+const PLANNED: &[&str] = &["bundle"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -30,6 +31,7 @@ fn main() -> ExitCode {
         "check-deps" => deps::run(),
         "tokens" => workspace_root().and_then(|root| tokens::run(&root, rest)),
         "icons" => workspace_root().and_then(|root| icons::run(&root, rest)),
+        "notice" => workspace_root().and_then(|root| notice::run(&root, rest)),
         c if PLANNED.contains(&c) => {
             println!("xtask {c}: not implemented yet");
             Ok(true)

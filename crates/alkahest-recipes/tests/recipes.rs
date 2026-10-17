@@ -494,3 +494,23 @@ async fn remove_deletes_only_marked_installs_of_the_selected_version() {
         Err(RecipeError::NotInstalled(_))
     ));
 }
+
+/// ALK-US-0077: every built-in recipe declares a permissive SPDX licence and ships its text.
+#[test]
+fn builtin_recipes_declare_licence_and_ship_text() {
+    for r in builtin_recipes() {
+        let spdx = r.license.as_deref().unwrap_or("");
+        assert!(
+            matches!(spdx, "MIT" | "Apache-2.0"),
+            "{} declares {spdx:?}",
+            r.id
+        );
+        let text = alkahest_recipes::engine_license_text(&r.id)
+            .unwrap_or_else(|| panic!("no licence text for {}", r.id));
+        assert!(text.contains(if spdx == "MIT" {
+            "MIT"
+        } else {
+            "Apache License"
+        }));
+    }
+}

@@ -33,6 +33,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: check-deps (crate graph rules)
         run: cargo xtask check-deps
+      - name: third-party licences (THIRD_PARTY_LICENSES and NOTICE are current, no GPL)
+        run: cargo xtask notice --check
       - name: design tokens (generated theme current, WCAG contrast)
         run: cargo xtask tokens --check --contrast
       - uses: EmbarkStudios/cargo-deny-action@v2

@@ -214,6 +214,7 @@ pub async fn install(
         reason: e.to_string(),
     })?;
     fs::write(&marker_path, json).map_err(|e| RecipeError::io(&marker_path, e))?;
+    write_engine_license(&partial, &recipe.id)?;
 
     if final_dir.exists() {
         fs::remove_dir_all(&final_dir).map_err(|e| RecipeError::io(&final_dir, e))?;
@@ -382,7 +383,52 @@ async fn install_venv(
         reason: e.to_string(),
     })?;
     fs::write(&marker_path, json).map_err(|e| RecipeError::io(&marker_path, e))?;
+    write_engine_license(final_dir, &recipe.id)?;
     read_installed(final_dir).ok_or(RecipeError::MissingExecutable(marker.executable))
+}
+
+/// Name of the licence file written next to every installed engine.
+pub const ENGINE_LICENSE_FILE: &str = "ALKAHEST-ENGINE-LICENSE.txt";
+
+/// Licence texts of the built-in engines (ALK-US-0077), one file per recipe id under
+/// `packaging/licenses/`. Upstream archives usually carry their own licence file too; this copy
+/// guarantees the notice is present for every install path (archive, source build, venv).
+const ENGINE_LICENSES: &[(&str, &str)] = &[
+    (
+        "llama-cpp",
+        include_str!("../../../packaging/licenses/llama-cpp.txt"),
+    ),
+    (
+        "prism-llama-cpp",
+        include_str!("../../../packaging/licenses/prism-llama-cpp.txt"),
+    ),
+    ("vllm", include_str!("../../../packaging/licenses/vllm.txt")),
+    (
+        "whisper-cpp",
+        include_str!("../../../packaging/licenses/whisper-cpp.txt"),
+    ),
+    (
+        "stable-diffusion-cpp",
+        include_str!("../../../packaging/licenses/stable-diffusion-cpp.txt"),
+    ),
+];
+
+/// The licence text of the built-in engine `id`, if it is one of the shipped recipes.
+pub fn engine_license_text(id: &str) -> Option<&'static str> {
+    ENGINE_LICENSES
+        .iter()
+        .find(|(i, _)| *i == id)
+        .map(|(_, t)| *t)
+}
+
+/// Writes [`ENGINE_LICENSE_FILE`] into an engine directory (no-op for user recipes whose id
+/// has no embedded text).
+fn write_engine_license(dir: &Path, id: &str) -> Result<()> {
+    let Some(text) = engine_license_text(id) else {
+        return Ok(());
+    };
+    let path = dir.join(ENGINE_LICENSE_FILE);
+    fs::write(&path, text).map_err(|e| RecipeError::io(&path, e))
 }
 
 /// SHA-256 of a file, lower-case hex (for trust-on-first-use assets).

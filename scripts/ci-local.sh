@@ -35,6 +35,7 @@ if [[ "$deny" == 1 ]]; then
   run cargo deny check
 fi
 run cargo xtask check-deps
+run cargo xtask notice --check
 run cargo xtask tokens --check --contrast
 run cargo build -p alkahest --no-default-features --locked
 if [[ "$size" == 1 ]]; then
