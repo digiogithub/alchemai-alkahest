@@ -2,14 +2,15 @@
 id: ALK-US-0084
 type: story
 title: Auth and shutdown hardening follow-ups
-status: backlog
+status: in_progress
 priority: low
 parent: ALK-EP-0008
 milestone: ALK-M-0006
 author: mcp
 labels: [security]
 created: 2026-10-17T00:39:36Z
-updated: 2026-10-17T00:55:20Z
+updated: 2026-10-17T05:18:41Z
+started: 2026-10-17T05:18:41Z
 inbox:
   status: accepted
   source: mcp

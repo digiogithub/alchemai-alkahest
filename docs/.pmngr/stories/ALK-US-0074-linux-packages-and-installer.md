@@ -2,14 +2,14 @@
 id: ALK-US-0074
 type: story
 title: Linux packages and installer
-status: in_progress
+status: in_review
 priority: critical
 parent: ALK-EP-0014
 milestone: ALK-M-0006
 labels: [release, linux]
 estimate: 5
 created: 2026-10-16T22:43:23Z
-updated: 2026-10-17T04:50:51Z
+updated: 2026-10-17T05:18:32Z
 started: 2026-10-17T04:50:51Z
 ---
 
