@@ -972,4 +972,52 @@ mod tests {
         drop(handle);
         task.await.unwrap();
     }
+
+    /// Answers every probe and serves an endless, silent event stream; each runtime poll
+    /// returns a snapshot whose `queued` counts the polls so far.
+    #[derive(Clone, Default)]
+    struct PollingServer {
+        polls: Arc<AtomicUsize>,
+    }
+
+    impl ServerApi for PollingServer {
+        async fn probe(&self) -> Result<ServerInfo, ProbeError> {
+            Ok(info())
+        }
+
+        async fn status_events(&self) -> Result<StatusStream, ProbeError> {
+            Ok(Box::pin(futures::stream::pending()))
+        }
+
+        async fn runtime(&self) -> Result<SchedulerStatus, ProbeError> {
+            let n = self.polls.fetch_add(1, Ordering::SeqCst) + 1;
+            Ok(SchedulerStatus {
+                queued: n,
+                ..SchedulerStatus::default()
+            })
+        }
+    }
+
+    /// ALK-SP-0008.R6: the runtime figures are refreshed at least every 2 seconds, even when
+    /// no status event arrives.
+    #[tokio::test(start_paused = true)]
+    async fn runtime_is_polled_every_two_seconds_while_connected() {
+        let server = PollingServer::default();
+        let (manager, mut handle) = ConnectionManager::new(
+            server.clone(),
+            None::<FakeLauncher>,
+            "http://127.0.0.1:11435".into(),
+        );
+        let task = tokio::spawn(manager.run());
+        let start = tokio::time::Instant::now();
+        let s = wait_for(&mut handle.snapshots, "three polls", |s| {
+            s.runtime.as_ref().is_some_and(|r| r.status.queued >= 3)
+        })
+        .await;
+        // Polls at 0 s, 2 s and 4 s.
+        assert!(start.elapsed() <= RUNTIME_POLL * 2 + Duration::from_millis(100));
+        assert!(matches!(s.state, ConnectionState::Connected(_)));
+        drop(handle);
+        task.await.unwrap();
+    }
 }

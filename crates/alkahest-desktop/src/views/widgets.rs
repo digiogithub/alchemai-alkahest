@@ -195,6 +195,19 @@ pub fn icon_button(
     el
 }
 
+/// A horizontal meter of `ratio` (0..=1) filled with `fill` (`size::METER` high unless a
+/// thinner `height` is asked for).
+pub fn meter(ratio: f32, fill: Hsla, height: f32, p: &Palette) -> Div {
+    let r = ratio.clamp(0.0, 1.0);
+    h_flex()
+        .w_full()
+        .h(px(height))
+        .rounded(px(radius::FULL))
+        .bg(c(p.muted_subtle))
+        .overflow_hidden()
+        .child(div().h_full().w(crate::ui::relative(r)).bg(fill))
+}
+
 /// Uppercase column label (`type.label`; GPUI has no letter spacing, so the text is written
 /// in capitals by the caller).
 pub fn column_label(label: &str, p: &Palette) -> Div {

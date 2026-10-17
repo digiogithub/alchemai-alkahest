@@ -5,7 +5,10 @@
 //! The rules live in [`crate::library::LibraryState`] (GPUI-free, unit tested); this view
 //! draws its rows, forwards clicks and runs the HTTP calls on the tokio bridge.
 
+use std::collections::HashMap;
+
 use alkahest_client::Client;
+use alkahest_gguf::ModelKind;
 
 use crate::connection::{ConnectionState, RuntimeSnapshot, Snapshot};
 use crate::library::{
@@ -14,6 +17,7 @@ use crate::library::{
 };
 use crate::nav::Screen;
 use crate::ops::{self, ModelOp};
+use crate::present::kind_of;
 use crate::theme::tokens::{Palette, radius, size, space, text};
 use crate::tokio_bridge;
 use crate::ui::input::{Input, InputEvent, InputState};
@@ -114,6 +118,15 @@ impl LibraryView {
     /// Models in the library once fetched (`None` before), for the rail counter.
     pub fn model_count(&self) -> Option<usize> {
         (self.state.status() == &ListStatus::Ready).then(|| self.state.models().len())
+    }
+
+    /// Kind of every library model by name, for the Running screen's badges.
+    pub fn kinds(&self) -> HashMap<String, ModelKind> {
+        self.state
+            .models()
+            .iter()
+            .map(|m| (m.name.clone(), kind_of(m)))
+            .collect()
     }
 
     /// Follows a connection snapshot: fetches the list on connect and when the server's
