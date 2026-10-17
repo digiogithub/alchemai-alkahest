@@ -16,3 +16,5 @@ GGUF = "GGUF"
 gpui = "gpui"
 # "PNGs" is split into "PN" + "Gs"
 PN = "PN"
+# flate2 crate name
+flate = "flate"
