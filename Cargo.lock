@@ -92,6 +92,17 @@ version = "0.1.0"
 [[package]]
 name = "alkahest-engine"
 version = "0.1.0"
+dependencies = [
+ "alkahest-core",
+ "alkahest-gguf",
+ "alkahest-store",
+ "alkahest-sysinfo",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
 
 [[package]]
 name = "alkahest-fetch"
