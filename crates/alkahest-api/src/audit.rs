@@ -278,14 +278,14 @@ fn append(path: &Path, entry: &AuditEntry, max_bytes: u64, keep: usize) -> io::R
     }
     let mut line = serde_json::to_vec(entry).map_err(io::Error::other)?;
     line.push(b'\n');
-    let mut opts = OpenOptions::new();
-    opts.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
+    // A new log file starts owner-only (0600, or an owner-only DACL on Windows); appends then
+    // reuse it.
+    match crate::private_file::create_new(path) {
+        Ok(f) => drop(f),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e),
     }
-    opts.open(path)?.write_all(&line)
+    OpenOptions::new().append(true).open(path)?.write_all(&line)
 }
 
 /// `path.<keep-1>` -> `path.<keep>`, ..., `path` -> `path.1`; the oldest is discarded.

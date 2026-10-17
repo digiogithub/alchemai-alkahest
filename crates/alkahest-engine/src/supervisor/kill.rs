@@ -2,8 +2,8 @@
 //!
 //! On unix every engine starts in its own process group (pgid = its pid), so signalling the
 //! group reaches helper processes the engine forked (vLLM workers, Python children) and the
-//! terminal's Ctrl-C does not reach engines behind the server's back. On Windows only the
-//! direct child is terminated (`TerminateProcess`); job objects are a follow-up.
+//! terminal's Ctrl-C does not reach engines behind the server's back. On Windows each engine
+//! has its own job object instead (`orphan::windows::Job`), terminated as a whole.
 
 /// Asks the process group led by `pid` to terminate (SIGTERM). Missing groups are fine.
 #[cfg(unix)]

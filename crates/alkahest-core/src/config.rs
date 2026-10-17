@@ -76,6 +76,66 @@ pub struct ServerConfig {
     pub cors_origins: Vec<String>,
     /// Which API families are served (ALK-SP-0006.R7); a disabled family answers 404.
     pub endpoints: EndpointsConfig,
+    /// HTTPS (ALK-SP-0006.R6). Off by default: loopback traffic never leaves the machine.
+    pub tls: TlsConfig,
+}
+
+/// Default interval, in seconds, between checks of the certificate files for changes.
+pub const DEFAULT_TLS_RELOAD_INTERVAL_SECS: u64 = 60;
+
+/// HTTPS listener settings (`[server.tls]`, ALK-SP-0006.R6).
+///
+/// The certificate and key are PEM files. They are re-read on SIGHUP (Unix) and whenever
+/// their modification time or size changes, so a renewed certificate applies to new
+/// connections without a restart. `alkahest certs generate` writes a self-signed pair to the
+/// default locations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TlsConfig {
+    /// Serve HTTPS instead of plain HTTP.
+    pub enabled: bool,
+    /// Certificate chain (PEM, leaf first). Default `<data_dir>/tls/cert.pem`.
+    pub cert: Option<PathBuf>,
+    /// Private key (PEM: PKCS#8, PKCS#1 or SEC1). Default `<data_dir>/tls/key.pem`.
+    pub key: Option<PathBuf>,
+    /// Seconds between checks of the files for changes; `0` reloads on SIGHUP only.
+    pub reload_interval_secs: u64,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            cert: None,
+            key: None,
+            reload_interval_secs: DEFAULT_TLS_RELOAD_INTERVAL_SECS,
+        }
+    }
+}
+
+impl TlsConfig {
+    /// Certificate path: the configured one or `<data_dir>/tls/cert.pem`.
+    pub fn cert_path(&self, data_dir: &Path) -> PathBuf {
+        self.cert
+            .clone()
+            .unwrap_or_else(|| data_dir.join("tls").join("cert.pem"))
+    }
+
+    /// Private key path: the configured one or `<data_dir>/tls/key.pem`.
+    pub fn key_path(&self, data_dir: &Path) -> PathBuf {
+        self.key
+            .clone()
+            .unwrap_or_else(|| data_dir.join("tls").join("key.pem"))
+    }
+
+    /// The CA certificate `alkahest certs generate` writes next to the certificate
+    /// (`ca.pem` in the certificate's directory). Clients trust it to reach a server that
+    /// uses the generated certificate.
+    pub fn ca_path(&self, data_dir: &Path) -> PathBuf {
+        let cert = self.cert_path(data_dir);
+        cert.parent()
+            .map_or_else(|| PathBuf::from("ca.pem"), |d| d.join("ca.pem"))
+    }
 }
 
 /// Switches for the API families (ALK-SP-0006.R7). All enabled by default.
@@ -119,6 +179,7 @@ impl Default for ServerConfig {
             shutdown_timeout_secs: DEFAULT_SHUTDOWN_TIMEOUT_SECS,
             cors_origins: Vec::new(),
             endpoints: EndpointsConfig::default(),
+            tls: TlsConfig::default(),
         }
     }
 }
@@ -133,17 +194,24 @@ impl ServerConfig {
         }
     }
 
-    /// Base URL a local client should use (`http://host:port`); wildcard binds map to loopback.
+    /// URL scheme clients use: `https` when TLS is enabled, else `http`.
+    pub fn scheme(&self) -> &'static str {
+        if self.tls.enabled { "https" } else { "http" }
+    }
+
+    /// Base URL a local client should use (`http://host:port`, `https://` with TLS); wildcard
+    /// binds map to loopback.
     pub fn client_url(&self) -> String {
         let host = match self.host.as_str() {
             "0.0.0.0" | "" => "127.0.0.1",
             "::" => "::1",
             h => h,
         };
+        let scheme = self.scheme();
         if host.contains(':') {
-            format!("http://[{host}]:{}", self.port)
+            format!("{scheme}://[{host}]:{}", self.port)
         } else {
-            format!("http://{host}:{}", self.port)
+            format!("{scheme}://{host}:{}", self.port)
         }
     }
 
@@ -870,7 +938,27 @@ mod tests {
         assert!(s.is_loopback());
         s.apply_host_spec("::").unwrap();
         assert_eq!(s.client_url(), "http://[::1]:7000");
+        s.tls.enabled = true;
+        assert_eq!(s.client_url(), "https://[::1]:7000");
         assert!(s.apply_host_spec("host:notaport").is_err());
+    }
+
+    #[test]
+    fn tls_section_parses_and_defaults_to_the_data_dir() {
+        let c = Config::from_toml_str("[server.tls]\nenabled = true\nkey = \"/k.pem\"\n").unwrap();
+        assert!(c.server.tls.enabled);
+        let data = Path::new("/data");
+        assert_eq!(
+            c.server.tls.cert_path(data),
+            Path::new("/data/tls/cert.pem")
+        );
+        assert_eq!(c.server.tls.key_path(data), Path::new("/k.pem"));
+        assert_eq!(c.server.tls.ca_path(data), Path::new("/data/tls/ca.pem"));
+        assert_eq!(
+            c.server.tls.reload_interval_secs,
+            DEFAULT_TLS_RELOAD_INTERVAL_SECS
+        );
+        assert!(Config::from_toml_str("[server.tls]\ncertificate = \"x\"\n").is_err());
     }
 
     #[test]

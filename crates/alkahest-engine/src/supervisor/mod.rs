@@ -16,6 +16,7 @@ pub mod kill;
 pub mod ledger;
 pub mod logs;
 mod orphan;
+pub use orphan::WATCHDOG_ENV;
 pub mod restart;
 pub mod usage;
 
@@ -401,11 +402,12 @@ pub fn spawn(spec: LaunchSpec, opts: &SpawnOptions) -> Result<EngineHandle> {
     #[cfg(unix)]
     cmd.process_group(0);
 
-    // Linux: the engine gets SIGTERM if the server dies without stopping it.
-    let mut child = orphan::spawn_tied_to_parent(cmd).map_err(|source| EngineError::Spawn {
-        program: spec.program.clone(),
-        source,
-    })?;
+    // The engine dies with the server even when the server is killed (see `orphan`).
+    let (mut child, tie) =
+        orphan::spawn_tied_to_parent(cmd).map_err(|source| EngineError::Spawn {
+            program: spec.program.clone(),
+            source,
+        })?;
     let pid = child.id();
     if let (Some(ledger), Some(p)) = (&opts.ledger, pid) {
         ledger.record(p, &opts.model);
@@ -451,6 +453,7 @@ pub fn spawn(spec: LaunchSpec, opts: &SpawnOptions) -> Result<EngineHandle> {
 
     tokio::spawn(monitor(Monitor {
         child,
+        tie,
         pid,
         stop_rx,
         default_grace: spec.stop_grace,
@@ -560,6 +563,8 @@ where
 /// closing when every handle is dropped is how it learns nobody needs the engine.
 struct Monitor {
     child: Child,
+    /// Watchdog or job object; dropped after the engine is reaped.
+    tie: orphan::Tie,
     pid: Option<u32>,
     stop_rx: oneshot::Receiver<Duration>,
     default_grace: Duration,
@@ -592,6 +597,7 @@ impl Drop for GroupGuard {
 async fn monitor(m: Monitor) {
     let Monitor {
         mut child,
+        tie,
         pid,
         mut stop_rx,
         default_grace,
@@ -611,7 +617,7 @@ async fn monitor(m: Monitor) {
             // A closed channel means every handle was dropped: stop as if asked.
             let grace = msg.unwrap_or(default_grace);
             state.send_replace(EngineState::Stopping);
-            (graceful_stop(&mut child, pid, grace).await, true)
+            (graceful_stop(&mut child, &tie, pid, grace).await, true)
         }
     };
     // Helpers the engine forked may outlive it; the group dies with the engine.
@@ -621,6 +627,8 @@ async fn monitor(m: Monitor) {
             ledger.forget(p);
         }
     }
+    tie.terminate_tree();
+    drop(tie);
     guard.armed = false;
     for r in readers {
         let _ = tokio::time::timeout(Duration::from_millis(500), r).await;
@@ -645,6 +653,7 @@ async fn monitor(m: Monitor) {
 
 async fn graceful_stop(
     child: &mut Child,
+    tie: &orphan::Tie,
     pid: Option<u32>,
     grace: Duration,
 ) -> std::io::Result<ExitStatus> {
@@ -662,11 +671,25 @@ async fn graceful_stop(
             }
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        let _ = (pid, grace);
+        // CTRL_BREAK first (works when the server has a console), then the whole job.
+        if let Some(p) = pid
+            && orphan::windows::ctrl_break(p)
+            && let Ok(status) = tokio::time::timeout(grace, child.wait()).await
+        {
+            return status;
+        }
+        tie.terminate_tree();
         let _ = child.start_kill();
     }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (pid, grace, tie);
+        let _ = child.start_kill();
+    }
+    #[cfg(unix)]
+    let _ = tie;
     child.wait().await
 }
 

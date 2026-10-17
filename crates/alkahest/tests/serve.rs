@@ -169,6 +169,51 @@ async fn sigint_stops_the_server_with_exit_code_0() {
     stops_cleanly_on("INT").await;
 }
 
+/// ALK-US-0084: a second stop signal cuts the drain short. An open event stream never ends
+/// on its own, so after the first SIGTERM the server waits (30 s drain); the second one makes
+/// it abort the stream and exit 0 at once.
+#[cfg(unix)]
+#[tokio::test]
+async fn second_stop_signal_forces_the_stop() {
+    let home = tempfile::tempdir().unwrap();
+    let host = format!("127.0.0.1:{}", free_port());
+    let mut child = spawn_serve(home.path(), &["--host", &host]);
+    wait_ready(&format!("http://{host}/healthz")).await;
+    let events = reqwest::get(format!("http://{host}/alkahest/v1/events"))
+        .await
+        .unwrap();
+    assert_eq!(events.status(), 200);
+    let term = |child: &Child| {
+        Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .unwrap()
+    };
+    assert!(term(&child).success());
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the first signal must drain, not exit"
+    );
+    let start = std::time::Instant::now();
+    assert!(term(&child).success());
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(0));
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(8),
+            "the second signal did not force the stop"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    drop(events);
+    let mut stderr = String::new();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
+    assert!(stderr.contains("forcing the stop"), "{stderr}");
+}
+
 /// Waits for a server that is expected to refuse to start; returns its stderr.
 fn refused(mut child: Child) -> String {
     let status = child.wait().unwrap();

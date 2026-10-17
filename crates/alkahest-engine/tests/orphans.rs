@@ -1,5 +1,5 @@
-//! Engines never outlive a killed server (ALK-US-0092): the Linux parent-death signal and the
-//! startup sweep over the runtime ledger.
+//! Engines never outlive a killed server (ALK-US-0092, ALK-US-0094): the Linux parent-death
+//! signal, the portable watchdog and the startup sweep over the runtime ledger.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -8,6 +8,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use alkahest_engine::supervisor::WATCHDOG_ENV;
 use alkahest_engine::supervisor::ledger::process_identity;
 use alkahest_engine::{
     ApiDialect, EngineId, LaunchSpec, LedgerEntry, ProcessLedger, SpawnOptions, launch,
@@ -75,24 +76,27 @@ fn orphan_parent_helper() {
     });
 }
 
-/// Scenario: a SIGKILLed server takes its engines with it (Linux, `PR_SET_PDEATHSIG`).
-#[cfg(target_os = "linux")]
-#[test]
-fn engine_dies_when_the_server_is_sigkilled() {
+/// Re-executes this test binary as a "server" that launches the fake engine, SIGKILLs it and
+/// waits for the engine to die. `watchdog` forces the portable watchdog (macOS mechanism) on
+/// Linux.
+fn sigkilled_server_takes_its_engine(watchdog: bool) {
     let dir = tempfile::tempdir().unwrap();
     let pidfile = dir.path().join("engine.pid");
-    let mut server = Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "orphan_parent_helper",
-            "--nocapture",
-            "--test-threads=1",
-        ])
-        .env(PARENT_ENV, &pidfile)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut cmd = Command::new(std::env::current_exe().unwrap());
+    cmd.args([
+        "--exact",
+        "orphan_parent_helper",
+        "--nocapture",
+        "--test-threads=1",
+    ])
+    .env(PARENT_ENV, &pidfile)
+    .env_remove(WATCHDOG_ENV)
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
+    if watchdog {
+        cmd.env(WATCHDOG_ENV, "1");
+    }
+    let mut server = cmd.spawn().unwrap();
     wait_until("the engine pid", Duration::from_secs(20), || {
         std::fs::read_to_string(&pidfile).is_ok_and(|s| !s.is_empty())
     });
@@ -106,9 +110,26 @@ fn engine_dies_when_the_server_is_sigkilled() {
     server.kill().unwrap(); // SIGKILL: no shutdown hooks run
     server.wait().unwrap();
 
-    wait_until("the orphaned engine to die", Duration::from_secs(5), || {
-        !running(engine)
-    });
+    // The watchdog polls once a second, then sends SIGTERM.
+    wait_until(
+        "the orphaned engine to die",
+        Duration::from_secs(10),
+        || !running(engine),
+    );
+}
+
+/// Scenario: a SIGKILLed server takes its engines with it (Linux: `PR_SET_PDEATHSIG`; macOS:
+/// the watchdog).
+#[test]
+fn engine_dies_when_the_server_is_sigkilled() {
+    sigkilled_server_takes_its_engine(false);
+}
+
+/// The macOS mechanism (ALK-US-0094), exercised on Linux through `ALKAHEST_ENGINE_WATCHDOG=1`.
+#[cfg(target_os = "linux")]
+#[test]
+fn engine_dies_with_the_server_through_the_watchdog() {
+    sigkilled_server_takes_its_engine(true);
 }
 
 /// The parent-death signal follows the thread that forked; engines spawned from a

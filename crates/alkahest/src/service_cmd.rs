@@ -1,5 +1,6 @@
-//! `alkahest service install|uninstall|start|stop|status` for systemd (ALK-US-0045,
-//! ALK-SP-0009.R1 to R3).
+//! `alkahest service install|uninstall|start|stop|status` (ALK-SP-0009.R1 to R3): the
+//! dispatcher and systemd (ALK-US-0045). launchd lives in [`crate::service_launchd`], the
+//! Windows service manager in [`crate::service_windows`].
 //!
 //! Everything is planned first ([`plan_install`] and friends return the files to write and the
 //! commands to run) and only then applied, so `--dry-run` prints exactly what a real run does
@@ -13,7 +14,7 @@ use alkahest_core::config::Loaded;
 use anyhow::{Context, Result, bail};
 use serde_json::json;
 
-use crate::cli::{ServiceAction, ServiceArgs};
+use crate::cli::{ServiceAction, ServiceArgs, ServiceManager};
 
 /// Unit template of the system service.
 const SYSTEM_UNIT: &str = include_str!("../../../packaging/systemd/alkahest.service");
@@ -69,7 +70,7 @@ fn first_field_exists(file: &Path, name: &str) -> bool {
 }
 
 /// `root` joined with the absolute `path` (`/` stays the real root).
-fn under(root: Option<&Path>, path: &str) -> PathBuf {
+pub(crate) fn under(root: Option<&Path>, path: &str) -> PathBuf {
     match root {
         Some(r) => r.join(path.trim_start_matches('/')),
         None => PathBuf::from(path),
@@ -223,8 +224,100 @@ fn run_command(cmd: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn shell_line(cmd: &[String]) -> String {
-    cmd.join(" ")
+/// A command line for display: words with spaces are quoted.
+pub(crate) fn shell_line(cmd: &[String]) -> String {
+    cmd.iter()
+        .map(|w| {
+            if w.is_empty() || w.contains(char::is_whitespace) {
+                format!("\"{}\"", w.replace('"', "\\\""))
+            } else {
+                w.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// One command of a plan, with whether its failure is expected and harmless (unloading a
+/// job that is not loaded, for instance).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Step {
+    /// Program and arguments.
+    pub argv: Vec<String>,
+    /// Failure is reported as a warning and the plan goes on.
+    pub may_fail: bool,
+}
+
+impl Step {
+    /// A step that must succeed.
+    pub fn new(argv: Vec<String>) -> Self {
+        Self {
+            argv,
+            may_fail: false,
+        }
+    }
+
+    /// A step whose failure is tolerated.
+    pub fn tolerant(argv: Vec<String>) -> Self {
+        Self {
+            argv,
+            may_fail: true,
+        }
+    }
+}
+
+/// Runs (or, with `--dry-run`/`--root`, prints) `steps` in order.
+pub(crate) fn apply_steps(args: &ServiceArgs, steps: &[Step]) -> Result<()> {
+    for step in steps {
+        if executes(args) {
+            println!("+ {}", shell_line(&step.argv));
+            match run_command(&step.argv) {
+                Err(e) if step.may_fail => eprintln!("warning: {e:#}"),
+                other => other?,
+            }
+        } else {
+            println!("# would run: {}", shell_line(&step.argv));
+        }
+    }
+    Ok(())
+}
+
+/// Writes (or, with `--dry-run`, prints) the plan's files.
+pub(crate) fn write_files(args: &ServiceArgs, files: &[(PathBuf, String)]) -> Result<()> {
+    for (path, content) in files {
+        if args.dry_run {
+            println!("# would write {}\n{content}", path.display());
+        } else {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)
+                    .with_context(|| format!("creating {}", dir.display()))?;
+            }
+            std::fs::write(path, content).with_context(|| format!("writing {}", path.display()))?;
+            println!("wrote {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+/// Removes (or, with `--dry-run`, names) an installed file.
+pub(crate) fn remove_file(args: &ServiceArgs, path: &Path) -> Result<()> {
+    if args.dry_run {
+        println!("# would remove {}", path.display());
+    } else if path.exists() {
+        std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
+        println!("removed {}", path.display());
+    } else {
+        println!("{} is not installed", path.display());
+    }
+    Ok(())
+}
+
+/// The binary the service starts: `--bin` or the running executable.
+pub(crate) fn service_binary(args: &ServiceArgs) -> Result<PathBuf> {
+    match &args.bin {
+        Some(b) => Ok(b.clone()),
+        None => std::env::current_exe().context("locating the alkahest binary"),
+    }
 }
 
 /// The real machine for [`Host`].
@@ -244,17 +337,45 @@ fn with_host<T>(args: &ServiceArgs, f: impl FnOnce(&Host<'_>) -> T) -> T {
 }
 
 /// Whether commands run: not with `--dry-run` and not with `--root`.
-fn executes(args: &ServiceArgs) -> bool {
+pub(crate) fn executes(args: &ServiceArgs) -> bool {
     !args.dry_run && args.root.is_none()
 }
 
-/// Runs `alkahest service <action>`.
+/// The options of any action.
+fn action_args(action: &ServiceAction) -> &ServiceArgs {
+    match action {
+        ServiceAction::Install(a)
+        | ServiceAction::Uninstall(a)
+        | ServiceAction::Start(a)
+        | ServiceAction::Stop(a)
+        | ServiceAction::Status(a) => a,
+    }
+}
+
+/// Runs `alkahest service <action>` with the selected (or native) service manager.
 pub fn run(action: &ServiceAction, loaded: &Loaded, json: bool) -> Result<ExitCode> {
-    if !cfg!(target_os = "linux") {
+    let args = action_args(action);
+    let native = ServiceManager::native();
+    let manager = match (args.manager, native) {
+        (Some(m), _) => m,
+        (None, Some(m)) => m,
+        (None, None) => bail!("`alkahest service` has no service manager for this platform"),
+    };
+    if Some(manager) != native && executes(args) {
         bail!(
-            "`alkahest service` supports systemd on Linux only for now (macOS and Windows: ALK-US-0046, ALK-US-0047)"
+            "`--manager {}` is another platform's service manager; it only works with --dry-run \
+             or --root",
+            format!("{manager:?}").to_ascii_lowercase()
         );
     }
+    match manager {
+        ServiceManager::Systemd => systemd(action, loaded, json),
+        ServiceManager::Launchd => crate::service_launchd::run(action, loaded, json),
+        ServiceManager::Windows => crate::service_windows::run(action, loaded, json),
+    }
+}
+
+fn systemd(action: &ServiceAction, loaded: &Loaded, json: bool) -> Result<ExitCode> {
     match action {
         ServiceAction::Install(args) => install(args),
         ServiceAction::Uninstall(args) => uninstall(args),
@@ -265,23 +386,9 @@ pub fn run(action: &ServiceAction, loaded: &Loaded, json: bool) -> Result<ExitCo
 }
 
 fn install(args: &ServiceArgs) -> Result<ExitCode> {
-    let bin = match &args.bin {
-        Some(b) => b.clone(),
-        None => std::env::current_exe().context("locating the alkahest binary")?,
-    };
+    let bin = service_binary(args)?;
     let plan = with_host(args, |h| plan_install(args, &bin, h));
-    for (path, content) in &plan.files {
-        if args.dry_run {
-            println!("# would write {}\n{content}", path.display());
-        } else {
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir)
-                    .with_context(|| format!("creating {}", dir.display()))?;
-            }
-            std::fs::write(path, content).with_context(|| format!("writing {}", path.display()))?;
-            println!("wrote {}", path.display());
-        }
-    }
+    write_files(args, &plan.files)?;
     for cmd in &plan.commands {
         if executes(args) {
             println!("+ {}", shell_line(cmd));
@@ -309,14 +416,7 @@ fn uninstall(args: &ServiceArgs) -> Result<ExitCode> {
             println!("# would run: {}", shell_line(cmd));
         }
     }
-    if args.dry_run {
-        println!("# would remove {}", unit.display());
-    } else if unit.exists() {
-        std::fs::remove_file(&unit).with_context(|| format!("removing {}", unit.display()))?;
-        println!("removed {}", unit.display());
-    } else {
-        println!("{} is not installed", unit.display());
-    }
+    remove_file(args, &unit)?;
     if !args.user {
         println!("note: the `{SERVICE_USER}` user and {STATE_DIR} were kept; remove them by hand");
     }
@@ -389,6 +489,7 @@ mod tests {
             dry_run: false,
             root: root.map(Path::to_path_buf),
             bin: None,
+            manager: None,
         }
     }
 

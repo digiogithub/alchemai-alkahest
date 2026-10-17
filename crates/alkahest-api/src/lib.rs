@@ -7,7 +7,10 @@
 //! * [`auth`]: authentication middleware, [`RequestContext`], startup exposure check.
 //! * [`dialect`]: API families, admin routes, dialect-shaped middleware errors.
 //! * [`keys`]: API key generation, hashed storage and verification.
-//! * [`server`]: [`bind`], [`serve`] and [`serve_with`] (drain timeout, shutdown hooks).
+//! * [`server`]: [`bind`], [`Server`], [`serve`] and [`serve_with`] (TLS, drain timeout, forced
+//!   stop, shutdown hooks).
+//! * [`tls`]: [`TlsAcceptor`] (rustls, reload on SIGHUP and file change) and certificate
+//!   generation.
 //! * [`shutdown`]: [`ShutdownHooks`] and the OS [`stop_signal`].
 //! * [`ollama`], [`openai`], [`responses`], [`anthropic`], [`admin`]: the API families, proxied to the engines the
 //!   scheduler leases; [`inference_routes`] merges all of them.
@@ -32,6 +35,7 @@ pub mod keys;
 pub mod ollama;
 pub mod openai;
 pub mod pooled;
+mod private_file;
 pub mod pull;
 pub mod rerank;
 pub mod responses;
@@ -41,6 +45,7 @@ pub mod server;
 pub mod service;
 pub mod shutdown;
 pub mod state;
+pub mod tls;
 pub mod upstream;
 
 pub use service::{HttpError, UpstreamClient};
@@ -63,6 +68,7 @@ pub use auth::{AuthPolicy, Caller, Exposure, ExposureError, RequestContext, chec
 pub use dialect::{DefaultErrorRenderer, ErrorKind, ErrorRenderer, Family};
 pub use error::{ApiError, Result};
 pub use router::{ApiRouter, ApiSettings};
-pub use server::{ServeOptions, ShutdownReport, bind, serve, serve_with};
-pub use shutdown::{HookOutcome, ShutdownHooks, stop_signal};
+pub use server::{ServeOptions, Server, ShutdownReport, bind, serve, serve_with};
+pub use shutdown::{HookOutcome, ShutdownHooks, StopSignals, stop_signal};
 pub use state::{AppState, AppStateBuilder, ServerInfo};
+pub use tls::{TlsAcceptor, TlsError};

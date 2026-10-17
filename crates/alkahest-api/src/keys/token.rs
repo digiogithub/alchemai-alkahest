@@ -15,6 +15,7 @@ use std::fmt;
 use rand::TryRng;
 use rand::rngs::SysRng;
 use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
 use super::KeyError;
 
@@ -37,9 +38,10 @@ const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 /// Total key length: `alk_` + id + `_` + secret.
 const KEY_LEN: usize = KEY_PREFIX.len() + ID_LEN + 1 + SECRET_LEN;
 
-/// A full API key. `Debug` and `Display` never print the secret.
+/// A full API key. `Debug` and `Display` never print the secret, and the memory holding it is
+/// wiped when the value is dropped.
 #[derive(Clone, PartialEq, Eq)]
-pub struct ApiKeySecret(String);
+pub struct ApiKeySecret(Zeroizing<String>);
 
 impl ApiKeySecret {
     /// The complete key, for showing it to the user exactly once.
@@ -66,25 +68,34 @@ pub(crate) fn os_random(buf: &mut [u8]) -> Result<(), KeyError> {
         .map_err(|e| KeyError::Random(e.to_string()))
 }
 
-/// `len` random base32 characters.
-fn random_base32(len: usize) -> Result<String, KeyError> {
-    let mut bytes = vec![0u8; len];
+/// `len` random base32 characters. The random bytes are wiped once mapped.
+fn random_base32(len: usize) -> Result<Zeroizing<String>, KeyError> {
+    let mut bytes = Zeroizing::new(vec![0u8; len]);
     os_random(&mut bytes)?;
-    Ok(bytes
-        .iter()
-        .map(|b| char::from(ALPHABET[usize::from(b & 0x1f)]))
-        .collect())
+    let mut out = Zeroizing::new(String::with_capacity(len));
+    out.extend(
+        bytes
+            .iter()
+            .map(|b| char::from(ALPHABET[usize::from(b & 0x1f)])),
+    );
+    Ok(out)
 }
 
 /// Generates a random public key id.
 pub(crate) fn generate_id() -> Result<String, KeyError> {
-    random_base32(ID_LEN)
+    // The id is public: no need to keep it in a wiping buffer.
+    Ok(random_base32(ID_LEN)?.as_str().to_owned())
 }
 
 /// Generates a new key with the given id.
 pub(crate) fn generate_key(id: &str) -> Result<ApiKeySecret, KeyError> {
     let secret = random_base32(SECRET_LEN)?;
-    Ok(ApiKeySecret(format!("{KEY_PREFIX}{id}_{secret}")))
+    let mut key = Zeroizing::new(String::with_capacity(KEY_LEN));
+    key.push_str(KEY_PREFIX);
+    key.push_str(id);
+    key.push('_');
+    key.push_str(&secret);
+    Ok(ApiKeySecret(key))
 }
 
 /// Generates a fresh random salt.
@@ -110,7 +121,7 @@ pub fn parse_key(presented: &str) -> Option<ApiKeySecret> {
         .iter()
         .enumerate()
         .all(|(i, b)| i + KEY_PREFIX.len() == sep || ALPHABET.contains(b));
-    body_ok.then(|| ApiKeySecret(presented.to_string()))
+    body_ok.then(|| ApiKeySecret(Zeroizing::new(presented.to_owned())))
 }
 
 /// `SHA-256(salt || key)`, hex encoded.

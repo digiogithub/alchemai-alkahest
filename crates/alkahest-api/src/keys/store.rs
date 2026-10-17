@@ -5,7 +5,7 @@
 //! file, read, modify, write a temporary file with mode 0600, fsync it and rename it over
 //! the store, so a reader never sees a half-written file. The server only reads it.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -280,17 +280,10 @@ pub(crate) fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<(), KeyE
     Ok(())
 }
 
-/// Creates a new file with owner-only permissions (0600 on Unix; on Windows the file
-/// inherits the ACL of the per-user data directory).
+/// Creates a new file with owner-only permissions (0600 on Unix, a protected owner-only DACL
+/// on Windows; see [`crate::private_file`]).
 fn private_create(path: &Path) -> io::Result<File> {
-    let mut opts = OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    opts.open(path)
+    crate::private_file::create_new(path)
 }
 
 #[cfg(unix)]
