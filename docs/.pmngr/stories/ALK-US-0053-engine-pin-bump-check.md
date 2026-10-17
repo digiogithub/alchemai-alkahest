@@ -2,14 +2,15 @@
 id: ALK-US-0053
 type: story
 title: Engine pin bump check
-status: backlog
+status: in_progress
 priority: low
 parent: ALK-EP-0010
 milestone: ALK-M-0006
 labels: [recipes, ci]
 estimate: 2
 created: 2026-10-16T22:42:02Z
-updated: 2026-10-16T22:42:02Z
+updated: 2026-10-17T04:50:51Z
+started: 2026-10-17T04:50:51Z
 ---
 
 ## Description
