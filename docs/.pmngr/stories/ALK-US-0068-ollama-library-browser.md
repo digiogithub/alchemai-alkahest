@@ -2,15 +2,16 @@
 id: ALK-US-0068
 type: story
 title: Ollama library browser
-status: in_progress
+status: done
 priority: high
 parent: ALK-EP-0013
 milestone: ALK-M-0005
 labels: [desktop, ollama]
 estimate: 3
 created: 2026-10-16T22:43:01Z
-updated: 2026-10-17T03:51:28Z
+updated: 2026-10-17T04:42:39Z
 started: 2026-10-17T03:51:28Z
+closed: 2026-10-17T04:42:39Z
 links:
   - { kind: implements, target: ALK-SP-0008.R4 }
 ---

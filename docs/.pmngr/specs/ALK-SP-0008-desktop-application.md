@@ -5,7 +5,7 @@ title: Desktop application
 status: backlog
 labels: [desktop]
 created: 2026-10-16T22:37:38Z
-updated: 2026-10-17T03:27:50Z
+updated: 2026-10-17T04:33:07Z
 requirements:
   R1:
     status: backlog
@@ -52,8 +52,35 @@ requirements:
         - crates/alkahest-client/tests/library.rs#library_composes_tags_models_and_show
   R4:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-desktop/src/discover.rs#DiscoverState
+        - crates/alkahest-desktop/src/discover.rs#quant_rows
+        - crates/alkahest-desktop/src/discover.rs#ollama_row
+        - crates/alkahest-desktop/src/discover.rs#parse_paste
+        - crates/alkahest-desktop/src/downloads.rs#DownloadsState
+        - crates/alkahest-desktop/src/views/discover.rs#DiscoverView
+        - crates/alkahest-desktop/src/ops.rs#library_model
+      tests:
+        - crates/alkahest-desktop/src/downloads.rs#download
+        - crates/alkahest-desktop/src/downloads.rs#failures_offer_the_right_action
+        - crates/alkahest-desktop/src/discover.rs#the_picker_recommends_q4_k_m_when_it_fits
+        - crates/alkahest-desktop/src/discover.rs#ollama_rows_list_tags_and_pull_the_chosen_one
+        - crates/alkahest-desktop/src/discover.rs#pasted_text_is_parsed
+        - crates/alkahest-desktop/src/views/discover.rs#detail_renders_quants_and_completed_jobs_refresh_the_library
   R5:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-desktop/src/model_settings.rs#SettingsForm
+        - crates/alkahest-desktop/src/model_settings.rs#EstimateView
+        - crates/alkahest-desktop/src/model_settings.rs#Debounce
+        - crates/alkahest-desktop/src/views/model_settings.rs#ModelSettingsView
+      tests:
+        - crates/alkahest-desktop/src/model_settings.rs#estimate
+        - crates/alkahest-desktop/src/model_settings.rs#edits_parse_validate_and_mark_the_origin
+        - crates/alkahest-desktop/src/model_settings.rs#card_differences_are_listed_and_applied
+        - crates/alkahest-desktop/src/views/model_settings.rs#the_form_renders_edits_and_drops_card_overrides
   R6:
     status: backlog
     trace:

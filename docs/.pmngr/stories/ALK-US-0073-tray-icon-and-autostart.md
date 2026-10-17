@@ -2,14 +2,15 @@
 id: ALK-US-0073
 type: story
 title: Tray icon and autostart
-status: backlog
+status: in_progress
 priority: low
 parent: ALK-EP-0013
 milestone: ALK-M-0005
 labels: [desktop]
 estimate: 3
 created: 2026-10-16T22:43:21Z
-updated: 2026-10-16T22:52:15Z
+updated: 2026-10-17T04:42:39Z
+started: 2026-10-17T04:42:39Z
 ---
 
 ## Description

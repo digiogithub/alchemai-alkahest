@@ -2,13 +2,15 @@
 id: ALK-US-0095
 type: story
 title: "Desktop settings form: remote server URL and API key (keyring)"
-status: backlog
+status: in_progress
 priority: medium
 parent: ALK-EP-0013
+milestone: ALK-M-0005
 author: mcp
 labels: [desktop]
 created: 2026-10-17T02:43:32Z
-updated: 2026-10-17T02:48:23Z
+updated: 2026-10-17T04:42:39Z
+started: 2026-10-17T04:42:39Z
 inbox:
   status: accepted
   source: mcp

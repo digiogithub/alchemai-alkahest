@@ -2,15 +2,16 @@
 id: ALK-US-0067
 type: story
 title: Hugging Face browser and downloads
-status: in_progress
+status: done
 priority: critical
 parent: ALK-EP-0013
 milestone: ALK-M-0005
 labels: [desktop, hf]
 estimate: 5
 created: 2026-10-16T22:42:56Z
-updated: 2026-10-17T03:51:28Z
+updated: 2026-10-17T04:42:39Z
 started: 2026-10-17T03:51:28Z
+closed: 2026-10-17T04:42:39Z
 links:
   - { kind: implements, target: ALK-SP-0008.R4 }
 ---
