@@ -7,8 +7,10 @@ parent: ALK-EP-0007
 author: mcp
 labels: [api, recipes, desktop]
 created: 2026-10-17T05:56:00Z
-updated: 2026-10-17T06:43:09Z
+updated: 2026-10-17T07:13:05Z
 started: 2026-10-17T06:43:09Z
+links:
+  - { kind: duplicated_by, target: ALK-US-0110 }
 inbox:
   status: accepted
   source: mcp
