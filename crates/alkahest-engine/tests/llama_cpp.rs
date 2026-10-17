@@ -421,8 +421,16 @@ fn cpu_only_build_never_offloads() {
     let a = spec_args(&gpu, &cpu_build);
     assert!(pair(&a, "-ngl").is_none(), "{a:?}");
 
+    // The CUDA build passes the pre-launch runtime check only where the CUDA runtime is
+    // found, so give it stand-in libraries instead of depending on the host's toolkit.
+    let runtime = tempfile::tempdir().unwrap();
+    let os = alkahest_recipes::Host::current().os;
+    for alternatives in alkahest_recipes::cuda_runtime_libraries(&os, 12) {
+        std::fs::write(runtime.path().join(&alternatives[0]), b"").unwrap();
+    }
     let mut cuda_build = install(&[]);
     cuda_build.variant = Some("cuda12.4".into());
+    cuda_build.library_dirs = vec![runtime.path().to_path_buf()];
     assert_eq!(
         pair(&spec_args(&gpu, &cuda_build), "-ngl").as_deref(),
         Some("999")

@@ -214,9 +214,22 @@ async fn safetensors_flag_downloads_the_snapshot_and_builds_the_directory() {
         std::fs::read(view.join("model.safetensors.index.json")).unwrap(),
         repo.index
     );
-    // Every entry is a link into this store.
-    let target = std::fs::canonicalize(view.join("config.json")).unwrap();
-    assert!(target.starts_with(std::fs::canonicalize(dir.path().join("blobs")).unwrap()));
+    // Every entry is a link into this store: a symlink that resolves into `blobs/` on Unix,
+    // a hard link to the blob on Windows (no symlinks without developer mode), whose path
+    // stays in the view and so can only be checked through the blob it shares bytes with.
+    #[cfg(unix)]
+    {
+        let target = std::fs::canonicalize(view.join("config.json")).unwrap();
+        assert!(target.starts_with(std::fs::canonicalize(dir.path().join("blobs")).unwrap()));
+    }
+    #[cfg(not(unix))]
+    {
+        let blob = dir
+            .path()
+            .join("blobs")
+            .join(Digest::of(&repo.config).filename());
+        assert_eq!(std::fs::read(blob).unwrap(), repo.config);
+    }
 }
 
 #[tokio::test]

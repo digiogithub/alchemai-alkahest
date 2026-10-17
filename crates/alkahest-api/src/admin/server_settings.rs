@@ -441,9 +441,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("config.toml");
         std::fs::write(&path, "# mine\n[server]\nport = 9999 # port\n").unwrap();
+        // Absolute on every host (`/data/models` is not absolute on Windows).
+        let models = tmp.path().join("data").join("models");
         let p = patch(json!({
             "keep_alive": "30m", "max_loaded": 2, "auto_install": true,
-            "models_dir": "/data/models", "log_format": "json"
+            "models_dir": models.display().to_string(), "log_format": "json"
         }));
         write_patch(&path, &p).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -459,10 +461,7 @@ mod tests {
         assert_eq!(c.scheduler.keep_alive.to_string(), "30m");
         assert_eq!(c.scheduler.max_loaded, 2);
         assert!(c.engines.auto_install);
-        assert_eq!(
-            c.store.models_dir.unwrap().display().to_string(),
-            "/data/models"
-        );
+        assert_eq!(c.store.models_dir.unwrap(), models);
         // null resets to the default by removing the key.
         write_patch(&path, &patch(json!({"models_dir": null}))).unwrap();
         let c = Config::from_toml_str(&std::fs::read_to_string(&path).unwrap()).unwrap();

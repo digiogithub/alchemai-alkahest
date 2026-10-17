@@ -15,6 +15,12 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const SERVER_BODY: &[u8] = b"#!/bin/sh\necho llama-server fake\n";
+/// The executable the installer looks for: the recipe's `executable` plus the platform suffix.
+const SERVER_EXE: &str = if cfg!(windows) {
+    "llama-server.exe"
+} else {
+    "llama-server"
+};
 
 /// A gzip tarball shaped like a llama.cpp release: one wrapper directory, an executable, a
 /// versioned library and a symlink to it.
@@ -28,7 +34,7 @@ fn llama_like_tar_gz(wrapper: &str) -> Vec<u8> {
     tar.append_data(&mut dir, format!("{wrapper}/"), std::io::empty())
         .unwrap();
     for (name, body, mode) in [
-        ("llama-server", SERVER_BODY, 0o755),
+        (SERVER_EXE, SERVER_BODY, 0o755),
         ("libllama.so.0", b"lib".as_slice(), 0o644),
     ] {
         let mut h = tar::Header::new_gnu();
@@ -113,7 +119,7 @@ async fn install_unpacks_strips_the_wrapper_and_keeps_the_executable_bit() {
     .unwrap();
 
     assert_eq!(got.dir, engines.path().join("llama-cpp/b1-cpu"));
-    assert_eq!(got.executable, got.dir.join("llama-server"));
+    assert_eq!(got.executable, got.dir.join(SERVER_EXE));
     assert_eq!(std::fs::read(&got.executable).unwrap(), SERVER_BODY);
     assert!(got.dir.join("libllama.so.0").is_file());
     #[cfg(unix)]

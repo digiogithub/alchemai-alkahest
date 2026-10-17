@@ -36,6 +36,15 @@ fn install(engines: &Path, id: EngineId, dir: &str) -> PathBuf {
     root
 }
 
+/// Puts empty stand-ins for the CUDA `major` runtime libraries into `dir`, so a CUDA build
+/// passes the pre-launch runtime check on hosts without a CUDA toolkit (CI runners).
+fn fake_cuda_runtime(dir: &Path, major: u32) {
+    let os = alkahest_recipes::Host::current().os;
+    for alternatives in alkahest_recipes::cuda_runtime_libraries(&os, major) {
+        std::fs::write(dir.join(&alternatives[0]), b"").unwrap();
+    }
+}
+
 fn locator(engines: &Path) -> FsLocator {
     FsLocator::new(engines, BTreeMap::new()).with_search_path(None)
 }
@@ -271,6 +280,7 @@ fn vllm_binary_found_in_venv() {
 fn llama_server_spec_from_request() {
     let tmp = tempfile::tempdir().unwrap();
     let root = install(tmp.path(), EngineId::LlamaCpp, "b6500-cuda12.4");
+    fake_cuda_runtime(&root, 12);
     let mut overrides = BTreeMap::new();
     overrides.insert(
         "llama-cpp".to_string(),

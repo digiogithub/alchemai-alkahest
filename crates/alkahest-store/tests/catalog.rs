@@ -257,7 +257,10 @@ fn detail_reads_text_layers_and_modelfile() {
     assert!(lines.contains(&("stop".into(), "\"<b>\"".into())));
     assert!(lines.contains(&("temperature".into(), "0.5".into())));
     let mf = d.modelfile(&e);
-    assert!(mf.contains("FROM /"), "{mf}");
+    // FROM names the weights blob by its absolute path (`C:\...` on Windows).
+    let blob = e.entry.model_path().unwrap();
+    assert!(blob.is_absolute(), "{}", blob.display());
+    assert!(mf.contains(&format!("FROM {}\n", blob.display())), "{mf}");
     assert!(mf.contains("TEMPLATE \"\"\"{{ .Prompt }}\"\"\""));
     assert!(mf.contains("SYSTEM \"\"\"Be brief.\"\"\""));
     assert!(mf.contains("PARAMETER stop \"<a>\""));

@@ -15,7 +15,8 @@ async fn tofu_asset_installs_and_records_the_digest_it_hashed_to() {
     let mut h = tar::Header::new_gnu();
     h.set_size(body.len() as u64);
     h.set_mode(0o755);
-    tar.append_data(&mut h, "srv", &body[..]).unwrap();
+    let name = format!("srv{}", std::env::consts::EXE_SUFFIX);
+    tar.append_data(&mut h, name, &body[..]).unwrap();
     let bytes = tar.into_inner().unwrap().finish().unwrap();
     let server = MockServer::start().await;
     Mock::given(method("GET"))

@@ -63,7 +63,9 @@ async fn fixture() -> Fixture {
     let host = Host::current();
     let libs = cuda_runtime_libraries(&host.os, 12);
     let names: Vec<String> = libs.iter().map(|alt| alt[0].clone()).collect();
-    let engine = zip_of(&[("srv", b"#!/bin/sh\necho hi\n")]);
+    // The installer looks for `executable` plus the platform suffix (`srv.exe` on Windows).
+    let srv = format!("srv{}", std::env::consts::EXE_SUFFIX);
+    let engine = zip_of(&[(srv.as_str(), b"#!/bin/sh\necho hi\n")]);
     let runtime_files: Vec<(&str, &[u8])> = names
         .iter()
         .map(|n| (n.as_str(), b"lib".as_slice()))
@@ -118,9 +120,14 @@ async fn companions_are_skipped_unless_requested() {
     .unwrap();
     assert!(got.companions.is_empty());
     assert_eq!(runtime_downloads(&f).await, 0);
+    // macOS has no CUDA runtime libraries to name, so there is nothing more to check there.
     let host = Host::current();
-    let first = &cuda_runtime_libraries(&host.os, 12)[0][0];
-    assert!(!got.dir.join(first).exists());
+    if let Some(first) = cuda_runtime_libraries(&host.os, 12)
+        .first()
+        .and_then(|alternatives| alternatives.first())
+    {
+        assert!(!got.dir.join(first).exists());
+    }
 }
 
 #[tokio::test]

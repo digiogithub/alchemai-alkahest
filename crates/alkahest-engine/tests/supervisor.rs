@@ -173,7 +173,10 @@ async fn exit_before_ready_reports_status_and_stderr() {
 async fn crash() {
     // Scenario ALK-SP-0004.R6 "crash": a dying engine is detected with its exit status and
     // stderr tail, so the scheduler can fail in-flight requests and reload later.
-    let handle = launch(|p| Ok(fake_spec(p, &["--crash-after-ms", "500"])), &opts())
+    // The crash must come after readiness: on Windows a probe that races the engine's bind
+    // waits out the 2 s probe timeout (refused loopback connects are retried there), so
+    // readiness can take over 2 s. The crash is still detected well within the timeout below.
+    let handle = launch(|p| Ok(fake_spec(p, &["--crash-after-ms", "5000"])), &opts())
         .await
         .unwrap();
     let mut rx = handle.subscribe();

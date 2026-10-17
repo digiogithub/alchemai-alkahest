@@ -1275,15 +1275,18 @@ async fn engine_admin_log_reload_and_override() {
     assert_eq!(status, StatusCode::OK, "{doc}");
     assert_eq!(doc["engine"], "llama-cpp");
     assert_eq!(doc["restart_required"], false);
+    // Absolute on every host (`/opt/...` is not absolute on Windows).
+    let server = a.tmp.path().join("llama").join("llama-server");
+    let server = server.display().to_string();
     let (status, doc) = send(
         &h,
         "PUT",
         "/alkahest/v1/engines/llama-cpp/override",
-        Some(json!({"path": "/opt/llama/llama-server", "extra_args": ["--mlock"]})),
+        Some(json!({"path": server, "extra_args": ["--mlock"]})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{doc}");
-    assert_eq!(doc["saved"]["path"], "/opt/llama/llama-server");
+    assert_eq!(doc["saved"]["path"], server.as_str());
     assert_eq!(doc["saved"]["extra_args"], json!(["--mlock"]));
     assert_eq!(doc["running"]["path"], Value::Null);
     assert_eq!(doc["restart_required"], true);

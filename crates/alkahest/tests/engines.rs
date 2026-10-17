@@ -57,12 +57,9 @@ fn ls_shows_an_installed_engine_once_with_its_path() {
         .collect();
     assert_eq!(cpu.len(), 1, "{rows:?}");
     assert_eq!(cpu[0]["state"], "installed");
-    assert!(
-        cpu[0]["path"]
-            .as_str()
-            .unwrap()
-            .ends_with("b11669-cpu/llama-server")
-    );
+    // Compared by components: Windows prints `b11669-cpu\llama-server`.
+    let path = std::path::Path::new(cpu[0]["path"].as_str().unwrap());
+    assert!(path.ends_with("b11669-cpu/llama-server"), "{path:?}");
     assert_eq!(rows.iter().filter(|r| r["state"] == "installed").count(), 1);
 }
 
