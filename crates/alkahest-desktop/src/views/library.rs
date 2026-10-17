@@ -152,6 +152,13 @@ impl LibraryView {
         cx.notify();
     }
 
+    /// Fetches the model list again (a download completed elsewhere).
+    pub fn reload(&mut self, cx: &mut Context<Self>) {
+        if self.connected {
+            self.refresh(cx);
+        }
+    }
+
     /// Fetches the model list.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         self.state.begin_fetch();

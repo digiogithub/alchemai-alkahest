@@ -271,3 +271,99 @@ pub fn confirm_dialog(
                 .child(actions),
         )
 }
+
+/// One segment of a segmented control (`Hugging Face | Ollama library`, template source).
+/// The active segment is raised on the track; the caller adds the click handler.
+pub fn segment(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    active: bool,
+    p: &Palette,
+) -> Stateful<Div> {
+    let mut el = h_flex()
+        .id(id)
+        .h(px(size::CONTROL_SMALL - 6.0))
+        .px(px(space::S3))
+        .items_center()
+        .rounded(px(radius::SM))
+        .type_style(text::SMALL)
+        .font_weight(FontWeight::MEDIUM)
+        .whitespace_nowrap()
+        .cursor_pointer()
+        .child(label.into());
+    if active {
+        el = el.bg(c(p.text_primary)).text_color(c(p.bg_base));
+    } else {
+        let hover = c(p.text_primary);
+        el = el
+            .text_color(c(p.text_secondary))
+            .hover(move |s| s.text_color(hover));
+    }
+    el
+}
+
+/// The track of a segmented control holding `segments`.
+pub fn segmented(segments: Vec<Stateful<Div>>, p: &Palette) -> Div {
+    let mut track = h_flex()
+        .flex_shrink_0()
+        .p(px(3.0))
+        .gap(px(2.0))
+        .items_center()
+        .rounded(px(radius::MD))
+        .border_1()
+        .border_color(c(p.line_strong))
+        .bg(c(p.bg_raised));
+    for s in segments {
+        track = track.child(s);
+    }
+    track
+}
+
+/// Cards never shrink inside a scrolling column; a caller that wants it to flex (a side
+/// panel) sets `flex_1()` after this.
+pub fn card(p: &Palette) -> Div {
+    v_flex()
+        .flex_shrink_0()
+        .p(px(size::CARD_PADDING))
+        .gap(px(space::S3))
+        .rounded(px(radius::XL))
+        .border_1()
+        .border_color(c(p.line_default))
+        .bg(c(p.bg_raised))
+}
+
+/// A one-line notice: neutral (signal blue) or a failure (cinnabar).
+pub fn notice_line(message: impl Into<SharedString>, danger: bool, p: &Palette) -> Div {
+    let (fg, bg, border) = if danger {
+        (p.danger_text, p.danger_subtle, p.danger_border)
+    } else {
+        (p.info_text, p.info_subtle, p.info_subtle)
+    };
+    h_flex()
+        .px(px(14.0))
+        .py(px(space::S2))
+        .rounded(px(radius::LG))
+        .bg(c(bg))
+        .border_1()
+        .border_color(c(border))
+        .text_color(c(fg))
+        .type_style(text::SMALL)
+        .child(div().flex_1().min_w_0().child(message.into()))
+}
+
+/// The frame around a kit text input (`size::CONTROL` high); cinnabar border on an error.
+pub fn field_frame(error: bool, p: &Palette) -> Div {
+    h_flex()
+        .h(px(size::CONTROL))
+        .px(px(space::S3))
+        .gap(px(space::S2))
+        .items_center()
+        .rounded(px(radius::MD))
+        .border_1()
+        .border_color(c(if error {
+            p.danger_border
+        } else {
+            p.line_strong
+        }))
+        .bg(c(p.bg_sidebar))
+}

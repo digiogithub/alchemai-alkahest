@@ -16,6 +16,7 @@ use crate::ui::{
     IntoElement, ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled,
     Window, div, h_flex, px, svg_icon, v_flex,
 };
+use crate::views::discover::{DiscoverEvent, DiscoverView};
 use crate::views::icons;
 use crate::views::library::{LibraryEvent, LibraryView};
 use crate::views::running::{RunningEvent, RunningView};
@@ -31,6 +32,7 @@ pub struct Shell {
     commands: mpsc::UnboundedSender<Command>,
     library: Entity<LibraryView>,
     running: Entity<RunningView>,
+    discover: Entity<DiscoverView>,
 }
 
 impl Shell {
@@ -45,7 +47,18 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Self {
         let library = cx.new(|cx| LibraryView::new(client.clone(), window, cx));
+        let discover = cx.new(|cx| DiscoverView::new(client.clone(), window, cx));
         let running = cx.new(|cx| RunningView::new(client, library.clone(), cx));
+        cx.subscribe(
+            &discover,
+            |this, _, event: &DiscoverEvent, cx| match event {
+                // A finished download: the Library lists the new model right away.
+                DiscoverEvent::ModelsChanged => this.library.update(cx, |view, cx| view.reload(cx)),
+            },
+        )
+        .detach();
+        // Active downloads feed the Discover rail counter.
+        cx.observe(&discover, |_, _, cx| cx.notify()).detach();
         cx.subscribe(&running, |this, _, event: &RunningEvent, cx| match event {
             RunningEvent::Navigate(screen) => this.select(*screen, cx),
         })
@@ -64,6 +77,7 @@ impl Shell {
             commands,
             library,
             running,
+            discover,
         }
     }
 
@@ -101,6 +115,8 @@ impl Shell {
     pub fn apply(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
         self.library.update(cx, |view, cx| view.apply(snapshot, cx));
         self.running.update(cx, |view, cx| view.apply(snapshot, cx));
+        self.discover
+            .update(cx, |view, cx| view.apply(snapshot, cx));
         let service = snapshot.service_card();
         let action = snapshot.card_action();
         let counters = snapshot.counters();
@@ -194,6 +210,9 @@ impl Shell {
         {
             counters.models = Some(n);
         }
+        if let Some(n) = self.discover.read(cx).active_downloads() {
+            counters.downloads = Some(n);
+        }
         counters
     }
 
@@ -202,8 +221,9 @@ impl Shell {
         match self.screen {
             Screen::Library => self.library.clone().into_any_element(),
             Screen::Running => self.running.clone().into_any_element(),
+            Screen::Discover => self.discover.clone().into_any_element(),
             // Each arm becomes the screen's own view when its story lands.
-            screen @ (Screen::Discover | Screen::Engines | Screen::ApiKeys) => {
+            screen @ (Screen::Engines | Screen::ApiKeys) => {
                 placeholder(screen, p).into_any_element()
             }
         }
