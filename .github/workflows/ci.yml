@@ -103,6 +103,30 @@ jobs:
       - name: Conformance suite
         run: scripts/conformance.sh
 
+  # User guide (ALK-US-0080): the generated CLI and configuration pages are current and the
+  # mdBook builds (broken pages fail the build).
+  docs:
+    name: user guide (mdBook)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+      - name: Generated reference pages are current
+        run: cargo xtask docs-cli --check
+      - name: Build the book
+        run: mdbook build docs/book
+      - uses: actions/upload-artifact@v4
+        with:
+          name: user-guide
+          path: target/book/
+          if-no-files-found: warn
+
   # Unused dependencies.
   machete:
     name: cargo machete

@@ -1,0 +1,16 @@
+[book]
+title = "Alkahest User Guide"
+description = "Install, run and integrate the Alkahest local AI model server."
+authors = ["Digio"]
+language = "en"
+src = "src"
+
+[build]
+# Outside docs/: everything under docs/ is indexed by the knowledge base.
+build-dir = "../../target/book"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/digio/alkahest"
+default-theme = "light"
+preferred-dark-theme = "navy"

@@ -38,6 +38,8 @@ run cargo xtask check-deps
 run cargo xtask notice --check
 run cargo xtask tokens --check --contrast
 run cargo build -p alkahest --no-default-features --locked
+run cargo xtask docs-cli --check
+if command -v mdbook >/dev/null 2>&1; then run mdbook build docs/book; fi
 if [[ "$size" == 1 ]]; then
   run scripts/binary-size.sh
 fi
