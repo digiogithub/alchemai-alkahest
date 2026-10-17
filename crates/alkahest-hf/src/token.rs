@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use zeroize::Zeroizing;
+
 use alkahest_core::config::HfConfig;
 use alkahest_core::paths::EnvFn;
 
@@ -12,15 +14,16 @@ pub const KEYRING_SERVICE: &str = "alkahest";
 /// Keyring user name of the Hub token.
 pub const KEYRING_USER: &str = "hf-token";
 
-/// A Hub access token. `Debug` and `Display` never show the secret.
+/// A Hub access token. `Debug` and `Display` never show the secret; its memory is wiped on
+/// drop.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Token(String);
+pub struct Token(Zeroizing<String>);
 
 impl Token {
     /// Wraps a token string; surrounding whitespace is trimmed and an empty string yields `None`.
     pub fn new(value: impl AsRef<str>) -> Option<Self> {
         let v = value.as_ref().trim();
-        (!v.is_empty()).then(|| Self(v.to_string()))
+        (!v.is_empty()).then(|| Self(Zeroizing::new(v.to_owned())))
     }
 
     /// The secret, for the `Authorization` header only.

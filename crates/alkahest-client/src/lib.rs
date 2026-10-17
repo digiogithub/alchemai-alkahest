@@ -514,11 +514,21 @@ fn tls_failure(e: &reqwest::Error) -> Option<String> {
 }
 
 /// Client of one Alkahest server.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Client {
     base: String,
     http: reqwest::Client,
-    api_key: Option<String>,
+    /// Wiped from memory on drop; never printed by `Debug`.
+    api_key: Option<zeroize::Zeroizing<String>>,
+}
+
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("base", &self.base)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .finish_non_exhaustive()
+    }
 }
 
 impl Client {
@@ -595,7 +605,7 @@ impl Client {
 
     /// Sends `key` as `Authorization: Bearer` (needed for non-loopback servers).
     pub fn with_api_key(mut self, key: Option<String>) -> Self {
-        self.api_key = key.filter(|k| !k.is_empty());
+        self.api_key = key.filter(|k| !k.is_empty()).map(zeroize::Zeroizing::new);
         self
     }
 
@@ -607,7 +617,7 @@ impl Client {
     fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
         let mut r = self.http.request(method, format!("{}{path}", self.base));
         if let Some(k) = &self.api_key {
-            r = r.bearer_auth(k);
+            r = r.bearer_auth(k.as_str());
         }
         r
     }
@@ -945,6 +955,16 @@ mod tests {
                 .base_url(),
             "https://127.0.0.1:11435"
         );
+    }
+
+    #[test]
+    fn debug_never_prints_the_api_key() {
+        let c = Client::new("http://h:1")
+            .unwrap()
+            .with_api_key(Some("alk_secret".into()));
+        let text = format!("{c:?}");
+        assert!(!text.contains("alk_secret"), "{text}");
+        assert!(text.contains("<redacted>"), "{text}");
     }
 
     #[test]

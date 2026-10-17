@@ -77,15 +77,40 @@ pub(crate) fn run_with(
     runtime.block_on(serve(loaded, allow_unauthenticated, control))
 }
 
-/// The foreground control: SIGINT/SIGTERM (Windows console events) stop the server.
+/// The foreground control: the first SIGINT/SIGTERM (Windows console event) stops the server
+/// gracefully, a second one skips the rest of the drain (open connections are aborted, hooks
+/// get a short budget), a third one exits at once with code 130.
 fn signal_control() -> Result<ServeControl> {
-    let stop = alkahest_api::stop_signal().context("installing stop-signal handlers")?;
+    let mut signals =
+        alkahest_api::StopSignals::install().context("installing stop-signal handlers")?;
+    let (first_tx, first_rx) = tokio::sync::oneshot::channel::<&'static str>();
+    let (second_tx, second_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let first = signals.recv().await;
+        let _ = first_tx.send(first);
+        eprintln!("alkahest serve: {first}: stopping (send it again to stop now)");
+        let second = signals.recv().await;
+        tracing::warn!(signal = second, "second stop signal: forcing the stop");
+        eprintln!("alkahest serve: {second} again: forcing the stop");
+        let _ = second_tx.send(());
+        let third = signals.recv().await;
+        tracing::warn!(signal = third, "third stop signal: exiting immediately");
+        eprintln!("alkahest serve: {third} a third time: exiting now");
+        std::process::exit(EXIT_FORCED);
+    });
     Ok(ServeControl {
-        stop: Box::pin(stop),
-        force: Box::pin(std::future::pending()),
+        stop: Box::pin(async move { first_rx.await.unwrap_or("stop") }),
+        force: Box::pin(async move {
+            if second_rx.await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }),
         on_listening: Box::new(|_| {}),
     })
 }
+
+/// Exit code after a third stop signal (128 + SIGINT, as shells report an interrupted job).
+const EXIT_FORCED: i32 = 130;
 
 async fn serve(
     loaded: &Loaded,
@@ -279,6 +304,8 @@ async fn serve(
         .await?;
     tracing::info!(
         drained = report.drained,
+        forced = report.forced,
+        aborted = report.aborted,
         hooks = report.hooks.len(),
         "server stopped"
     );

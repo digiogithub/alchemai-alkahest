@@ -543,17 +543,20 @@ fn write_atomic(path: &Path, bytes: &[u8], secret: bool) -> Result<(), TlsError>
         .and_then(|n| n.to_str())
         .unwrap_or("tls.pem");
     let tmp = dir.join(format!(".{name}.tmp-{}", std::process::id()));
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(if secret { 0o600 } else { 0o644 });
-    }
-    #[cfg(not(unix))]
-    let _ = secret;
     let _ = std::fs::remove_file(&tmp);
-    let result = options.open(&tmp).and_then(|mut f| {
+    let file = if secret {
+        crate::private_file::create_new(&tmp)
+    } else {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o644);
+        }
+        options.open(&tmp)
+    };
+    let result = file.and_then(|mut f| {
         f.write_all(bytes)?;
         f.sync_all()
     });
