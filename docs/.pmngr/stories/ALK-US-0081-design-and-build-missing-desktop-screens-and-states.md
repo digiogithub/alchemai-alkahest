@@ -2,14 +2,15 @@
 id: ALK-US-0081
 type: story
 title: Design and build missing desktop screens and states
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0013
 milestone: ALK-M-0005
 labels: [desktop, design]
 estimate: 5
 created: 2026-10-16T22:52:19Z
-updated: 2026-10-16T22:52:19Z
+updated: 2026-10-17T03:30:54Z
+started: 2026-10-17T03:30:54Z
 ---
 
 ## Description

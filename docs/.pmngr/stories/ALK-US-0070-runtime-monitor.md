@@ -2,15 +2,16 @@
 id: ALK-US-0070
 type: story
 title: Runtime monitor
-status: in_progress
+status: done
 priority: critical
 parent: ALK-EP-0013
 milestone: ALK-M-0005
 labels: [desktop, observability]
 estimate: 5
 created: 2026-10-16T22:43:10Z
-updated: 2026-10-17T02:48:23Z
+updated: 2026-10-17T03:31:00Z
 started: 2026-10-17T02:48:23Z
+closed: 2026-10-17T03:31:00Z
 links:
   - { kind: implements, target: ALK-SP-0008.R6 }
 ---

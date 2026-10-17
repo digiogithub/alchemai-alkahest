@@ -2,15 +2,16 @@
 id: ALK-T-0191
 type: task
 title: Monitor view with gauges and per-model cards
-status: in_progress
+status: done
 priority: critical
 parent: ALK-US-0070
 milestone: ALK-M-0005
 labels: [desktop]
 effort: 3
 created: 2026-10-16T22:43:12Z
-updated: 2026-10-17T02:51:52Z
+updated: 2026-10-17T03:27:50Z
 started: 2026-10-17T02:51:52Z
+closed: 2026-10-17T03:27:50Z
 ---
 
 ## Description
