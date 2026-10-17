@@ -403,6 +403,20 @@ async fn doubled_and_trailing_slashes_reach_the_clean_route() {
     assert_eq!(h.get("/no/such/route/").await.status(), 404);
 }
 
+/// OpenAI-compatible clients append `/models` to the base URL they are given; with a base of
+/// `http://host:11435` (no `/v1`) the OpenAI routes must still answer, as llama-server does.
+#[tokio::test]
+async fn openai_routes_answer_without_the_v1_prefix() {
+    let h = Harness::start(&models()).await;
+    let v: Value = h.get("/models").await.json().await.unwrap();
+    assert_eq!(v["object"], "list");
+    assert_eq!(v["data"][0]["id"], "llama3.2:latest");
+    assert_eq!(h.get("//models/").await.status(), 200);
+    assert_eq!(h.get("/models/llama3.2:latest").await.status(), 200);
+    // Not an OpenAI resource: still unknown.
+    assert_eq!(h.get("/tags").await.status(), 404);
+}
+
 /// Scenario "ollama client" (list part): `/api/tags`, `/api/show`, `/api/ps`.
 #[tokio::test]
 async fn ollama_client_list_show_and_ps() {

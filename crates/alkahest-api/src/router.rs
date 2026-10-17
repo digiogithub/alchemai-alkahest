@@ -169,18 +169,45 @@ impl ApiRouter {
     }
 }
 
-/// Collapses repeated slashes and drops a trailing slash before routing, so `//api/tags` and
-/// `/api/tags/` reach `/api/tags`. Ollama's server (gin) answers such paths with a redirect to
-/// the clean path, and clients built against it depend on that: Pando, for one, requests
-/// `base + "/api/tags"`, which becomes `//api/tags` when the configured base URL ends in `/`.
-/// Serving the clean route directly works for every client, including those that do not follow
-/// redirects. No route has an empty segment or a meaningful trailing slash.
+/// First path segments of the OpenAI and Anthropic routes, which are also served without the
+/// `/v1` prefix (as llama-server and LocalAI do): OpenAI-compatible clients append `/models` or
+/// `/chat/completions` to whatever base URL they are given, so a base of
+/// `http://127.0.0.1:11435` (without `/v1`) must work too.
+const UNPREFIXED_V1: &[&str] = &[
+    "models",
+    "chat",
+    "completions",
+    "embeddings",
+    "audio",
+    "images",
+    "rerank",
+    "responses",
+    "messages",
+];
+
+/// Cleans the path before routing:
+///
+/// - repeated slashes collapse and a trailing slash is dropped, so `//api/tags` and `/api/tags/`
+///   reach `/api/tags`. Ollama's server (gin) answers such paths with a redirect to the clean
+///   path and clients depend on it: Pando, for one, requests `base + "/api/tags"`, which becomes
+///   `//api/tags` when the configured base URL ends in `/`;
+/// - an OpenAI or Anthropic route without its `/v1` prefix (`/models`, `/chat/completions`)
+///   gets it ([`UNPREFIXED_V1`]).
+///
+/// The clean route is served directly rather than redirected, which also covers clients that do
+/// not follow redirects. No route has an empty segment or a meaningful trailing slash, and
+/// authentication runs after this rewrite, so the route family is judged on the final path.
 pub(crate) fn normalize_path<B>(mut req: Request<B>) -> Request<B> {
     let path = req.uri().path();
-    if !path.contains("//") && !(path.len() > 1 && path.ends_with('/')) {
+    let first = path.split('/').find(|s| !s.is_empty()).unwrap_or("");
+    let add_v1 = UNPREFIXED_V1.contains(&first);
+    if !add_v1 && !path.contains("//") && !(path.len() > 1 && path.ends_with('/')) {
         return req;
     }
-    let mut clean = String::with_capacity(path.len());
+    let mut clean = String::with_capacity(path.len() + 3);
+    if add_v1 {
+        clean.push_str("/v1");
+    }
     for segment in path.split('/').filter(|s| !s.is_empty()) {
         clean.push('/');
         clean.push_str(segment);

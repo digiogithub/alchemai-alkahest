@@ -30,3 +30,12 @@ route directly instead of redirecting, which also covers clients that do not fol
 Test `crates/alkahest-api/tests/ollama.rs#doubled_and_trailing_slashes_reach_the_clean_route`.
 `cargo fmt --check`, `clippy -D warnings`, `cargo nextest run --workspace` (1360 passed),
 `cargo deny check`, `cargo xtask check-deps`, headless build: all OK.
+
+## Follow-up: OpenAI routes without `/v1`
+
+The product owner's Pando uses the "OpenAI compatible" provider, which requests
+`TrimRight(baseURL, "/") + "/models"`; with a base URL without `/v1` that is `/models`, still a
+404 after the first fix. `normalize_path` now also prefixes `/v1` when the first path segment is
+an OpenAI or Anthropic resource (`UNPREFIXED_V1`: models, chat, completions, embeddings, audio,
+images, rerank, responses, messages), as llama-server and LocalAI accept. Authentication runs
+after the rewrite. Test `openai_routes_answer_without_the_v1_prefix`; 1361 tests pass.
