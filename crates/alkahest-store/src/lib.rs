@@ -27,6 +27,7 @@ pub mod ollama;
 pub mod ops;
 pub mod overlay;
 pub mod reference;
+pub mod snapshot;
 pub mod source;
 
 pub use catalog::{Catalog, CatalogEntry, ModelDetail, ModelSummary};

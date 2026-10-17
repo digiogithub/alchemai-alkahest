@@ -74,6 +74,14 @@ impl AlkahestStore {
         fs::remove_file(&stored.path).map_err(|e| StoreError::io("delete", &stored.path, e))?;
         prune_empty_dirs(stored.path.parent(), &self.manifests_dir());
         let still_used = self.referenced_blobs()?;
+        // A snapshot view is owned by its manifest digest; aliases made by `cp` share it.
+        if !self
+            .list_manifests()?
+            .iter()
+            .any(|m| m.digest == stored.digest)
+        {
+            self.remove_snapshot(&stored.digest)?;
+        }
         let mut removed = Vec::new();
         let mut kept = 0;
         let mut reclaimed = 0;
@@ -111,6 +119,8 @@ impl AlkahestStore {
             report.reclaimed += size;
             report.blobs_removed.push((*d, size));
         }
+        let live_manifests = self.list_manifests()?.iter().map(|m| m.digest).collect();
+        self.prune_snapshots(&live_manifests, dry_run)?;
         let (n, bytes) = self.sweep_staging(STALE_STAGING_AGE, dry_run)?;
         report.staging_removed = n;
         report.reclaimed += bytes;

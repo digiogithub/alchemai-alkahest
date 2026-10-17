@@ -171,6 +171,14 @@ impl HfClient {
         Ok(self.send(url, repo).await?.text().await?)
     }
 
+    /// The raw bytes of one file of a revision, for the small non-LFS files of a snapshot
+    /// (`config.json`, tokenizer files). Large files go through the downloader instead.
+    pub async fn file_bytes(&self, repo: &str, revision: &str, file: &str) -> Result<Vec<u8>> {
+        let url = Url::parse(&self.resolve_url(repo, Some(revision), file)?)
+            .map_err(|e| HfError::InvalidUrl(e.to_string()))?;
+        Ok(self.send(url, file).await?.bytes().await?.to_vec())
+    }
+
     /// The parsed model card of a revision.
     pub async fn model_card(&self, repo: &str, revision: Option<&str>) -> Result<ModelCard> {
         ModelCard::parse(&self.readme(repo, revision).await?)

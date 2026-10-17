@@ -26,6 +26,7 @@ pub fn run(
     model: &str,
     insecure: bool,
     force: bool,
+    safetensors: bool,
     loaded: &Loaded,
     json: bool,
 ) -> Result<ExitCode> {
@@ -35,7 +36,11 @@ pub fn run(
         .context("starting the async runtime")?;
     runtime.block_on(run_async(
         model,
-        PullOptions { insecure, force },
+        PullOptions {
+            insecure,
+            force,
+            safetensors,
+        },
         loaded,
         json,
     ))

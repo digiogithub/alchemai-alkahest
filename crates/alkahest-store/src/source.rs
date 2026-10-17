@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use crate::digest::Digest;
 use crate::error::Result;
 use crate::fsutil::{self, MAX_DOCUMENT};
-use crate::manifest::{Descriptor, LayerKind, Manifest, ModelConfig};
+use crate::manifest::{Descriptor, LayerKind, Manifest, ModelConfig, media_type};
 use crate::reference::{ModelName, Origin};
 
 /// One layer of a listed model, with where its blob is.
@@ -112,6 +112,37 @@ impl ModelEntry {
     /// Path of the model weights blob.
     pub fn model_path(&self) -> Option<&Path> {
         self.model_layer().map(|l| l.path.as_path())
+    }
+
+    /// Whether the model is a safetensors snapshot (layers of
+    /// [`media_type::SAFETENSORS_FILE`]).
+    pub fn is_snapshot(&self) -> bool {
+        self.layers
+            .iter()
+            .any(|l| l.descriptor.media_type == media_type::SAFETENSORS_FILE)
+    }
+
+    /// The directory view an engine loads for a safetensors snapshot
+    /// (`<store>/snapshots/<manifest digest>`); `None` for other models. The directory is
+    /// built by [`crate::AlkahestStore::materialise_snapshot`], which pull does; the path is
+    /// derived from the blob locations so no store handle is needed.
+    pub fn snapshot_dir(&self) -> Option<PathBuf> {
+        if !self.is_snapshot() {
+            return None;
+        }
+        let blob = &self.layers.first()?.path;
+        let root = blob.parent()?.parent()?;
+        Some(
+            root.join(crate::snapshot::SNAPSHOTS)
+                .join(self.manifest_digest.hex()),
+        )
+    }
+
+    /// What an engine loads: the weights blob (GGUF) or the snapshot directory (safetensors).
+    pub fn weights_path(&self) -> Option<PathBuf> {
+        self.model_path()
+            .map(Path::to_path_buf)
+            .or_else(|| self.snapshot_dir())
     }
 
     /// Path of the multimodal projector blob, when the model has one.

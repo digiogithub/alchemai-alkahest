@@ -11,7 +11,7 @@ use alkahest_core::Config;
 use alkahest_core::config::ResolvedPaths;
 use alkahest_core::paths::process_env;
 use alkahest_fetch::FetchConfig;
-use alkahest_hf::pull::{HfPullError, pull_hf};
+use alkahest_hf::pull::{HfPullError, PullFormat, pull_hf_with};
 use alkahest_hf::{HfClient, KeyringStore};
 use alkahest_ollama::{
     PullError as OllamaPullError, PullOptions as OllamaPullOptions, PullOutcome, RegistryClient,
@@ -28,6 +28,8 @@ pub struct PullOptions {
     pub insecure: bool,
     /// Download into the Alkahest store even when the Ollama store already has the model.
     pub force: bool,
+    /// Pull a safetensors snapshot for vLLM instead of GGUF (`pull --safetensors`).
+    pub safetensors: bool,
 }
 
 /// How a pull ended.
@@ -163,14 +165,19 @@ impl PullService {
                     transfer = transfer.with_progress(p);
                 }
                 let overlays = ModelOverlays::in_data_dir(&self.paths.data_dir);
-                let outcome = pull_hf(&transfer, &client, &hf, Some(&overlays))
+                let format = if opts.safetensors {
+                    PullFormat::Safetensors
+                } else {
+                    PullFormat::Auto
+                };
+                let outcome = pull_hf_with(&transfer, &client, &hf, Some(&overlays), format)
                     .await
                     .map_err(|e| {
                         let msg = format!("pulling {hf}: {e}");
                         match e {
-                            HfPullError::NotFound { .. } | HfPullError::NoGguf(_) => {
-                                PullError::NotFound(msg)
-                            }
+                            HfPullError::NotFound { .. }
+                            | HfPullError::NoGguf(_)
+                            | HfPullError::NoSafetensors(_) => PullError::NotFound(msg),
                             HfPullError::Name(_) => PullError::InvalidReference(msg),
                             _ => PullError::Failed(msg),
                         }

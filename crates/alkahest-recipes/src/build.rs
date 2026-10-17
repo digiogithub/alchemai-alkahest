@@ -10,7 +10,7 @@ use std::process::Stdio;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{RecipeError, Result};
-use crate::recipe::SourceBuild;
+use crate::recipe::{SourceBuild, VenvBuild};
 
 /// The programs a source build runs; overridable so tests (and unusual systems) can point at
 /// other executables.
@@ -20,6 +20,10 @@ pub struct BuildTools {
     pub git: PathBuf,
     /// The `cmake` program.
     pub cmake: PathBuf,
+    /// The `uv` program, preferred for Python environments.
+    pub uv: PathBuf,
+    /// The Python interpreter used when `uv` is absent.
+    pub python: PathBuf,
 }
 
 impl Default for BuildTools {
@@ -27,6 +31,8 @@ impl Default for BuildTools {
         Self {
             git: "git".into(),
             cmake: "cmake".into(),
+            uv: "uv".into(),
+            python: "python3".into(),
         }
     }
 }
@@ -176,6 +182,90 @@ pub(crate) async fn build_from_source(
     fs::remove_dir_all(&checkout).map_err(|e| RecipeError::io(&checkout, e))?;
     Ok(())
 }
+
+/// Creates the virtual environment of `venv` at `dir` (which must not exist yet) and installs
+/// its packages. Output of every step is appended to `log`. The caller removes `dir` on error.
+pub(crate) async fn build_venv(
+    venv: &VenvBuild,
+    tools: &BuildTools,
+    dir: &Path,
+    log: &Path,
+    cancel: &CancellationToken,
+) -> Result<()> {
+    if let Some(parent) = log.parent() {
+        fs::create_dir_all(parent).map_err(|e| RecipeError::io(parent, e))?;
+    }
+    let cwd = dir
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    fs::create_dir_all(&cwd).map_err(|e| RecipeError::io(&cwd, e))?;
+    let dir_arg = dir.display().to_string();
+    let mut index_args: Vec<String> = Vec::new();
+    if let Some(u) = &venv.index_url {
+        index_args.extend(["--index-url".to_string(), u.clone()]);
+    }
+    for u in &venv.extra_index_urls {
+        index_args.extend(["--extra-index-url".to_string(), u.clone()]);
+    }
+    let step = |name: &'static str, program: PathBuf, args: Vec<String>| Step {
+        name,
+        program,
+        args,
+        cwd: cwd.clone(),
+    };
+
+    if tool_exists(&tools.uv) {
+        let mut create = vec!["venv".to_string()];
+        if let Some(py) = &venv.python {
+            create.extend(["--python".to_string(), py.clone()]);
+        }
+        create.push(dir_arg.clone());
+        run(&step("uv venv", tools.uv.clone(), create), log, cancel).await?;
+        let mut install = vec![
+            "pip".to_string(),
+            "install".to_string(),
+            "--python".to_string(),
+            dir.join(VENV_BIN).join("python").display().to_string(),
+        ];
+        install.extend(index_args);
+        install.extend(venv.packages.iter().cloned());
+        run(
+            &step("uv pip install", tools.uv.clone(), install),
+            log,
+            cancel,
+        )
+        .await
+    } else if tool_exists(&tools.python) {
+        run(
+            &step(
+                "python -m venv",
+                tools.python.clone(),
+                vec!["-m".into(), "venv".into(), dir_arg],
+            ),
+            log,
+            cancel,
+        )
+        .await?;
+        let mut install = vec!["install".to_string()];
+        install.extend(index_args);
+        install.extend(venv.packages.iter().cloned());
+        run(
+            &step("pip install", dir.join(VENV_BIN).join("pip"), install),
+            log,
+            cancel,
+        )
+        .await
+    } else {
+        Err(RecipeError::BuildToolMissing("uv (or python3)".into()))
+    }
+}
+
+/// Directory of a virtual environment that holds its executables.
+#[cfg(windows)]
+const VENV_BIN: &str = "Scripts";
+/// Directory of a virtual environment that holds its executables.
+#[cfg(not(windows))]
+const VENV_BIN: &str = "bin";
 
 /// One subprocess of the build.
 struct Step {

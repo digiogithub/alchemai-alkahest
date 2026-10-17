@@ -61,6 +61,7 @@ fn test_recipe(url: &str, bytes: &[u8], format: ArchiveFormat, strip: usize) -> 
         notes: String::new(),
         library_dirs: vec![],
         source: None,
+        venv: None,
         description: String::new(),
         license: None,
         homepage: None,

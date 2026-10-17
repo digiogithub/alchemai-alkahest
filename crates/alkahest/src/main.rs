@@ -106,7 +106,15 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             model,
             insecure,
             force,
-        } => pull_cmd::run(model, *insecure, *force, &loaded, cli.global.json),
+            safetensors,
+        } => pull_cmd::run(
+            model,
+            *insecure,
+            *force,
+            *safetensors,
+            &loaded,
+            cli.global.json,
+        ),
         Command::Engines { action } => engines_cmd::run(action, &loaded, cli.global.json),
         Command::Serve {
             allow_unauthenticated,

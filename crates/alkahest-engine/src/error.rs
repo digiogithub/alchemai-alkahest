@@ -75,6 +75,14 @@ pub enum EngineError {
         /// Model name.
         model: String,
     },
+    /// The directory view of a safetensors model could not be built.
+    #[error("cannot prepare the snapshot directory of `{model}`: {reason}")]
+    SnapshotUnavailable {
+        /// Model name.
+        model: String,
+        /// Cause.
+        reason: String,
+    },
     /// A per-model engine setting could not be parsed (`llama-cpp@` with an empty version).
     #[error("invalid engine setting `{value}`: {reason}")]
     InvalidEngineSetting {

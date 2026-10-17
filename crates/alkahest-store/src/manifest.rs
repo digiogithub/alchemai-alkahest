@@ -47,6 +47,9 @@ pub mod media_type {
     pub const TENSOR: &str = "application/vnd.ollama.image.tensor";
     /// JSON side file of a safetensors model (config, tokenizer).
     pub const JSON: &str = "application/vnd.ollama.image.json";
+    /// Alkahest extension: one file of a Hugging Face safetensors snapshot; the descriptor
+    /// `name` is the path relative to the repository root.
+    pub const SAFETENSORS_FILE: &str = "application/vnd.alkahest.safetensors.file.v1";
     /// Alkahest extension: where the model came from ([`super::SourceInfo`]).
     pub const ALKAHEST_SOURCE: &str = "application/vnd.alkahest.source.v1+json";
     /// Alkahest extension: per-model configuration (engine, context, overrides). Its schema

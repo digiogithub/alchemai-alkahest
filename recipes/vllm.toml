@@ -1,0 +1,44 @@
+# Engine recipe: vLLM (ALK-SP-0003.R2; ALK-US-0054, ALK-T-0153).
+#
+# vLLM is a Python package, so it is installed into its own virtual environment below
+# `<engines dir>/vllm/<version>-<variant>/` with `uv` (preferred) or `python3 -m venv` + `pip`.
+# The version is pinned; moving the pin means editing this file and re-running the opt-in
+# real test (ALKAHEST_TEST_VLLM=<path to the installed `bin/vllm`>).
+#
+# The install downloads several GB (PyTorch and CUDA runtime wheels) and needs network access
+# to PyPI; Alkahest never does it implicitly unless `engines.auto_install` is set.
+#
+# Variants:
+#   cuda12.8   Linux x86_64 and aarch64 with an NVIDIA driver for CUDA 12.8+. The `vllm`
+#              wheel on PyPI is built against CUDA 12.8 and pulls its own CUDA runtime.
+#   metal      macOS on Apple Silicon (M1-M4). EXPERIMENTAL: vLLM publishes no macOS wheels, so
+#              `pip` builds the CPU backend from the source distribution (needs Xcode command
+#              line tools and several minutes). The Metal GPU path is the subject of the spike
+#              ALK-T-0212; until it concludes this variant runs on the CPU cores.
+
+id = "vllm"
+version = "0.11.0"
+description = "vLLM (OpenAI-compatible server for safetensors models)"
+license = "Apache-2.0"
+homepage = "https://github.com/vllm-project/vllm"
+# The console script `pip` creates inside the environment.
+executable = "bin/vllm"
+
+[variants."cuda12.8"]
+accelerator = "cuda"
+cuda = "12.8"
+notes = "Linux with an NVIDIA GPU. Needs uv or python3 (3.10-3.13) and about 10 GB of disk."
+[variants."cuda12.8".venv]
+python = "3.12"
+packages = ["vllm==0.11.0"]
+os = ["linux"]
+arch = ["x86_64", "aarch64"]
+
+[variants."metal"]
+accelerator = "metal"
+notes = "EXPERIMENTAL. macOS on Apple Silicon: built from the source distribution (CPU backend); see ALK-T-0212."
+[variants."metal".venv]
+python = "3.12"
+packages = ["vllm==0.11.0"]
+os = ["macos"]
+arch = ["aarch64"]
