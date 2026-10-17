@@ -2,15 +2,16 @@
 id: ALK-US-0060
 type: story
 title: "Spike: video generation models"
-status: in_progress
+status: done
 priority: low
 parent: ALK-EP-0011
 milestone: ALK-M-0004
 labels: [spike, video]
 estimate: 2
 created: 2026-10-16T22:42:26Z
-updated: 2026-10-17T03:43:56Z
+updated: 2026-10-17T04:21:36Z
 started: 2026-10-17T03:43:56Z
+closed: 2026-10-17T04:21:36Z
 ---
 
 ## Description

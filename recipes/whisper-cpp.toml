@@ -1,0 +1,70 @@
+# Engine recipe: whisper.cpp `whisper-server` (ALK-SP-0003.R2/R4; ALK-SP-0005.R4; ALK-US-0057).
+#
+# Pinned to the upstream release tag v1.9.5 (commit d1be6fde11ac6e0407606b4e42fe72d34add8037 of
+# github.com/ggml-org/whisper.cpp). Upstream publishes no prebuilt Linux or macOS binaries for
+# this release, so every variant is a source build (`engines install whisper-cpp`
+# builds it; needs git, cmake and ninja, and a C++ toolchain). The CPU build is small
+# (about 3 MB of libraries plus the server) and takes about a minute.
+#
+# `whisper-server --help` of this build is the reference for the adapter: `-m`, `--host`,
+# `--port`, `-t`, `-l`, `--prompt`, `--convert` (ffmpeg transcoding) and `/inference`, `/health`.
+#
+# Variants:
+#   cpu       runtime-selected SIMD backends (GGML_CPU_ALL_VARIANTS + GGML_BACKEND_DL); runs
+#             everywhere a C++17 toolchain exists.
+#   cuda12.4  needs a CUDA toolkit 12.4+ at build time (nvcc on PATH) and a driver for CUDA
+#             12.4+ plus the CUDA runtime libraries (libcudart, libcublas) at run time.
+#   vulkan    needs the Vulkan SDK (headers and glslc) at build time and a Vulkan 1.x driver.
+#   metal     macOS Apple Silicon: Metal is compiled in.
+
+id = "whisper-cpp"
+version = "v1.9.5"
+description = "whisper.cpp (speech-to-text server)"
+license = "MIT"
+homepage = "https://github.com/ggml-org/whisper.cpp"
+executable = "whisper-server"
+
+
+[variants."cpu"]
+accelerator = "cpu"
+notes = "Source build only: upstream publishes no prebuilt binaries for this release."
+[variants."cpu".source]
+git = "https://github.com/ggml-org/whisper.cpp.git"
+rev = "v1.9.5"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_SDL2=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_NATIVE=OFF", "-DGGML_CPU_ALL_VARIANTS=ON", "-DGGML_BACKEND_DL=ON"]
+targets = ["whisper-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."cuda12.4"]
+accelerator = "cuda"
+cuda = "12.4"
+notes = "Source build with the CUDA toolkit (nvcc) on PATH; needs the CUDA runtime libraries on the host."
+[variants."cuda12.4".source]
+git = "https://github.com/ggml-org/whisper.cpp.git"
+rev = "v1.9.5"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_SDL2=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON"]
+targets = ["whisper-server"]
+tools = ["git", "cmake", "ninja", "nvcc"]
+
+
+[variants."vulkan"]
+accelerator = "vulkan"
+notes = "Source build; needs the Vulkan SDK (headers and glslc)."
+[variants."vulkan".source]
+git = "https://github.com/ggml-org/whisper.cpp.git"
+rev = "v1.9.5"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_SDL2=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_VULKAN=ON"]
+targets = ["whisper-server"]
+tools = ["git", "cmake", "ninja", "glslc"]
+
+
+[variants."metal"]
+accelerator = "metal"
+notes = "Source build on macOS Apple Silicon; Metal is compiled in."
+[variants."metal".source]
+git = "https://github.com/ggml-org/whisper.cpp.git"
+rev = "v1.9.5"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_SDL2=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=@loader_path", "-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON"]
+targets = ["whisper-server"]
+tools = ["git", "cmake", "ninja"]

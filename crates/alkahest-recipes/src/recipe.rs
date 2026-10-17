@@ -145,6 +145,10 @@ pub struct SourceBuild {
     pub git: String,
     /// Commit, tag or branch to build; a commit id or tag keeps the build reproducible.
     pub rev: String,
+    /// Fetch the repository's submodules at their pinned commits (stable-diffusion.cpp vendors
+    /// ggml that way).
+    #[serde(default)]
+    pub submodules: bool,
     /// Arguments passed to the CMake configure step (`-DGGML_CUDA=ON`).
     #[serde(default)]
     pub cmake_flags: Vec<String>,
@@ -454,15 +458,26 @@ pub(crate) fn parse_cuda_version(s: &str) -> Option<(u32, u32)> {
     Some((maj.parse().ok()?, min.parse().ok()?))
 }
 
-/// Numeric part of a version tag: the first run of digits (`b11669` is 11669,
-/// `prism-b10777-e3de715` is 10777); tags without digits sort first.
+/// Numeric part of a version tag. Dotted versions (`v1.9.5`, `0.11.0`) pack their first three
+/// components as `major * 1_000_000 + minor * 1_000 + patch`, so `v1.10.0` sorts after
+/// `v1.9.5`; other tags use the first run of digits (`b11669` is 11669,
+/// `prism-b10777-e3de715` is 10777). Tags without digits sort first.
 pub(crate) fn tag_number(tag: &str) -> u64 {
-    let digits: String = tag
-        .chars()
-        .skip_while(|c| !c.is_ascii_digit())
-        .take_while(char::is_ascii_digit)
-        .collect();
-    digits.parse().unwrap_or(0)
+    let rest = tag.trim_start_matches(|c: char| !c.is_ascii_digit());
+    let mut parts = rest.split('.');
+    let num = |p: Option<&str>| -> Option<u64> {
+        let digits: String = p?.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse().ok()
+    };
+    let major = num(parts.next());
+    if rest.contains('.')
+        && let Some(major) = major
+    {
+        let minor = num(parts.next()).unwrap_or(0).min(999);
+        let patch = num(parts.next()).unwrap_or(0).min(999);
+        return major * 1_000_000 + minor * 1_000 + patch;
+    }
+    major.unwrap_or(0)
 }
 
 impl Recipe {
@@ -471,6 +486,13 @@ impl Recipe {
         self.assets
             .iter()
             .find(|a| a.os == host.os && a.arch == host.arch)
+    }
+
+    /// Whether installing on `host` has to build from source: no prebuilt archive exists but
+    /// the recipe has build steps (whisper.cpp publishes no Linux binaries). Python
+    /// environments are not source builds.
+    pub fn needs_source_build(&self, host: &Host) -> bool {
+        self.asset_for(host).is_none() && self.source.is_some() && self.venv.is_none()
     }
 
     /// Whether this variant can be installed on `host`: a prebuilt asset exists, or it can be
@@ -537,4 +559,19 @@ pub(crate) fn select_for<'a>(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tag_number_tests {
+    use super::tag_number;
+
+    #[test]
+    fn tags_sort_numerically() {
+        assert_eq!(tag_number("b11669"), 11669);
+        assert_eq!(tag_number("prism-b10777-e3de715"), 10777);
+        assert!(tag_number("v1.10.0") > tag_number("v1.9.5"));
+        assert!(tag_number("0.11.0") > tag_number("0.9.2"));
+        assert_eq!(tag_number("v1.9.5"), 1_009_005);
+        assert_eq!(tag_number("nightly"), 0);
+    }
 }

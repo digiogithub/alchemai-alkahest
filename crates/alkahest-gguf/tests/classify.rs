@@ -482,3 +482,67 @@ fn other_tags_and_empty_decision_type_stay_chat() {
     });
     assert_eq!(c.kind, ModelKind::Chat);
 }
+
+#[test]
+fn whisper_ggml_files_are_speech_to_text_in_ggml() {
+    let c = classify(&ClassifyInput {
+        file_name: Some("ggml-tiny.en.bin"),
+        hf_pipeline_tag: Some("automatic-speech-recognition"),
+        ..ClassifyInput::default()
+    });
+    assert_eq!(c.kind, ModelKind::SpeechToText);
+    assert_eq!(c.format, ModelFormat::Ggml);
+
+    // The capability Alkahest writes into the manifest of a pulled whisper model.
+    let caps = caps(&["transcription"]);
+    let c = classify(&ClassifyInput {
+        ollama_capabilities: &caps,
+        ..ClassifyInput::default()
+    });
+    assert_eq!(
+        (c.kind, c.format),
+        (ModelKind::SpeechToText, ModelFormat::Ggml)
+    );
+    assert_eq!(ModelFormat::Ggml.label(), "GGML");
+}
+
+#[test]
+fn metadata_less_stable_diffusion_checkpoints_are_images() {
+    use alkahest_gguf::{GgmlType, TensorInfo};
+    let tensor = |name: &str| TensorInfo {
+        name: name.to_owned(),
+        shape: vec![4],
+        ggml_type: GgmlType::F16,
+        offset: 0,
+    };
+    // sd.cpp's own conversions have no key-value pairs, only the checkpoint's tensor names.
+    let mut sd = gguf("x", &[]);
+    sd.metadata.clear();
+    sd.tensors = vec![
+        tensor("cond_stage_model.transformer.text_model.final_layer_norm.bias"),
+        tensor("model.diffusion_model.input_blocks.0.0.weight"),
+    ];
+    let c = classify(&ClassifyInput {
+        gguf: Some(&sd),
+        ..ClassifyInput::default()
+    });
+    assert_eq!((c.kind, c.format), (ModelKind::Image, ModelFormat::Gguf));
+
+    // A metadata-less GGUF with other tensors stays on the default path.
+    let mut other = gguf("x", &[]);
+    other.metadata.clear();
+    other.tensors = vec![tensor("blk.0.attn_q.weight")];
+    let c = classify(&ClassifyInput {
+        gguf: Some(&other),
+        ..ClassifyInput::default()
+    });
+    assert_eq!(c.kind, ModelKind::Chat);
+
+    // The Hub tags of an sd.cpp repository do the same before the file is read.
+    let caps = caps(&["image-generation"]);
+    let c = classify(&ClassifyInput {
+        ollama_capabilities: &caps,
+        ..ClassifyInput::default()
+    });
+    assert_eq!(c.kind, ModelKind::Image);
+}

@@ -170,7 +170,7 @@ fn store_name(hf: &HfRef, variant: &GgufVariant) -> Result<ModelName, HfPullErro
 }
 
 /// Parses a Hub SHA-256 (`LfsInfo::sha256`) into a store digest.
-fn digest_of(file: &RepoFile) -> Result<Digest, HfPullError> {
+pub(crate) fn digest_of(file: &RepoFile) -> Result<Digest, HfPullError> {
     let hex = file
         .sha256
         .as_deref()
@@ -219,6 +219,15 @@ pub async fn pull_hf_with(
     let repo = hf.repo_id();
     let info = client.model_info(&repo, None).await?;
     let files: Vec<RepoFile> = info.siblings.iter().map(RepoFile::from).collect();
+    // whisper.cpp repositories hold `ggml-*.bin` files and no GGUF.
+    if format == PullFormat::Auto
+        && gguf_variants(&files).is_empty()
+        && !crate::ggml::ggml_variants(&files).is_empty()
+        && !matches!(hf.selector(),
+            Some(HfSelector::Quant(q)) if q.eq_ignore_ascii_case(crate::safetensors::TAG))
+    {
+        return crate::ggml::pull_ggml(transfer, client, hf, overlays, info).await;
+    }
     let snapshot = match format {
         PullFormat::Safetensors => true,
         PullFormat::Gguf => false,
@@ -236,6 +245,19 @@ pub async fn pull_hf_with(
     } else {
         pull_gguf(transfer, client, hf, overlays, info).await
     }
+}
+
+/// Whether the Hub marks the repository as an image generation model: the `text-to-image`
+/// pipeline, or the tags stable-diffusion.cpp conversions carry. Their GGUF files have no
+/// metadata, so this is how the manifest learns what the model does.
+fn is_image_repo(info: &crate::ModelInfo) -> bool {
+    matches!(
+        info.pipeline_tag.as_deref(),
+        Some("text-to-image" | "image-to-image")
+    ) || info
+        .tags
+        .iter()
+        .any(|t| matches!(t.as_str(), "stable-diffusion.cpp" | "sd.cpp"))
 }
 
 /// The GGUF half of [`pull_hf_with`].
@@ -327,7 +349,14 @@ async fn pull_gguf(
     let mut config = ModelConfig {
         model_format: "gguf".into(),
         file_type: sel.variant.quant.clone().unwrap_or_default(),
-        capabilities: vec!["completion".into()],
+        capabilities: vec![
+            if is_image_repo(&info) {
+                "image-generation"
+            } else {
+                "completion"
+            }
+            .into(),
+        ],
         ..ModelConfig::default()
     };
     if let Some(g) = &info.gguf {

@@ -1,0 +1,161 @@
+# Engine recipe: stable-diffusion.cpp `sd-server` (ALK-SP-0003.R2/R4; ALK-SP-0005.R4; ALK-US-0059).
+#
+# Pinned to the upstream release master-970-2f016e8 (commit 2f016e8 of github.com/leejet/stable-diffusion.cpp).
+# Every sha256 is the digest GitHub reports for the release asset (`digest` field of the releases
+# API). The archives are flat (no wrapper directory) and hold `sd-server`, `sd-cli` and their
+# shared libraries; on Linux and macOS the binaries carry RUNPATH $ORIGIN / @loader_path, so no
+# `library_dirs` is needed. `sd-server --help` of this build is the reference for the adapter:
+# `-m`, `-l/--listen-ip`, `--listen-port`, `-t`, `--backend`, `-s`, and the OpenAI-compatible
+# `POST /v1/images/generations`.
+#
+# Variants:
+#   cpu       Linux x64 (built on Ubuntu 24.04: needs glibc 2.39+), macOS arm64 (Metal is compiled in
+#             and used automatically), Windows x64. Runtime-selected SIMD backends.
+#   metal     macOS Apple Silicon: the same archive as `cpu`.
+#   vulkan    Linux x64 and Windows x64, any Vulkan 1.x GPU through the system loader.
+#   rocm      AMD ROCm/HIP 10.1 (Linux x64, Windows x64); needs the ROCm runtime on the host.
+#   cuda12.4  Windows x64 prebuilt (needs the CUDA 12 runtime DLLs: the separate
+#             `cudart-sd-bin-win-cu12-x64.zip` of the release, 563 MB, or a CUDA toolkit on PATH),
+#             and a Linux source build (needs nvcc 12.4+ on PATH; the release has no Linux CUDA
+#             binary).
+#
+# Every variant also carries `source` build steps (`engines install --from-source`); the
+# repository vendors ggml, libwebp and libwebm as submodules.
+
+id = "stable-diffusion-cpp"
+version = "master-970-2f016e8"
+description = "stable-diffusion.cpp (image generation server)"
+license = "MIT"
+homepage = "https://github.com/leejet/stable-diffusion.cpp"
+executable = "sd-server"
+
+
+[variants."cpu"]
+accelerator = "cpu"
+[[variants."cpu".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-970-2f016e8/sd-master-2f016e8-bin-Linux-Ubuntu-24.04-x86_64.zip"
+sha256 = "3afeca2b63a62c11f0b18dd66806ae6ca91f854d037415a0381eaea3b46078d0"
+size = 26189733
+format = "zip"
+strip_components = 0
+[[variants."cpu".assets]]
+os = "macos"
+arch = "aarch64"
+url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-970-2f016e8/sd-master-2f016e8-bin-Darwin-macOS-26.6.2-arm64.zip"
+sha256 = "88b9de9ed7a156685ac3b8b77cf963d8f1030028685a3ff3d075c6e7d40a27c9"
+size = 35254394
+format = "zip"
+strip_components = 0
+[[variants."cpu".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-970-2f016e8/sd-master-2f016e8-bin-win-cpu-x64.zip"
+sha256 = "d04797cc9a375f8f1b43a1ab500c50b3bf6528a383d93189822e68ce0e6585b3"
+size = 17583859
+format = "zip"
+strip_components = 0
+[variants."cpu".source]
+git = "https://github.com/leejet/stable-diffusion.cpp.git"
+rev = "master-970-2f016e8"
+submodules = true
+cmake_flags = ["-DSD_BUILD_SHARED_LIBS=ON", "-DSD_BUILD_SHARED_GGML_LIB=ON", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_NATIVE=OFF", "-DGGML_CPU_ALL_VARIANTS=ON", "-DGGML_BACKEND_DL=ON"]
+targets = ["sd-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."cuda12.4"]
+accelerator = "cuda"
+cuda = "12.4"
+notes = "Windows: prebuilt, needs cudart-sd-bin-win-cu12-x64.zip or a CUDA toolkit on PATH. Linux: built from source with nvcc."
+[[variants."cuda12.4".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-970-2f016e8/sd-master-2f016e8-bin-win-cuda12-x64.zip"
+sha256 = "0d181034a61ba75a7e89b1962e764393c1c636cdce164a8ed3a209749f4d6dac"
+size = 338054307
+format = "zip"
+strip_components = 0
+[variants."cuda12.4".source]
+git = "https://github.com/leejet/stable-diffusion.cpp.git"
+rev = "master-970-2f016e8"
+submodules = true
+cmake_flags = ["-DSD_BUILD_SHARED_LIBS=ON", "-DSD_BUILD_SHARED_GGML_LIB=ON", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DSD_CUDA=ON"]
+targets = ["sd-server"]
+tools = ["git", "cmake", "ninja", "nvcc"]
+
+
+[variants."vulkan"]
+accelerator = "vulkan"
+[[variants."vulkan".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-970-2f016e8/sd-master-2f016e8-bin-Linux-Ubuntu-24.04-x86_64-vulkan.zip"
+sha256 = "703528d1dd40348945cf8c90b28c28571a92c565a92ea007f61e68329cd3371f"
+size = 37054860
+format = "zip"
+strip_components = 0
+[[variants."vulkan".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-970-2f016e8/sd-master-2f016e8-bin-win-vulkan-x64.zip"
+sha256 = "c9ce9278c43fae4dd8e07baab7bab02aa7ef8893ed6f4d9f4494a2c709becc86"
+size = 30164424
+format = "zip"
+strip_components = 0
+[variants."vulkan".source]
+git = "https://github.com/leejet/stable-diffusion.cpp.git"
+rev = "master-970-2f016e8"
+submodules = true
+cmake_flags = ["-DSD_BUILD_SHARED_LIBS=ON", "-DSD_BUILD_SHARED_GGML_LIB=ON", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DSD_VULKAN=ON"]
+targets = ["sd-server"]
+tools = ["git", "cmake", "ninja", "glslc"]
+
+
+[variants."rocm"]
+accelerator = "rocm"
+notes = "ROCm/HIP 10.1 build; needs the ROCm runtime on the host."
+[[variants."rocm".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-970-2f016e8/sd-master-2f016e8-bin-Linux-Ubuntu-24.04-x86_64-rocm-10.1.0.zip"
+sha256 = "0233961384de7923be88e3821cced5b7fe0d41919828c54d4555bed6753a14a9"
+size = 285046529
+format = "zip"
+strip_components = 0
+[[variants."rocm".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-970-2f016e8/sd-master-2f016e8-bin-win-rocm-10.1.0-x64.zip"
+sha256 = "debde0fbf4f8477677de51498c4eeb7371e85a9fb284bb631ea1b72aa619decc"
+size = 259051110
+format = "zip"
+strip_components = 0
+[variants."rocm".source]
+git = "https://github.com/leejet/stable-diffusion.cpp.git"
+rev = "master-970-2f016e8"
+submodules = true
+cmake_flags = ["-DSD_BUILD_SHARED_LIBS=ON", "-DSD_BUILD_SHARED_GGML_LIB=ON", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DSD_HIPBLAS=ON"]
+targets = ["sd-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."metal"]
+accelerator = "metal"
+notes = "The macOS arm64 archive has Metal built in; same archive as the cpu variant on Apple Silicon."
+[[variants."metal".assets]]
+os = "macos"
+arch = "aarch64"
+url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-970-2f016e8/sd-master-2f016e8-bin-Darwin-macOS-26.6.2-arm64.zip"
+sha256 = "88b9de9ed7a156685ac3b8b77cf963d8f1030028685a3ff3d075c6e7d40a27c9"
+size = 35254394
+format = "zip"
+strip_components = 0
+[variants."metal".source]
+git = "https://github.com/leejet/stable-diffusion.cpp.git"
+rev = "master-970-2f016e8"
+submodules = true
+cmake_flags = ["-DSD_BUILD_SHARED_LIBS=ON", "-DSD_BUILD_SHARED_GGML_LIB=ON", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=@loader_path", "-DSD_METAL=ON"]
+targets = ["sd-server"]
+tools = ["git", "cmake", "ninja"]

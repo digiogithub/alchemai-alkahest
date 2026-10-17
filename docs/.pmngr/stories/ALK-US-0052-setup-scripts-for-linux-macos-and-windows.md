@@ -2,14 +2,15 @@
 id: ALK-US-0052
 type: story
 title: Setup scripts for Linux, macOS and Windows
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0010
 milestone: ALK-M-0004
 labels: [recipes, scripts]
 estimate: 5
 created: 2026-10-16T22:41:58Z
-updated: 2026-10-16T22:41:58Z
+updated: 2026-10-17T04:21:42Z
+started: 2026-10-17T04:21:42Z
 ---
 
 ## Description

@@ -2,14 +2,14 @@
 id: ALK-US-0058
 type: story
 title: Text-to-speech
-status: in_progress
+status: in_review
 priority: low
 parent: ALK-EP-0011
 milestone: ALK-M-0004
 labels: [engine, audio]
 estimate: 3
 created: 2026-10-16T22:42:19Z
-updated: 2026-10-17T03:43:56Z
+updated: 2026-10-17T04:21:36Z
 started: 2026-10-17T03:43:56Z
 links:
   - { kind: implements, target: ALK-SP-0005.R4 }
