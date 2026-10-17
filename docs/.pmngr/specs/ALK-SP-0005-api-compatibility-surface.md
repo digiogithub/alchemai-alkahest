@@ -5,7 +5,7 @@ title: API compatibility surface
 status: backlog
 labels: [api]
 created: 2026-10-16T22:37:35Z
-updated: 2026-10-17T03:48:27Z
+updated: 2026-10-17T04:18:56Z
 requirements:
   R1:
     status: backlog
@@ -85,12 +85,27 @@ requirements:
         - crates/alkahest-api/src/rerank.rs#shape_results
         - crates/alkahest-api/src/pooled.rs#fit_inputs
         - crates/alkahest-engine/src/llama_cpp.rs#EMBED_BATCH_DEFAULT
+        - crates/alkahest-api/src/audio/transcribe.rs#routes
+        - crates/alkahest-api/src/audio/transcribe.rs#shape_verbose
+        - crates/alkahest-api/src/audio/speech.rs#routes
+        - crates/alkahest-api/src/imagegen/generations.rs#routes
+        - crates/alkahest-api/src/imagegen/generations.rs#parse_request
+        - crates/alkahest-engine/src/whisper_cpp.rs#WhisperCppEngine
+        - crates/alkahest-engine/src/sd_cpp.rs#StableDiffusionCppEngine
+        - crates/alkahest-hf/src/ggml.rs#pull_ggml
       tests:
         - crates/alkahest-api/tests/rerank.rs#rerank_returns_jina_shape_sorted
         - crates/alkahest-api/tests/rerank.rs#rerank_options_and_errors
         - crates/alkahest-api/tests/rerank.rs#ollama_embed_truncates_long_inputs_unless_told_not_to
         - crates/alkahest-engine/tests/llama_cpp.rs#embedding_and_rerank_kinds
         - crates/alkahest-gguf/tests/classify.rs#pooling_less_rerankers_are_rerank
+        - crates/alkahest-api/tests/audio.rs#transcription_returns_openai_json
+        - crates/alkahest-api/tests/audio.rs#speech_is_a_clear_501_until_an_engine_exists
+        - crates/alkahest/tests/serve_audio.rs#real_whisper_transcribes_the_jfk_sample
+        - crates/alkahest-api/tests/imagegen.rs#generation_returns_openai_shape
+        - crates/alkahest/tests/serve_images.rs#real_sd_turbo_generates_a_picture
+        - crates/alkahest-engine/tests/whisper_cpp.rs#command_line_with_and_without_ffmpeg
+        - crates/alkahest-engine/tests/sd_cpp.rs#command_line_in_order_with_extra_args_last
   R5:
     status: backlog
     trace:
