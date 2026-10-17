@@ -473,7 +473,7 @@ fn ensure_engine(
     cross: bool,
 ) -> Result<()> {
     let dest = bundle_dir.join("engines").join(ENGINE_ID);
-    if dest.is_dir() && !refresh {
+    if engine_staged(&dest) && !refresh {
         println!("bundled engine: reusing {}", dest.display());
         return Ok(());
     }
@@ -516,6 +516,22 @@ fn ensure_engine(
     fs::remove_dir_all(&home)?;
     println!("bundled engine: staged {}", dest.display());
     Ok(())
+}
+
+/// Whether `dest` holds a staged engine, not merely its directory. A CI cache that prunes
+/// files under `target/` (Swatinem/rust-cache) restores the tree as empty directories, and
+/// reusing that skeleton ships an app without its engine.
+fn engine_staged(dest: &Path) -> bool {
+    WalkDir::new(dest)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .any(|e| {
+            e.file_type().is_file()
+                && matches!(
+                    e.file_name().to_str(),
+                    Some("llama-server" | "llama-server.exe")
+                )
+        })
 }
 
 /// Recursively copies a directory, keeping file modes and (on Unix) symlinks.
@@ -844,6 +860,26 @@ mod tests {
             let full = format!("{name}/{want}");
             assert!(names.contains(&full), "missing {full} in {names:?}");
         }
+    }
+
+    #[test]
+    fn an_empty_engine_skeleton_is_not_staged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("bundle/engines/llama-cpp");
+        fs::create_dir_all(dest.join("b1-cpu")).unwrap();
+        assert!(!engine_staged(&dest));
+        // A cross build therefore refuses the skeleton instead of bundling it.
+        let err = ensure_engine(
+            tmp.path(),
+            Path::new("x"),
+            &tmp.path().join("bundle"),
+            false,
+            true,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("stage it"), "{err}");
+        let bundle = fake_bundle(tmp.path());
+        assert!(engine_staged(&bundle.join("engines/llama-cpp")));
     }
 
     #[test]
