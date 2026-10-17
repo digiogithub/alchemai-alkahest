@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# SDK conformance suite (ALK-US-0038): the official `ollama` and `openai` Python clients
+# SDK conformance suite (ALK-US-0038, ALK-US-0037): the official `ollama`, `openai` and
+# `anthropic` Python clients
 # against Alkahest. Creates a virtual environment under target/conformance/venv (never
 # committed) with the client packages, then:
 #   default            runs crates/alkahest-api/tests/conformance.rs (in-process server
@@ -7,7 +8,7 @@
 #   --url URL          runs the scripts against an already running server instead, with
 #                      the models named by --chat MODEL and --embed MODEL (a tiny real
 #                      model, e.g. `alkahest serve` with tiny-llamas)
-# Pins: ALKAHEST_CONFORMANCE_PACKAGES (default "ollama openai").
+# Pins: ALKAHEST_CONFORMANCE_PACKAGES (default "ollama openai anthropic").
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -29,11 +30,11 @@ if [[ ! -x "$venv/bin/python" ]]; then
   python3 -m venv "$venv"
 fi
 # shellcheck disable=SC2086
-"$venv/bin/pip" install --quiet --disable-pip-version-check ${ALKAHEST_CONFORMANCE_PACKAGES:-ollama openai}
-"$venv/bin/pip" list --disable-pip-version-check 2>/dev/null | grep -Ei '^(ollama|openai) '
+"$venv/bin/pip" install --quiet --disable-pip-version-check ${ALKAHEST_CONFORMANCE_PACKAGES:-ollama openai anthropic}
+"$venv/bin/pip" list --disable-pip-version-check 2>/dev/null | grep -Ei '^(ollama|openai|anthropic) '
 
 if [[ -n "$url" ]]; then
-  for script in ollama_sdk.py openai_sdk.py; do
+  for script in ollama_sdk.py openai_sdk.py anthropic_sdk.py; do
     echo "==> $script against $url"
     "$venv/bin/python" -I "crates/alkahest-api/tests/conformance/$script" "$url" "$chat" "$embed"
   done

@@ -7,7 +7,9 @@
 //! Startup builds the unified catalog, the engine registry, the platform description (from
 //! hardware detection), the catalog-backed scheduler and the pull service, registers them as
 //! [`AppState`] services and mounts the Ollama, OpenAI and admin routes. Engine teardown is a
-//! shutdown hook, so no engine process outlives the server.
+//! shutdown hook, so no engine process outlives the server; when the server is killed
+//! instead, Linux engines get SIGTERM from the kernel (parent-death signal) and every engine
+//! is in the runtime ledger (`<data_dir>/run/engines.json`) that the next start sweeps.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -21,7 +23,7 @@ use alkahest_api::{
     ApiRouter, ApiSettings, AppState, Exposure, ServeOptions, ServerInfo, check_exposure,
 };
 use alkahest_core::config::Loaded;
-use alkahest_engine::{EngineRegistry, Platform};
+use alkahest_engine::{EngineRegistry, Platform, ProcessLedger, SpawnOptions};
 use alkahest_sched::{CatalogBackend, Scheduler, SchedulerOptions};
 use alkahest_store::{Catalog, ModelSettings};
 use anyhow::{Context, Result};
@@ -32,6 +34,8 @@ const USAGE_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 /// Audit log rotation: size of one file and number of rotated files kept.
 const AUDIT_MAX_BYTES: u64 = 10 * 1024 * 1024;
 const AUDIT_KEEP: usize = 5;
+/// Time an orphaned engine gets to exit after SIGTERM before the startup sweep kills it.
+const ORPHAN_GRACE: Duration = Duration::from_secs(5);
 
 /// Runs `alkahest serve`.
 pub fn run(loaded: &Loaded, allow_unauthenticated: bool) -> Result<ExitCode> {
@@ -78,6 +82,24 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         .await
         .context("detecting the hardware")?;
     tracing::info!(?platform, "platform");
+    // Engines a killed predecessor left behind (ALK-US-0092): stop them before starting ours.
+    // Only processes recorded in the ledger by a server that is gone are touched.
+    let ledger = Arc::new(ProcessLedger::open(
+        paths.data_dir.join("run").join("engines.json"),
+    ));
+    let report = {
+        let ledger = ledger.clone();
+        tokio::task::spawn_blocking(move || ledger.sweep(ORPHAN_GRACE))
+            .await
+            .context("sweeping orphaned engines")?
+    };
+    for e in &report.stopped {
+        tracing::warn!(pid = e.pid, model = %e.model, "stopped an orphaned engine");
+        eprintln!(
+            "alkahest serve: stopped an orphaned engine (pid {}, model {})",
+            e.pid, e.model
+        );
+    }
     let registry = Arc::new(EngineRegistry::from_config(config, &paths));
     let backend = CatalogBackend::new(
         catalog.clone(),
@@ -85,7 +107,11 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         platform,
         ModelSettings::global_defaults(config),
     )
-    .with_log_dir(paths.log_dir.join("engines"));
+    .with_log_dir(paths.log_dir.join("engines"))
+    .with_spawn_options(SpawnOptions {
+        ledger: Some(ledger),
+        ..SpawnOptions::default()
+    });
     let scheduler = Scheduler::new(
         Arc::new(backend),
         SchedulerOptions::from_config(&config.scheduler),

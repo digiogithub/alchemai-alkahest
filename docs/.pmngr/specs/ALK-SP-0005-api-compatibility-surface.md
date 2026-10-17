@@ -5,7 +5,7 @@ title: API compatibility surface
 status: backlog
 labels: [api]
 created: 2026-10-16T22:37:35Z
-updated: 2026-10-17T02:26:31Z
+updated: 2026-10-17T03:13:14Z
 requirements:
   R1:
     status: backlog
@@ -42,6 +42,12 @@ requirements:
         - crates/alkahest-api/src/openai.rs#sse_response
         - crates/alkahest-api/src/openai.rs#embeddings
         - crates/alkahest-api/src/openai.rs#list_models
+        - crates/alkahest-api/src/responses/mod.rs#routes
+        - crates/alkahest-api/src/responses/request.rs#translate
+        - crates/alkahest-api/src/responses/stream.rs#Translator
+        - crates/alkahest-api/src/responses/store.rs#ResponseStore
+        - crates/alkahest-api/src/images.rs#normalize_messages
+        - crates/alkahest-api/src/images.rs#fetch_as_data_url
       tests:
         - crates/alkahest-api/tests/openai.rs#openai_sdk_streams_chunks_and_tool_calls
         - crates/alkahest-api/tests/openai.rs#include_usage_adds_the_usage_chunk
@@ -50,10 +56,41 @@ requirements:
         - crates/alkahest-api/tests/openai.rs#completions_stream_and_not
         - crates/alkahest-api/tests/openai.rs#embeddings_float_and_base64
         - crates/alkahest-api/tests/openai.rs#models_list_and_get
+        - crates/alkahest-api/tests/responses.rs#non_streaming_response
+        - crates/alkahest-api/tests/responses.rs#streaming_events
+        - crates/alkahest-api/tests/responses.rs#function_calls_and_previous_response
+        - crates/alkahest-api/tests/conformance.rs#openai_python_conformance
+        - crates/alkahest-api/tests/vision.rs#remote_images_are_fetched_into_data_urls_in_every_dialect
+        - crates/alkahest-api/tests/vision.rs#private_addresses_are_refused_by_default
+        - crates/alkahest-api/tests/vision.rs#models_without_vision_refuse_images_before_fetching
   R3:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/anthropic/mod.rs#routes
+        - crates/alkahest-api/src/anthropic/request.rs#translate
+        - crates/alkahest-api/src/anthropic/stream.rs#Translator
+        - crates/alkahest-api/src/anthropic/stream.rs#aggregate
+      tests:
+        - crates/alkahest-api/tests/anthropic.rs#anthropic_sdk_receives_a_message
+        - crates/alkahest-api/tests/anthropic.rs#streaming_event_sequence
+        - crates/alkahest-api/tests/anthropic.rs#tools_round_trip
+        - crates/alkahest-api/tests/anthropic.rs#images_and_sampling_reach_the_engine
+        - crates/alkahest-api/tests/conformance.rs#anthropic_python_conformance
   R4:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/rerank.rs#routes
+        - crates/alkahest-api/src/rerank.rs#shape_results
+        - crates/alkahest-api/src/pooled.rs#fit_inputs
+        - crates/alkahest-engine/src/llama_cpp.rs#EMBED_BATCH_DEFAULT
+      tests:
+        - crates/alkahest-api/tests/rerank.rs#rerank_returns_jina_shape_sorted
+        - crates/alkahest-api/tests/rerank.rs#rerank_options_and_errors
+        - crates/alkahest-api/tests/rerank.rs#ollama_embed_truncates_long_inputs_unless_told_not_to
+        - crates/alkahest-engine/tests/llama_cpp.rs#embedding_and_rerank_kinds
+        - crates/alkahest-gguf/tests/classify.rs#pooling_less_rerankers_are_rerank
   R5:
     status: backlog
     trace:

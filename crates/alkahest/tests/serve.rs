@@ -6,6 +6,22 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 /// A free loopback port: bind port 0, read it, release it.
+/// Stops a server with SIGTERM so its graceful shutdown stops the engine processes (a
+/// SIGKILL would skip the shutdown hooks), then kills it if it is still running after 10 s.
+fn stop_server(child: &mut Child) {
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+    for _ in 0..100 {
+        if let Ok(Some(_)) = child.try_wait() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -53,8 +69,7 @@ async fn serve_binds_the_host_flag_and_answers_version() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
 
-    child.kill().unwrap();
-    child.wait().unwrap();
+    stop_server(&mut child);
     // The long-running server logs to a file under the log directory.
     let logs: Vec<_> = std::fs::read_dir(home.path().join("logs"))
         .unwrap()
@@ -105,8 +120,7 @@ async fn last_used_shows_in_keys_ls_and_the_audit_log() {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    child.kill().unwrap();
-    child.wait().unwrap();
+    stop_server(&mut child);
     assert_ne!(last_used, "-", "usage never persisted");
 
     let audit = std::fs::read_to_string(home.path().join("logs").join("audit.jsonl")).unwrap();

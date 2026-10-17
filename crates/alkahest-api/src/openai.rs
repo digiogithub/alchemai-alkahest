@@ -148,6 +148,11 @@ async fn proxy(
     service::require(&lease, &model, cap)?;
     if images {
         service::require(&lease, &model, Capability::Vision)?;
+        // Remote image URLs are fetched here (SSRF-checked) and inline ones validated.
+        if let Some(Value::Array(msgs)) = body.get_mut("messages") {
+            crate::images::normalize_messages(msgs, &crate::images::ImageFetchPolicy::of(state))
+                .await?;
+        }
     }
     if has_tools && lease.settings().tools_enabled == Some(false) {
         return Err(HttpError::bad_request(format!(
@@ -316,7 +321,7 @@ async fn embeddings_inner(
     let client = service::upstream(state);
     let call = async {
         let resp = post_json(&client, &lease.base_url(), "/v1/embeddings", &upstream_body).await?;
-        read_json(resp).await
+        read_json(resp).await.map_err(crate::pooled::input_too_long)
     };
     let doc = tokio::select! {
         biased;

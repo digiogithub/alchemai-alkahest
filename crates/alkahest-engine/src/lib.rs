@@ -33,13 +33,15 @@ pub use id::{ApiDialect, EngineId};
 pub use install::{EngineInstaller, InstallFuture, RecipeInstaller};
 pub use launch::{HealthCheck, LaunchRequest, LaunchSpec, ReadyPredicate};
 pub use llama_cpp::{
-    DECISION_SLOTS, LlamaCppEngine, TemplateSource, builtin_template_for_go, template_source,
+    DECISION_SLOTS, EMBED_BATCH_DEFAULT, LlamaCppEngine, TemplateSource, builtin_template_for_go,
+    template_source,
 };
 pub use locator::{EngineInstall, EngineLocator, FsLocator, InstallSource, LocateQuery};
 pub use registry::{EnginePlan, EngineRegistry, PreparedLaunch};
 pub use select::{
     EngineChoice, Os, PRISM_PIN, Platform, SelectionReason, parse_engine_setting, select_engine,
 };
+pub use supervisor::ledger::{LedgerEntry, ProcessLedger, SweepReport};
 pub use supervisor::logs::{LogBuffer, LogLine, Stream};
 pub use supervisor::restart::{RestartDecision, RestartPolicy, RestartTracker};
 pub use supervisor::usage::{ResourceSampler, ResourceUsage};

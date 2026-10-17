@@ -245,6 +245,12 @@ fn kind_from_gguf(g: &Gguf, has_mmproj: bool) -> Option<ModelKind> {
         _ => {}
     }
     if EMBEDDING_ARCHS.contains(&arch) {
+        // Older reranker conversions carry no pooling type: a classification head
+        // (`cls.*`) or the reranker tags give them away (llama-server then needs
+        // `--reranking --pooling rank`).
+        if looks_like_reranker(g) {
+            return Some(ModelKind::Rerank);
+        }
         return Some(ModelKind::Embeddings);
     }
     if has_mmproj {
@@ -255,6 +261,21 @@ fn kind_from_gguf(g: &Gguf, has_mmproj: bool) -> Option<ModelKind> {
     } else {
         ModelKind::Completion
     })
+}
+
+/// A pooled encoder with a classification head or reranker tags.
+fn looks_like_reranker(g: &Gguf) -> bool {
+    let head = g
+        .tensors
+        .iter()
+        .any(|t| t.name == "cls.weight" || t.name == "cls.output.weight");
+    let tagged = g.tags().iter().any(|t| {
+        matches!(
+            t.to_ascii_lowercase().as_str(),
+            "reranker" | "cross-encoder" | "text-ranking"
+        )
+    });
+    head || tagged
 }
 
 fn kind_from_ollama(caps: &[String]) -> Option<ModelKind> {

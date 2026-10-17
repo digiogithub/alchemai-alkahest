@@ -5,7 +5,7 @@ title: Desktop application
 status: backlog
 labels: [desktop]
 created: 2026-10-16T22:37:38Z
-updated: 2026-10-17T02:44:07Z
+updated: 2026-10-17T03:19:01Z
 requirements:
   R1:
     status: backlog
@@ -38,6 +38,18 @@ requirements:
         - crates/alkahest-client/tests/client.rs#events_stream_decodes_status_snapshots
   R3:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-desktop/src/library.rs#LibraryState
+        - crates/alkahest-desktop/src/views/library.rs#LibraryView
+        - crates/alkahest-desktop/src/ops.rs#ModelOps
+        - crates/alkahest-desktop/src/present.rs#Pill
+        - crates/alkahest-client/src/library.rs#Client::library
+      tests:
+        - crates/alkahest-desktop/src/library.rs#unload
+        - crates/alkahest-desktop/src/library.rs#deleting_an_ollama_model_is_refused_with_a_hint
+        - crates/alkahest-desktop/src/views/library.rs#rows_render_and_delete_asks_first
+        - crates/alkahest-client/tests/library.rs#library_composes_tags_models_and_show
   R4:
     status: backlog
   R5:
