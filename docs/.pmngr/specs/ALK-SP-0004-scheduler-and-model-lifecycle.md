@@ -5,22 +5,64 @@ title: Scheduler and model lifecycle
 status: backlog
 labels: [sched]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-17T00:17:43Z
+updated: 2026-10-17T01:07:46Z
 requirements:
   R1:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-sched/src/scheduler.rs#Scheduler
+        - crates/alkahest-sched/src/scheduler.rs#Lease
+        - crates/alkahest-sched/src/backend.rs#CatalogBackend
+      tests:
+        - crates/alkahest-sched/tests/scheduler.rs#single_load
+        - crates/alkahest-sched/tests/scheduler.rs#cancelled_request_does_not_cancel_the_load
+        - crates/alkahest-sched/tests/end_to_end.rs#idle_unload_stops_the_real_engine_process
   R2:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-sched/src/scheduler.rs#Scheduler
+        - crates/alkahest-sched/src/scheduler.rs#SchedulerOptions
+      tests:
+        - crates/alkahest-sched/tests/scheduler.rs#idle_unload
+        - crates/alkahest-sched/tests/scheduler.rs#keep_alive_zero_unloads_after_the_request
+        - crates/alkahest-sched/tests/scheduler.rs#negative_keep_alive_keeps_the_model_forever
+        - crates/alkahest-sched/tests/scheduler.rs#request_keep_alive_overrides_model_and_global
+        - crates/alkahest-sched/tests/end_to_end.rs#idle_unload_stops_the_real_engine_process
   R3:
     status: backlog
     trace:
-      code: [crates/alkahest-sched/src/memory.rs#MemoryEstimate]
+      code:
+        - crates/alkahest-sched/src/memory.rs#MemoryEstimate
+        - crates/alkahest-sched/src/admission.rs#placement
+        - crates/alkahest-sched/src/admission.rs#pick_victim
+        - crates/alkahest-sched/src/admission.rs#SystemMemoryProbe
+        - crates/alkahest-sched/src/scheduler.rs#admit
       tests:
         - crates/alkahest-sched/tests/memory.rs#admission_uses_the_fraction_of_free_memory
+        - crates/alkahest-sched/tests/admission.rs#eviction
+        - crates/alkahest-sched/tests/admission.rs#busy_models_until_the_timeout_give_503_with_the_estimate
+        - crates/alkahest-sched/tests/admission.rs#max_loaded_evicts_least_recently_used_idle_model
+        - crates/alkahest-sched/tests/admission.rs#automatic_gpu_layers_offload_what_fits
   R4:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-sched/src/scheduler.rs#QueueTicket
+        - crates/alkahest-sched/src/scheduler.rs#QueueStatus
+      tests:
+        - crates/alkahest-sched/tests/queue.rs#queue_full
+        - crates/alkahest-sched/tests/queue.rs#parallel_slots_bound_concurrency
+        - crates/alkahest-sched/tests/queue.rs#waiting_requests_are_served_in_arrival_order
+        - crates/alkahest-sched/tests/queue.rs#a_cancelled_request_leaves_the_queue
   R5:
     status: backlog
+    trace:
+      code: [crates/alkahest-sched/src/scheduler.rs#Scheduler]
+      tests:
+        - crates/alkahest-sched/tests/scheduler.rs#stop
+        - crates/alkahest-sched/tests/queue.rs#stop_fails_requests_queued_for_a_slot
   R6:
     status: backlog
     trace:
@@ -28,12 +70,24 @@ requirements:
         - crates/alkahest-engine/src/supervisor/mod.rs#EngineHandle
         - crates/alkahest-engine/src/supervisor/mod.rs#ExitInfo
         - crates/alkahest-engine/src/supervisor/restart.rs#RestartTracker
+        - crates/alkahest-sched/src/scheduler.rs#Lease
       tests:
         - crates/alkahest-engine/tests/supervisor.rs#crash
         - crates/alkahest-engine/tests/supervisor.rs#killed_engine_is_detected
         - crates/alkahest-engine/tests/supervisor.rs#exit_before_ready_reports_status_and_stderr
+        - crates/alkahest-sched/tests/scheduler.rs#crash
+        - crates/alkahest-sched/tests/scheduler.rs#crash_loop_gives_up
   R7:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-sched/src/metrics.rs#ModelStatus
+        - crates/alkahest-sched/src/metrics.rs#render_prometheus
+        - crates/alkahest-sched/src/scheduler.rs#Scheduler
+      tests:
+        - crates/alkahest-sched/tests/metrics.rs#ps
+        - crates/alkahest-sched/tests/metrics.rs#counters_and_prometheus_text
+        - crates/alkahest-sched/tests/metrics.rs#usage_and_tokens_per_second
 ---
 
 ## Purpose

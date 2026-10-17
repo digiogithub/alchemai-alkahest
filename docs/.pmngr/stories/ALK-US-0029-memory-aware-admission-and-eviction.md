@@ -2,15 +2,16 @@
 id: ALK-US-0029
 type: story
 title: Memory-aware admission and eviction
-status: in_progress
+status: done
 priority: critical
 parent: ALK-EP-0006
 milestone: ALK-M-0003
 labels: [sched]
 estimate: 5
 created: 2026-10-16T22:40:15Z
-updated: 2026-10-17T00:19:24Z
+updated: 2026-10-17T01:11:43Z
 started: 2026-10-17T00:19:24Z
+closed: 2026-10-17T01:11:43Z
 links:
   - { kind: implements, target: ALK-SP-0004.R3 }
 ---

@@ -5,7 +5,7 @@ title: Engines and recipes
 status: backlog
 labels: [engine, recipes]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-17T00:54:11Z
+updated: 2026-10-17T01:11:04Z
 requirements:
   R1:
     status: backlog
@@ -42,8 +42,25 @@ requirements:
         - crates/alkahest-engine/tests/llama_cpp.rs#real_llama_server_serves_and_stops
   R3:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-recipes/src/recipe.rs#parse_recipes
+        - crates/alkahest-recipes/src/catalog.rs#Catalog
+      tests:
+        - crates/alkahest-recipes/tests/recipes.rs#recipe_validation_rejects_a_recipe_without_a_pinned_version
+        - crates/alkahest-recipes/tests/recipes.rs#recipe_validation_names_the_broken_rule
+        - crates/alkahest-recipes/tests/recipes.rs#discovery_layers_directories_over_the_builtin_recipes
   R4:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-recipes/src/recipe.rs#select_variant
+        - crates/alkahest-recipes/src/build.rs#build_from_source
+        - crates/alkahest/src/engines_cmd.rs#install_cmd
+      tests:
+        - crates/alkahest-recipes/tests/recipes.rs#cuda_pick_chooses_the_variant_the_driver_supports
+        - crates/alkahest-recipes/tests/recipes.rs#variant_pick_follows_the_hardware_preference_order
+        - crates/alkahest-recipes/tests/recipes.rs#source_build_runs_the_steps_logs_and_keeps_only_the_products
   R5:
     status: backlog
     trace:
@@ -52,11 +69,15 @@ requirements:
         - crates/alkahest-engine/src/locator.rs#split_install_dir
         - crates/alkahest-engine/src/launch.rs#LaunchSpec::prepend_library_dirs
         - crates/alkahest-engine/src/select.rs#parse_engine_setting
+        - crates/alkahest-recipes/src/install.rs#install
+        - crates/alkahest-recipes/src/install.rs#remove_installed
       tests:
         - crates/alkahest-engine/tests/registry.rs#two_versions_default_newest_and_pin
         - crates/alkahest-engine/tests/registry.rs#variant_follows_accelerator
         - crates/alkahest-engine/tests/supervisor.rs#library_path_reaches_the_child
         - crates/alkahest-engine/tests/registry.rs#bundled_roots_are_searched_after_the_engines_dir
+        - crates/alkahest-recipes/tests/recipes.rs#two_versions_coexist_and_the_pin_or_newest_is_used
+        - crates/alkahest-recipes/tests/recipes.rs#remove_deletes_only_marked_installs_of_the_selected_version
   R6:
     status: backlog
     trace:
