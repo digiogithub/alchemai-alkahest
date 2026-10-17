@@ -319,6 +319,44 @@ pub fn segmented(segments: Vec<Stateful<Div>>, p: &Palette) -> Div {
     track
 }
 
+/// A selectable chip (choice lists: KV cache types, keep-alive presets, quant tags). The
+/// selected chip carries the brass border and text; the caller adds the click handler.
+pub fn choice_chip(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    selected: bool,
+    mono: bool,
+    p: &Palette,
+) -> Stateful<Div> {
+    let (border, fg, bg) = if selected {
+        (p.accent_default, p.accent_text, p.accent_subtle)
+    } else {
+        (p.line_strong, p.text_secondary, p.bg_raised)
+    };
+    let hover = c(p.accent_border);
+    let el = h_flex()
+        .id(id)
+        .flex_shrink_0()
+        .h(px(size::CONTROL_SMALL - 4.0))
+        .px(px(10.0))
+        .items_center()
+        .rounded(px(radius::SM))
+        .border_1()
+        .border_color(c(border))
+        .bg(c(bg))
+        .text_color(c(fg))
+        .whitespace_nowrap()
+        .cursor_pointer()
+        .hover(move |s| s.border_color(hover));
+    let el = if mono {
+        el.type_style(text::MONO).text_size(px(text::CAPTION.size))
+    } else {
+        el.type_style(text::SMALL)
+    };
+    el.child(label.into())
+}
+
+/// A raised card (1 px border, no shadow) with the standard padding.
 /// Cards never shrink inside a scrolling column; a caller that wants it to flex (a side
 /// panel) sets `flex_1()` after this.
 pub fn card(p: &Palette) -> Div {

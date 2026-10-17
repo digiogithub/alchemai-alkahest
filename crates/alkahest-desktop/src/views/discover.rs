@@ -15,8 +15,9 @@ use futures::StreamExt;
 
 use crate::connection::{ConnectionState, Snapshot};
 use crate::discover::{
-    DiscoverState, Fetch, Fit, Hardware, HfFormat, HfSort, HfTask, PasteTarget, QuantRow, Source,
-    card_summary, check_token, hf_row, parse_paste, recommended_block, repo_header, token_pill,
+    DiscoverState, Fetch, Fit, Hardware, HfFormat, HfSort, HfTask, OllamaRow, PasteTarget,
+    QuantRow, Source, card_summary, check_token, hf_row, ollama_row, parse_paste,
+    recommended_block, repo_header, token_pill,
 };
 use crate::downloads::{DownloadRow, DownloadStatus, DownloadsState, FailureKind, Transition};
 use crate::theme::tokens::{Palette, radius, size, space, text};
@@ -31,8 +32,8 @@ use crate::ui::{
 use crate::views::icons;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
-    ButtonKind, button, card, column_label, dot, field_frame, format_tag, kind_badge, meter,
-    notice_line, overlay_shadow, segment, segmented,
+    ButtonKind, button, card, choice_chip, column_label, dot, field_frame, format_tag, kind_badge,
+    meter, notice_line, overlay_shadow, segment, segmented,
 };
 
 /// Typing pause before a search runs.
@@ -1132,6 +1133,163 @@ impl DiscoverView {
             .child(action)
     }
 
+    fn ollama_body(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+        let mut col = v_flex()
+            .id("ollama-results")
+            .w(px(RESULTS_WIDTH))
+            .flex_shrink_0()
+            .h_full()
+            .gap(px(space::S2))
+            .overflow_y_scroll();
+        match &self.state.ollama_results {
+            Fetch::Idle => col = col.child(muted_line("Type to search the Ollama library.", p)),
+            Fetch::Loading => col = col.child(muted_line("Searching\u{2026}", p)),
+            Fetch::Failed(e) => {
+                col = col.child(notice_line(format!("Search failed: {e}"), true, p));
+            }
+            Fetch::Ready(rows) => {
+                col = col.child(
+                    div()
+                        .type_style(text::SMALL)
+                        .text_color(c(p.text_secondary))
+                        .child(format!("{} models", rows.len())),
+                );
+                for (i, m) in rows.iter().enumerate() {
+                    let row = ollama_row(m);
+                    let selected = self.state.ollama_selected.as_deref() == Some(row.name.as_str());
+                    let name = row.name.clone();
+                    let mut meta = h_flex()
+                        .gap(px(space::S2))
+                        .items_center()
+                        .child(kind_badge(row.kind));
+                    for cap in &row.capabilities {
+                        meta = meta.child(mono_caption(cap.clone(), p));
+                    }
+                    if !row.tags.is_empty() && !row.cloud {
+                        meta = meta.child(mono_caption(
+                            format!(
+                                "{} tag{}",
+                                row.tags.len(),
+                                if row.tags.len() == 1 { "" } else { "s" }
+                            ),
+                            p,
+                        ));
+                    }
+                    col = col.child(
+                        result_card(
+                            SharedString::from(format!("ollama-result-{i}")),
+                            selected,
+                            p,
+                        )
+                        .child(
+                            h_flex()
+                                .gap(px(space::S2))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(SharedString::from(row.name.clone())),
+                                )
+                                .child(mono_caption(row.pulls.clone(), p)),
+                        )
+                        .child(meta)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.state.ollama_selected = Some(name.clone());
+                            this.state.ollama_tag = None;
+                            cx.notify();
+                        })),
+                    );
+                }
+            }
+        }
+        h_flex()
+            .flex_1()
+            .min_h_0()
+            .gap(px(space::S5))
+            .items_start()
+            .child(col)
+            .child(self.ollama_detail(self.state.ollama_row(), p, cx))
+    }
+
+    fn ollama_detail(&self, row: Option<OllamaRow>, p: &Palette, cx: &mut Context<Self>) -> Div {
+        let panel = card(p).flex_1().min_w_0().gap(px(space::S4));
+        let Some(row) = row else {
+            return panel.child(muted_line("Pick a model to see its tags.", p));
+        };
+        let chosen = self.state.ollama_pull();
+        let mut tags = h_flex().flex_wrap().gap(px(space::S2));
+        for (i, tag) in row.tags.iter().enumerate() {
+            let on = chosen.as_ref().is_some_and(|c| &c.model == tag);
+            let t = tag.clone();
+            tags = tags.child(
+                choice_chip(
+                    SharedString::from(format!("ollama-tag-{i}")),
+                    tag.clone(),
+                    on,
+                    true,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.state.ollama_tag = Some(t.clone());
+                    cx.notify();
+                })),
+            );
+        }
+        let mut panel = panel
+            .child(mono_caption("ollama.com / library".to_string(), p))
+            .child(
+                div()
+                    .type_style(text::H1)
+                    .child(SharedString::from(row.name.clone())),
+            )
+            .child(
+                div()
+                    .type_style(text::SMALL)
+                    .text_color(c(p.text_secondary))
+                    .child(SharedString::from(row.description.clone())),
+            )
+            .child(column_label("Choose a tag", p));
+        if row.cloud {
+            panel = panel.child(muted_line(
+                "Cloud-only model: it runs on ollama.com and cannot be downloaded.",
+                p,
+            ));
+        } else {
+            panel = panel.child(tags).child(
+                div()
+                    .type_style(text::CAPTION)
+                    .text_color(c(p.text_muted))
+                    .child(
+                        "The library search lists size tags only; quantised tags \
+                         (qwen3:8b-q8_0) can be pulled from Paste repo / URL.",
+                    ),
+            );
+        }
+        let pulling = chosen
+            .as_ref()
+            .is_some_and(|c| self.downloads.is_pulling(&c.model));
+        let label = match (&chosen, pulling) {
+            (_, true) => "Downloading\u{2026}".to_string(),
+            (Some(c), false) => format!("Pull {}", c.model),
+            (None, false) => "Pull".to_string(),
+        };
+        let disabled = chosen.is_none() || pulling || !self.connected;
+        let mut b = button(
+            "ollama-pull",
+            label,
+            ButtonKind::Primary,
+            size::CONTROL_LARGE,
+            disabled,
+            p,
+        );
+        if let (Some(req), false) = (chosen, disabled) {
+            b = b.on_click(cx.listener(move |this, _, _, cx| this.pull(req.clone(), cx)));
+        }
+        panel.child(h_flex().justify_end().child(b))
+    }
+
     fn paste_body(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
         let parsed = parse_paste(&self.state.paste);
         let (label, hint) = match &parsed {
@@ -1466,10 +1624,7 @@ impl Render for DiscoverView {
                         .gap(px(space::S3))
                         .child(self.search_field(&self.ollama_search, p)),
                 )
-                .child(muted_line(
-                    "The Ollama library browser arrives with ALK-US-0068.",
-                    p,
-                )),
+                .child(self.ollama_body(p, cx)),
             Source::Paste => content.child(self.paste_body(p, cx)).child(div().flex_1()),
         };
         if let Some(strip) = self.downloads_strip(p, cx) {
