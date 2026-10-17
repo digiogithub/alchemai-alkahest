@@ -128,7 +128,11 @@ fn availability(r: &Recipe, host: &Host, recommended: Option<&Recipe>) -> String
         "available".to_string()
     };
     if r.asset_for(host).is_none() {
-        s.push_str(" (source only)");
+        s.push_str(if r.venv.is_some() {
+            " (python package)"
+        } else {
+            " (source only)"
+        });
     }
     s
 }
@@ -308,7 +312,7 @@ async fn install_cmd(
             recipe.variant
         );
     }
-    if !args.from_source && recipe.asset_for(&host).is_none() {
+    if !args.from_source && !recipe.installable_on(&host) {
         bail!(
             "{} {} ({}) has no prebuilt archive for {}/{}; try `--from-source`",
             recipe.id,

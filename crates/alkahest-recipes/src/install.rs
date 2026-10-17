@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use sha2::{Digest, Sha256};
 
 use crate::archive::extract;
-use crate::build::{BuildTools, build_from_source};
+use crate::build::{BuildTools, build_from_source, build_venv};
 use crate::error::{RecipeError, Result};
 use crate::recipe::{Host, Recipe, tag_number};
 
@@ -111,6 +111,23 @@ pub async fn install(
         && let Some(done) = read_installed(&final_dir)
     {
         return Ok(done);
+    }
+    let venv = recipe
+        .venv
+        .as_ref()
+        .filter(|_| !opts.from_source && recipe.asset_for(&host).is_none());
+    if let Some(venv) = venv {
+        return install_venv(
+            recipe,
+            venv,
+            engines_dir,
+            &final_dir,
+            exe_rel,
+            &host,
+            opts,
+            cancel,
+        )
+        .await;
     }
     let partial = final_dir.with_file_name(format!("{}.partial", recipe.dir_name()));
     if partial.exists() {
@@ -226,6 +243,66 @@ pub async fn install(
     fs::rename(&partial, &final_dir).map_err(|e| RecipeError::io(&final_dir, e))?;
 
     read_installed(&final_dir).ok_or(RecipeError::MissingExecutable(marker.executable))
+}
+
+/// Installs a Python engine into a virtual environment created in place.
+///
+/// A virtual environment records its own absolute path in script shebangs, so it cannot be
+/// built in a `.partial` directory and renamed. It is built at the final path instead and is
+/// only complete once the marker file is written last; a failure removes the directory.
+#[allow(clippy::too_many_arguments)]
+async fn install_venv(
+    recipe: &Recipe,
+    venv: &crate::recipe::VenvBuild,
+    engines_dir: &Path,
+    final_dir: &Path,
+    exe_rel: PathBuf,
+    host: &Host,
+    opts: &InstallOptions,
+    cancel: &CancellationToken,
+) -> Result<InstalledEngine> {
+    if !venv.supports(host) {
+        return Err(RecipeError::UnsupportedHost {
+            id: recipe.id.clone(),
+            variant: recipe.variant.clone(),
+            os: host.os.clone(),
+            arch: host.arch.clone(),
+        });
+    }
+    if final_dir.exists() {
+        fs::remove_dir_all(final_dir).map_err(|e| RecipeError::io(final_dir, e))?;
+    }
+    let log_dir = opts
+        .log_dir
+        .clone()
+        .unwrap_or_else(|| engines_dir.join(".logs"));
+    let log = log_dir.join(format!("{}-{}.log", recipe.id, recipe.dir_name()));
+    if let Err(e) = build_venv(venv, &opts.build_tools, final_dir, &log, cancel).await {
+        let _ = fs::remove_dir_all(final_dir);
+        return Err(e);
+    }
+    if !final_dir.join(&exe_rel).is_file() {
+        let _ = fs::remove_dir_all(final_dir);
+        return Err(RecipeError::MissingExecutable(exe_rel));
+    }
+    let marker = Marker {
+        id: recipe.id.clone(),
+        variant: recipe.variant.clone(),
+        tag: recipe.tag.clone(),
+        executable: exe_rel,
+        source: format!("pip {}", venv.packages.join(" ")),
+        sha256: String::new(),
+        tofu: false,
+        from_source: false,
+        library_dirs: recipe.library_dirs.clone(),
+    };
+    let marker_path = final_dir.join(MARKER_FILE);
+    let json = serde_json::to_vec_pretty(&marker).map_err(|e| RecipeError::Archive {
+        archive: marker_path.clone(),
+        reason: e.to_string(),
+    })?;
+    fs::write(&marker_path, json).map_err(|e| RecipeError::io(&marker_path, e))?;
+    read_installed(final_dir).ok_or(RecipeError::MissingExecutable(marker.executable))
 }
 
 /// SHA-256 of a file, lower-case hex (for trust-on-first-use assets).

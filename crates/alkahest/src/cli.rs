@@ -160,6 +160,10 @@ pub enum Command {
         /// Download into the Alkahest store even when the Ollama store already has the model.
         #[arg(long, visible_alias = "copy")]
         force: bool,
+        /// Download the safetensors snapshot of a Hugging Face repository for vLLM instead of
+        /// GGUF (chosen automatically when the repository has no GGUF files).
+        #[arg(long)]
+        safetensors: bool,
     },
     /// Search the Ollama library and Hugging Face for models.
     Search(SearchArgs),

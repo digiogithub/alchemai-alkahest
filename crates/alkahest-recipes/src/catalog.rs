@@ -19,6 +19,7 @@ use crate::recipe::{
 const BUILTIN: &[&str] = &[
     include_str!("../../../recipes/llama-cpp.toml"),
     include_str!("../../../recipes/prism-llama-cpp.toml"),
+    include_str!("../../../recipes/vllm.toml"),
 ];
 
 /// A recipe file that was found but could not be used.

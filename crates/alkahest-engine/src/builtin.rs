@@ -6,7 +6,6 @@
 //! these baselines through [`crate::EngineRegistry::register`].
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use alkahest_gguf::ModelFormat;
 
@@ -17,11 +16,10 @@ use crate::id::{ApiDialect, EngineId};
 use crate::launch::{HealthCheck, LaunchRequest, LaunchSpec, ReadyPredicate};
 use crate::llama_cpp::LlamaCppEngine;
 use crate::locator::EngineInstall;
+pub use crate::vllm::VllmEngine;
 
 /// GGUF only.
 const GGUF: &[ModelFormat] = &[ModelFormat::Gguf];
-/// Safetensors only.
-const SAFETENSORS: &[ModelFormat] = &[ModelFormat::Safetensors];
 
 /// Every built-in engine, one per [`EngineId`].
 pub fn builtin_engines() -> Vec<Arc<dyn Engine>> {
@@ -55,54 +53,6 @@ fn append_extra_args(spec: &mut LaunchSpec, req: &LaunchRequest, install: &Engin
     }
     for a in req.settings.extra_args.iter().flatten() {
         spec.arg(a);
-    }
-}
-
-/// vLLM OpenAI-compatible server (`vllm serve`).
-#[derive(Debug, Clone, Copy)]
-pub struct VllmEngine;
-
-impl Engine for VllmEngine {
-    fn id(&self) -> EngineId {
-        EngineId::Vllm
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities::of(&[
-            C::Chat,
-            C::Completion,
-            C::Embeddings,
-            C::Rerank,
-            C::Vision,
-            C::Logits,
-            C::Tokenize,
-        ])
-    }
-
-    fn formats(&self) -> &'static [ModelFormat] {
-        SAFETENSORS
-    }
-
-    fn dialect(&self) -> ApiDialect {
-        ApiDialect::VllmOpenAi
-    }
-
-    fn prepare(&self, req: &LaunchRequest, install: &EngineInstall) -> Result<LaunchSpec> {
-        self.check(req)?;
-        let mut spec = base_spec(EngineId::Vllm, req, install, ApiDialect::VllmOpenAi);
-        spec.arg("serve")
-            .arg(&req.model_path)
-            .flag("--host", req.host.to_string())
-            .flag("--port", req.port.to_string())
-            .flag("--served-model-name", &req.model);
-        if let Some(ctx) = req.settings.context_length {
-            spec.flag("--max-model-len", ctx.to_string());
-        }
-        // vLLM compiles kernels and captures CUDA graphs on start; minutes are normal.
-        spec.startup_timeout = Duration::from_secs(900);
-        spec.stop_grace = Duration::from_secs(30);
-        append_extra_args(&mut spec, req, install);
-        Ok(spec)
     }
 }
 

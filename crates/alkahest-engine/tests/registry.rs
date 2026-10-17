@@ -402,6 +402,8 @@ fn vllm_spec() {
             "9000",
             "--served-model-name",
             "org/model",
+            "--dtype",
+            "auto",
             "--max-model-len",
             "4096"
         ]

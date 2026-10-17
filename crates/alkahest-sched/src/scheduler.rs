@@ -523,6 +523,13 @@ async fn load(inner: &Arc<Inner>, runner: &Arc<Runner>) -> Result<Arc<dyn Engine
     let estimate = admit(inner, runner).await?;
     let mut req = runner.launch.clone();
     req.settings.gpu_layers = launch_gpu_layers(&runner.model, &estimate);
+    // vLLM claims a fixed share of the GPU; give it the share the estimate charged.
+    if runner.model.dialect == alkahest_engine::ApiDialect::VllmOpenAi {
+        req.gpu_memory_utilization = crate::safetensors::gpu_memory_utilization(
+            estimate.vram_bytes,
+            inner.probe.snapshot().total_vram,
+        );
+    }
     let _ = runner.launched.set(req.clone());
     tracing::info!(
         model = %runner.model.name,

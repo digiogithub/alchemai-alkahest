@@ -5,7 +5,7 @@ title: Engines and recipes
 status: backlog
 labels: [engine, recipes]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-17T01:11:04Z
+updated: 2026-10-17T02:05:09Z
 requirements:
   R1:
     status: backlog
@@ -32,6 +32,11 @@ requirements:
         - crates/alkahest-engine/src/registry.rs#EngineRegistry::plan
         - crates/alkahest-engine/src/error.rs#EngineError
         - crates/alkahest-engine/src/llama_cpp.rs#LlamaCppEngine
+        - crates/alkahest-engine/src/vllm.rs#VllmEngine
+        - crates/alkahest-recipes/src/build.rs#build_venv
+        - crates/alkahest-recipes/src/recipe.rs#VenvBuild
+        - crates/alkahest-sched/src/safetensors.rs#estimate_vllm
+        - recipes/vllm.toml
       tests:
         - crates/alkahest-engine/tests/selection.rs#bonsai_routing
         - crates/alkahest-engine/tests/selection.rs#rules_by_format_kind_and_quant
@@ -40,6 +45,12 @@ requirements:
         - crates/alkahest-engine/tests/selection.rs#not_installed_names_the_install_command
         - crates/alkahest-engine/tests/selection.rs#agrees_with_the_catalog_default_engine
         - crates/alkahest-engine/tests/llama_cpp.rs#real_llama_server_serves_and_stops
+        - crates/alkahest-engine/tests/vllm.rs#full_command_line_in_order
+        - crates/alkahest-engine/tests/vllm.rs#platform_rules_name_what_is_missing
+        - crates/alkahest-engine/tests/vllm.rs#real_vllm_serves_a_snapshot
+        - crates/alkahest-recipes/tests/venv.rs#venv_install_with_uv_creates_the_environment_in_place
+        - crates/alkahest-recipes/tests/venv.rs#venv_install_falls_back_to_python_and_pip_without_uv
+        - crates/alkahest-recipes/tests/venv.rs#builtin_vllm_recipe_is_pinned_and_follows_the_hardware
   R3:
     status: backlog
     trace:
