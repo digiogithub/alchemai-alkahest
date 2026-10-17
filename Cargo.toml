@@ -113,7 +113,7 @@ rustyline = { version = "=18.0.1", default-features = false, features = ["with-f
 
 # Security
 keyring = "=4.2.0"
-rpassword = "=7.4.0"
+rpassword = "=7.5.0"
 argon2 = "=0.6.0"
 rand = "=0.10.3"
 # Wipes secrets (TLS keys, API key secrets, HF token) from memory on drop.
@@ -133,7 +133,7 @@ byteorder = "=1.5.0"
 walkdir = "=2.5.0"
 # Engine archives (pure Rust, no C): gzip, tar and zip.
 flate2 = "=1.1.9"
-tar = { version = "=0.4.45", default-features = false }
+tar = { version = "=0.4.46", default-features = false }
 zip = { version = "=9.0.3", default-features = false, features = ["deflate"] }
 # Pure-Rust rpm writer for `cargo xtask bundle` (cargo-packager has no rpm target, ALK-US-0105).
 # No PGP signing, zstd or xz: packages are gzip-compressed and unsigned (the release has SHA256SUMS).
