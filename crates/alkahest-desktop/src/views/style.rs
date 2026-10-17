@@ -5,7 +5,10 @@
 
 use crate::theme::ThemePreference;
 use crate::theme::tokens::{self, Family, Palette, TypeStyle};
-use crate::ui::{App, FontWeight, Global, Hsla, Styled, Window, WindowAppearance, color, px};
+use crate::ui::{
+    App, FontWeight, Global, Hsla, KitColors, Styled, Window, WindowAppearance, color, px,
+    sync_kit_theme,
+};
 
 /// The active palette, kept as a GPUI global so any view can read it.
 #[derive(Debug, Clone, Copy)]
@@ -21,10 +24,23 @@ impl Global for Theme {}
 impl Theme {
     /// Installs the theme for `preference`, resolved against the window appearance.
     pub fn install(cx: &mut App, preference: ThemePreference, appearance: WindowAppearance) {
+        let palette = preference.palette(is_dark(appearance));
         cx.set_global(Self {
             preference,
-            palette: preference.palette(is_dark(appearance)),
+            palette,
         });
+        // Kit widgets (the filter field) draw with gpui-kit's own theme: keep it on the palette.
+        sync_kit_theme(
+            cx,
+            KitColors {
+                foreground: c(palette.text_primary),
+                muted_foreground: c(palette.text_muted),
+                background: c(palette.bg_sidebar),
+                border: c(palette.line_strong),
+                accent: c(palette.accent_default),
+                selection: c(palette.accent_focus_ring),
+            },
+        );
     }
 
     /// Re-resolves a `System` preference after the window appearance changed.

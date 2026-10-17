@@ -5,17 +5,20 @@
 //! build it in [`Shell::new`], and return it from the matching arm of [`Shell::content`]
 //! instead of the placeholder. The rail, theme and service card stay as they are.
 
+use alkahest_client::Client;
 use tokio::sync::{mpsc, watch};
 
 use crate::connection::{CardAction, Command, Snapshot};
 use crate::nav::{Counter, NavCounters, Screen, ServiceCard, Tone};
 use crate::theme::tokens::{Palette, radius, size, space, text};
 use crate::ui::{
-    AnyElement, App, Context, Div, Entity, FontWeight, Hsla, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Window, div,
-    h_flex, px, svg_icon, v_flex,
+    AnyElement, App, AppContext as _, Context, Div, Entity, FontWeight, Hsla, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled,
+    Window, div, h_flex, px, svg_icon, v_flex,
 };
 use crate::views::icons;
+use crate::views::library::{LibraryEvent, LibraryView};
+use crate::views::running::{RunningEvent, RunningView};
 use crate::views::style::{TextStyleExt, Theme, c};
 
 /// Root view of the main window.
@@ -26,18 +29,41 @@ pub struct Shell {
     service: ServiceCard,
     card_action: Option<CardAction>,
     commands: mpsc::UnboundedSender<Command>,
+    library: Entity<LibraryView>,
+    running: Entity<RunningView>,
 }
 
 impl Shell {
     /// A shell showing the Library, with unknown counters and the "connecting" card for
-    /// `server_url`. `commands` reaches the connection manager.
-    pub fn new(server_url: &str, commands: mpsc::UnboundedSender<Command>) -> Self {
+    /// `server_url`. `commands` reaches the connection manager; `client` is what the screens
+    /// use for their own requests.
+    pub fn new(
+        server_url: &str,
+        commands: mpsc::UnboundedSender<Command>,
+        client: Client,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let library = cx.new(|cx| LibraryView::new(client.clone(), window, cx));
+        let running = cx.new(|cx| RunningView::new(client, library.clone(), cx));
+        cx.subscribe(&running, |this, _, event: &RunningEvent, cx| match event {
+            RunningEvent::Navigate(screen) => this.select(*screen, cx),
+        })
+        .detach();
+        cx.subscribe(&library, |this, _, event: &LibraryEvent, cx| match event {
+            LibraryEvent::Navigate(screen) => this.select(*screen, cx),
+        })
+        .detach();
+        // The Library's own count (fresh after a delete) feeds the rail counter.
+        cx.observe(&library, |_, _, cx| cx.notify()).detach();
         Self {
             screen: Screen::Library,
             counters: NavCounters::default(),
             service: ServiceCard::connecting(server_url),
             card_action: None,
             commands,
+            library,
+            running,
         }
     }
 
@@ -73,6 +99,8 @@ impl Shell {
 
     /// Shows a connection snapshot: service card, its button and the rail counters.
     pub fn apply(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
+        self.library.update(cx, |view, cx| view.apply(snapshot, cx));
+        self.running.update(cx, |view, cx| view.apply(snapshot, cx));
         let service = snapshot.service_card();
         let action = snapshot.card_action();
         let counters = snapshot.counters();
@@ -151,21 +179,33 @@ impl Shell {
         } else {
             item = item.hover(|s| s.bg(c(p.bg_overlay)));
         }
-        if let Some(counter) = self.counters.counter(screen) {
+        if let Some(counter) = self.live_counters(cx).counter(screen) {
             item = item.child(counter_badge(&counter, active, p));
         }
         item
     }
 
+    /// The rail counters: the connection's, with the Library's own count once it has one
+    /// (it changes right after a delete, before the next probe).
+    fn live_counters(&self, cx: &App) -> NavCounters {
+        let mut counters = self.counters;
+        if counters.models.is_some()
+            && let Some(n) = self.library.read(cx).model_count()
+        {
+            counters.models = Some(n);
+        }
+        counters
+    }
+
     /// The content of the selected screen.
     fn content(&self, p: &Palette) -> AnyElement {
         match self.screen {
+            Screen::Library => self.library.clone().into_any_element(),
+            Screen::Running => self.running.clone().into_any_element(),
             // Each arm becomes the screen's own view when its story lands.
-            screen @ (Screen::Library
-            | Screen::Discover
-            | Screen::Running
-            | Screen::Engines
-            | Screen::ApiKeys) => placeholder(screen, p).into_any_element(),
+            screen @ (Screen::Discover | Screen::Engines | Screen::ApiKeys) => {
+                placeholder(screen, p).into_any_element()
+            }
         }
     }
 }
