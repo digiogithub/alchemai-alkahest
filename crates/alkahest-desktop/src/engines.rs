@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 
+use alkahest_client::EngineOverride;
 use alkahest_client::admin::{EngineInstall, EngineListing, EngineVariant, Job};
 use serde_json::Value;
 
@@ -61,7 +62,8 @@ pub struct VariantChip {
     pub variant: String,
     /// Style.
     pub state: ChipState,
-    /// Short note after the name (`Installed`, `recommended`, the reason it is unsupported).
+    /// Short note after the name (`Installed`, `recommended`, the reason it is unsupported),
+    /// with the download size of installable variants (`recommended \u{b7} 142 MB`).
     pub note: String,
 }
 
@@ -98,6 +100,8 @@ pub struct InstalledBuild {
     pub in_use: bool,
     /// `built from source` / `prebuilt`.
     pub origin: String,
+    /// Shipped with the binary: it cannot be removed.
+    pub bundled: bool,
     /// Executable.
     pub path: String,
 }
@@ -172,6 +176,7 @@ pub fn cards(
                     } else {
                         "prebuilt".into()
                     },
+                    bundled: r.bundled,
                     path: r.path.clone().unwrap_or_default(),
                 })
                 .collect();
@@ -218,9 +223,9 @@ fn chip(r: &EngineVariant, running_jobs: &[String]) -> VariantChip {
     } else if !r.prebuilt && r.source_build {
         (ChipState::SourceOnly, "from source".to_string())
     } else if r.recommended {
-        (ChipState::Recommended, "recommended".to_string())
+        (ChipState::Recommended, with_size("recommended", r))
     } else {
-        (ChipState::Available, String::new())
+        (ChipState::Available, with_size("", r))
     };
     VariantChip {
         engine: r.id.clone(),
@@ -228,6 +233,15 @@ fn chip(r: &EngineVariant, running_jobs: &[String]) -> VariantChip {
         variant: r.variant.clone(),
         state,
         note,
+    }
+}
+
+/// `note` followed by the download size of the prebuilt archive, when the recipe states it.
+fn with_size(note: &str, r: &EngineVariant) -> String {
+    match (note.is_empty(), r.download_bytes.filter(|b| *b > 0)) {
+        (_, None) => note.to_string(),
+        (true, Some(b)) => format_bytes(b),
+        (false, Some(b)) => format!("{note} \u{b7} {}", format_bytes(b)),
     }
 }
 
@@ -427,6 +441,127 @@ pub fn machine_facts(system: &Value) -> Vec<String> {
     out
 }
 
+/// Splits an extra-arguments line into arguments: whitespace separates them, single or double
+/// quotes keep spaces inside one (`--chat-template "my template"`).
+pub fn split_args(line: &str) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut started = false;
+    for ch in line.chars() {
+        match (quote, ch) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), c) => cur.push(c),
+            (None, '"' | '\'') => {
+                quote = Some(ch);
+                started = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if started || !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                    started = false;
+                }
+            }
+            (None, c) => cur.push(c),
+        }
+    }
+    if quote.is_some() {
+        return Err("A quote is not closed.".into());
+    }
+    if started || !cur.is_empty() {
+        out.push(cur);
+    }
+    Ok(out)
+}
+
+/// The inverse of [`split_args`]: arguments with spaces or quotes are double-quoted.
+pub fn join_args(args: &[String]) -> String {
+    args.iter()
+        .map(|a| {
+            if a.is_empty() || a.contains(char::is_whitespace) || a.contains(['"', '\'']) {
+                if a.contains('"') {
+                    format!("'{a}'")
+                } else {
+                    format!("\"{a}\"")
+                }
+            } else {
+                a.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whether `path` is absolute on Linux, macOS or Windows (the server may be any of them).
+fn absolute(path: &str) -> bool {
+    path.starts_with('/')
+        || path.starts_with("\\\\")
+        || path
+            .as_bytes()
+            .get(1..3)
+            .is_some_and(|b| b == b":\\" || b == b":/")
+}
+
+/// The override sheet's form: what the two fields hold.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OverrideForm {
+    /// Executable path (empty = the installed build).
+    pub path: String,
+    /// Extra arguments, one line (see [`split_args`]).
+    pub args: String,
+}
+
+impl OverrideForm {
+    /// The form showing `o`.
+    pub fn from_override(o: &EngineOverride) -> Self {
+        Self {
+            path: o.path.clone().unwrap_or_default(),
+            args: join_args(&o.extra_args),
+        }
+    }
+
+    /// The override the form describes, or why it cannot be saved.
+    pub fn to_override(&self) -> Result<EngineOverride, String> {
+        let path = self.path.trim();
+        if !path.is_empty() && !absolute(path) {
+            return Err("The executable path must be absolute.".into());
+        }
+        Ok(EngineOverride {
+            path: (!path.is_empty()).then(|| path.to_string()),
+            extra_args: split_args(&self.args)?,
+        })
+    }
+}
+
+/// The line after "Reload recipes": counts, and the recipe files the server ignored with the
+/// reason. The flag is `true` when something was ignored (shown as a warning).
+pub fn reload_summary(doc: &Value) -> (String, bool) {
+    let engines = doc["engines"].as_array().map_or(0, Vec::len);
+    let variants = doc["variants"].as_u64().unwrap_or(0);
+    let mut line = format!("Recipes reloaded: {engines} engines, {variants} variants.");
+    let issues = doc["issues"].as_array().cloned().unwrap_or_default();
+    if issues.is_empty() {
+        return (line, false);
+    }
+    let what: Vec<String> = issues
+        .iter()
+        .map(|i| {
+            format!(
+                "{} ({})",
+                i["path"].as_str().unwrap_or("?"),
+                i["reason"].as_str().unwrap_or("ignored")
+            )
+        })
+        .collect();
+    line.push_str(&format!(
+        " {} recipe file{} ignored: {}.",
+        issues.len(),
+        if issues.len() == 1 { "" } else { "s" },
+        what.join("; ")
+    ));
+    (line, true)
+}
+
 /// Accelerator preference order shown in the strip.
 pub const PREFERENCE: &str = "Metal \u{203a} CUDA \u{203a} ROCm \u{203a} Vulkan \u{203a} CPU";
 
@@ -536,6 +671,75 @@ mod tests {
                 v("vllm", "0.11.0", "cuda12.8", "recommended"),
             ],
         }
+    }
+
+    #[test]
+    fn bundled_builds_and_download_sizes_show_in_the_cards() {
+        let mut l = listing();
+        l.engines[0].bundled = true;
+        l.engines[1].download_bytes = Some(142_000_000);
+        l.engines[2].download_bytes = Some(31_500_000);
+        let c = cards(&l, &[], &[]);
+        assert!(c[0].installed[0].bundled);
+        let chip = |variant: &str| c[0].chips.iter().find(|x| x.variant == variant).unwrap();
+        assert_eq!(chip("cuda12.8").note, "recommended \u{b7} 142 MB");
+        assert_eq!(chip("vulkan").note, "32 MB");
+        assert_eq!(
+            chip("rocm").note,
+            "no AMD GPU",
+            "unsupported keeps its reason"
+        );
+        assert!(!c[1].installed.iter().any(|b| b.bundled));
+    }
+
+    #[test]
+    fn override_forms_round_trip_and_validate() {
+        assert_eq!(
+            split_args(r#"--mlock --chat-template "my template" -c '4 096'"#).unwrap(),
+            ["--mlock", "--chat-template", "my template", "-c", "4 096"]
+        );
+        assert_eq!(split_args("  ").unwrap(), Vec::<String>::new());
+        assert_eq!(split_args(r#"a "" b"#).unwrap(), ["a", "", "b"]);
+        assert!(split_args("--x \"open").is_err());
+        let args = vec!["--mlock".to_string(), "a b".to_string(), "it's".to_string()];
+        assert_eq!(split_args(&join_args(&args)).unwrap(), args);
+
+        let form = OverrideForm {
+            path: " /opt/llama/llama-server ".into(),
+            args: "--mlock".into(),
+        };
+        let o = form.to_override().unwrap();
+        assert_eq!(o.path.as_deref(), Some("/opt/llama/llama-server"));
+        assert_eq!(OverrideForm::from_override(&o).args, "--mlock");
+        assert!(OverrideForm::default().to_override().unwrap() == EngineOverride::default());
+        let bad = OverrideForm {
+            path: "llama-server".into(),
+            args: String::new(),
+        };
+        assert!(bad.to_override().unwrap_err().contains("absolute"));
+        assert!(
+            OverrideForm {
+                path: r"C:\llama\llama-server.exe".into(),
+                args: String::new()
+            }
+            .to_override()
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn reload_reports_ignored_recipes() {
+        let (line, warn) =
+            reload_summary(&json!({"engines": ["a", "b"], "variants": 9, "issues": []}));
+        assert_eq!(line, "Recipes reloaded: 2 engines, 9 variants.");
+        assert!(!warn);
+        let (line, warn) = reload_summary(&json!({"engines": ["a"], "variants": 3,
+            "issues": [{"path": "/r/bad.toml", "reason": "unknown field"}]}));
+        assert!(warn);
+        assert!(
+            line.contains("1 recipe file ignored: /r/bad.toml (unknown field)"),
+            "{line}"
+        );
     }
 
     #[test]
