@@ -1,13 +1,13 @@
 ---
 id: ALK-US-0116
 type: story
-title: "Ollama pull fails: rustls CaUsedAsEndEntity on Cloudflare R2 blob host"
+title: "Pull: actionable error (no retries) when TLS is intercepted, e.g. ISP block of Cloudflare R2 IPs"
 status: triage
-priority: high
+priority: medium
 author: mcp
 labels: [bug, fetch, tls]
 created: 2026-10-17T13:26:28Z
-updated: 2026-10-17T13:26:28Z
+updated: 2026-10-17T14:00:03Z
 inbox:
   status: pending
   source: mcp

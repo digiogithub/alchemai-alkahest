@@ -64,6 +64,8 @@ come from the environment.
 - No CI or release job builds or publishes the image yet (GHCR push is outward-facing; needs the
   product owner).
 - `alkahest pull qwen3:0.6b` failed both in the container and on the host with rustls
-  `CaUsedAsEndEntity` on the Cloudflare R2 blob host: pre-existing, not caused by this change;
-  filed in the inbox.
+  `CaUsedAsEndEntity` on the Cloudflare R2 blob host. Root cause: the ISP blocks the R2 IPs
+  (172.64.66.1, 172.64.190.1) under the LaLiga court order and serves a self-signed
+  `CN=core1.netops.test` certificate; plain HTTP shows the block notice. Not an Alkahest bug;
+  rejecting the certificate is correct. Better diagnostics tracked in [[ALK-US-0116]].
 - Security review by the product owner pending for [[ALK-US-0114]].
