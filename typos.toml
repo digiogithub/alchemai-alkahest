@@ -18,3 +18,5 @@ gpui = "gpui"
 PN = "PN"
 # flate2 crate name
 flate = "flate"
+# Ollama's `/set nothink` REPL command, kept for muscle memory.
+nothink = "nothink"

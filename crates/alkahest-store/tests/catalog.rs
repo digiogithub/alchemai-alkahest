@@ -7,7 +7,7 @@ mod common;
 use std::fs;
 
 use alkahest_store::{AlkahestStore, Catalog, OllamaStore, Origin, StoreError, media_type};
-use common::{OllamaFx, gguf_bytes, name, put_model};
+use common::{OllamaFx, gguf_bytes, gguf_bytes_with, name, put_model};
 
 struct World {
     tmp: tempfile::TempDir,
@@ -315,6 +315,59 @@ fn metadata_cache_lives_outside_both_stores() {
     for entry in walk(&w.ollama.root) {
         assert!(!entry.to_string_lossy().contains("gguf-"), "{entry:?}");
     }
+}
+
+/// ALK-US-0089: tev1:0.8b as stored by Ollama 0.35 (capability `decision`, a plain chat
+/// GGUF) and as currently published (a `systemone` template, no capability) are both
+/// decision models, so they get the decision launch flags and the decision API metadata.
+#[test]
+fn ollama_decision_models_are_classified_decision() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ollama = OllamaFx::new(tmp.path());
+    let chat = gguf_bytes_with(
+        "qwen35",
+        7,
+        2048,
+        Some("{{ messages }}"),
+        &[("general.basename", "Tev1")],
+    );
+    ollama.add(
+        "registry.ollama.ai/library/tev1/0.8b",
+        r#"{"model_format":"gguf","model_family":"qwen35","file_type":"Q8_0","capabilities":["decision"]}"#,
+        &[(media_type::MODEL, &chat), (media_type::SYSTEM, b"Evaluate.")],
+    );
+    let systemone = gguf_bytes_with(
+        "qwen35",
+        7,
+        2048,
+        Some("{{ messages }}"),
+        &[("tokenizer.chat_template.systemone", "{{ state }}")],
+    );
+    ollama.add(
+        "registry.ollama.ai/library/tev1/new",
+        r#"{"model_format":"gguf","model_family":"qwen35","renderer":"tev1"}"#,
+        &[(media_type::MODEL, &systemone)],
+    );
+    let alk = AlkahestStore::open(tmp.path().join("alkahest")).unwrap();
+    let catalog = Catalog::new(
+        alk,
+        Some(OllamaStore::open(&ollama.root).unwrap()),
+        Some(tmp.path().join("cache")),
+    );
+
+    let e = catalog.resolve("tev1:0.8b").unwrap();
+    assert_eq!(e.summary().kind, "decision");
+    assert!(e.info.capabilities.contains(&"decision".to_string()));
+    assert_eq!(e.info.decision.basename.as_deref(), Some("Tev1"));
+    assert!(!e.info.decision.has_systemone_template);
+
+    let e = catalog.resolve("tev1:new").unwrap();
+    assert_eq!(e.summary().kind, "decision");
+    assert!(e.info.decision.has_systemone_template);
+    assert_eq!(e.info.decision.renderer.as_deref(), Some("tev1"));
+    // A second read comes from the metadata cache and keeps the decision facts.
+    let again = catalog.resolve("tev1:new").unwrap();
+    assert_eq!(again.info, e.info);
 }
 
 fn walk(p: &std::path::Path) -> Vec<std::path::PathBuf> {

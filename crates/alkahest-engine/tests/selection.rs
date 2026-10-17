@@ -280,6 +280,7 @@ fn info(format: ModelFormat, kind: ModelKind, quant: Option<&str>, needs_prism: 
         loadable: true,
         needs_prism,
         gguf_chat_template: None,
+        decision: Default::default(),
     }
 }
 

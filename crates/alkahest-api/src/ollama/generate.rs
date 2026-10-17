@@ -167,25 +167,47 @@ async fn generate_inner(
         )
         .await;
     }
-    if !req.suffix.is_empty() {
-        return Err(HttpError::bad_request(
-            "suffix (fill-in-the-middle) is not supported yet",
-        ));
-    }
     let response_format = response_format(req.format.as_ref())?;
     let kwargs = think_kwargs(req.think.as_ref())?;
     let acquired = acquire(state, ctx, &req.model, &opts.settings, req.keep_alive).await?;
     let lease = acquired.lease;
-    let use_chat = !req.raw && lease.capabilities().contains(Capability::Chat);
+    let fim = !req.suffix.is_empty();
+    let use_chat = !fim && !req.raw && lease.capabilities().contains(Capability::Chat);
     let client = service::upstream(state);
     let sink = UsageSink::new(state, ctx);
-    let pieces: std::pin::Pin<Box<dyn Stream<Item = Result<Piece, HttpError>> + Send>> = if use_chat
-    {
+    let pieces: std::pin::Pin<Box<dyn Stream<Item = Result<Piece, HttpError>> + Send>> = if fim {
+        // Fill-in-the-middle: llama-server's `/infill` builds the FIM prompt from the
+        // model's own FIM tokens (and refuses models without them), where Ollama renders
+        // `{{ .Suffix }}` in its Go template.
+        service::require(&lease, &req.model, Capability::Completion)?;
+        if !req.images.is_empty() {
+            return Err(HttpError::bad_request(
+                "images are not supported with suffix (fill-in-the-middle)",
+            ));
+        }
+        let mut b = Map::new();
+        b.insert("input_prefix".into(), json!(req.prompt));
+        b.insert("input_suffix".into(), json!(req.suffix));
+        b.insert("prompt".into(), json!(""));
+        b.insert("stream".into(), json!(true));
+        b.insert("cache_prompt".into(), json!(true));
+        for (k, v) in &opts.passthrough {
+            b.insert(k.clone(), v.clone());
+        }
+        apply_sampling(&mut b, lease.settings(), LimitField::NPredict);
+        let resp = post_json(&client, &lease.base_url(), "/infill", &Value::Object(b)).await?;
+        Box::pin(completion_pieces(resp, lease, sink))
+    } else if use_chat {
         if !req.images.is_empty() {
             service::require(&lease, &req.model, Capability::Vision)?;
         }
         let mut messages = Vec::new();
-        if let Some(system) = req.system.as_deref().filter(|s| !s.is_empty()) {
+        // The request's `system` replaces the model's SYSTEM layer, as in Ollama.
+        let system = match req.system.as_deref().filter(|s| !s.is_empty()) {
+            Some(s) => Some(s.to_owned()),
+            None => service::model_system(state, &req.model).await,
+        };
+        if let Some(system) = system {
             messages.push(json!({"role": "system", "content": system}));
         }
         messages.push(user_content("user", &req.prompt, &req.images));
@@ -257,8 +279,15 @@ async fn chat_inner(
     let kwargs = think_kwargs(req.think.as_ref())?;
     let tools = req.tools.clone().unwrap_or_default();
     let has_images = req.messages.iter().any(|m| !m.images.is_empty());
-    let messages: Vec<Value> = req.messages.iter().map(openai_message).collect();
+    let mut messages: Vec<Value> = req.messages.iter().map(openai_message).collect();
     let acquired = acquire(state, ctx, &req.model, &opts.settings, req.keep_alive).await?;
+    // Ollama prepends the model's SYSTEM layer unless the conversation starts with a system
+    // message of its own.
+    if req.messages.first().is_none_or(|m| m.role != "system")
+        && let Some(system) = service::model_system(state, &req.model).await
+    {
+        messages.insert(0, json!({"role": "system", "content": system}));
+    }
     let lease = acquired.lease;
     service::require(&lease, &req.model, Capability::Chat)?;
     if has_images {

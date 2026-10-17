@@ -7,10 +7,13 @@
 //! with [`crate::AppStateBuilder::error_renderer`] without touching the middleware.
 
 use std::fmt;
+use std::sync::Arc;
 
 use alkahest_core::config::EndpointsConfig;
 use axum::Json;
+use axum::extract::{Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
@@ -25,7 +28,9 @@ pub enum Family {
     OpenAi,
     /// Anthropic Messages API, `/v1/messages`.
     Anthropic,
-    /// Decision API, `/v1/systemone`, `/v1/decisions`.
+    /// System One decision API, `/v1/systemone` (Ollama dialect: its clients are Ollama's).
+    SystemOne,
+    /// OpenAI / LocalAI Decisions API, `/v1/decisions` (OpenAI dialect).
     Decisions,
     /// Alkahest admin API, `/alkahest/*`.
     Admin,
@@ -40,6 +45,7 @@ impl fmt::Display for Family {
             Self::Ollama => "ollama",
             Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
+            Self::SystemOne => "systemone",
             Self::Decisions => "decisions",
             Self::Admin => "admin",
             Self::Other => "other",
@@ -60,7 +66,8 @@ impl Family {
             "/" | "/healthz" => Self::Base,
             p if under(p, "/api") => Self::Ollama,
             p if under(p, "/v1/messages") => Self::Anthropic,
-            p if under(p, "/v1/systemone") || under(p, "/v1/decisions") => Self::Decisions,
+            p if under(p, "/v1/systemone") => Self::SystemOne,
+            p if under(p, "/v1/decisions") => Self::Decisions,
             p if under(p, "/v1") => Self::OpenAi,
             p if under(p, "/alkahest") => Self::Admin,
             _ => Self::Other,
@@ -74,7 +81,7 @@ impl Family {
             Self::Ollama => endpoints.ollama,
             Self::OpenAi => endpoints.openai,
             Self::Anthropic => endpoints.anthropic,
-            Self::Decisions => endpoints.decisions,
+            Self::SystemOne | Self::Decisions => endpoints.decisions,
             Self::Base | Self::Admin | Self::Other => true,
         }
     }
@@ -109,6 +116,12 @@ pub enum ErrorKind {
     ModelNotFound,
     /// Malformed or unsupported request (400).
     BadRequest,
+    /// The route exists but not for this HTTP method (405).
+    MethodNotAllowed,
+    /// The request took longer than the server allows (408).
+    RequestTimeout,
+    /// The request body exceeds `server.max_body_bytes` (413).
+    PayloadTooLarge,
     /// Unexpected server failure (500).
     Internal,
     /// The route exists but the operation is not implemented (501).
@@ -127,6 +140,9 @@ impl ErrorKind {
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::NotFound | Self::ModelNotFound => StatusCode::NOT_FOUND,
             Self::BadRequest => StatusCode::BAD_REQUEST,
+            Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
+            Self::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
+            Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
             Self::BadGateway => StatusCode::BAD_GATEWAY,
@@ -141,6 +157,9 @@ impl ErrorKind {
             401 => Self::Unauthorized,
             403 => Self::Forbidden,
             404 => Self::NotFound,
+            405 => Self::MethodNotAllowed,
+            408 => Self::RequestTimeout,
+            413 => Self::PayloadTooLarge,
             501 => Self::NotImplemented,
             502 | 504 => Self::BadGateway,
             503 => Self::Unavailable,
@@ -172,6 +191,13 @@ impl ErrorRenderer for DefaultErrorRenderer {
                     ErrorKind::NotFound => ("invalid_request_error", Some("not_found")),
                     ErrorKind::ModelNotFound => ("invalid_request_error", Some("model_not_found")),
                     ErrorKind::BadRequest => ("invalid_request_error", None),
+                    ErrorKind::MethodNotAllowed => {
+                        ("invalid_request_error", Some("method_not_allowed"))
+                    }
+                    ErrorKind::PayloadTooLarge => {
+                        ("invalid_request_error", Some("request_too_large"))
+                    }
+                    ErrorKind::RequestTimeout => ("server_error", Some("timeout")),
                     ErrorKind::NotImplemented => ("invalid_request_error", Some("not_implemented")),
                     ErrorKind::Internal | ErrorKind::BadGateway => ("server_error", None),
                     ErrorKind::Unavailable => ("server_error", Some("server_busy")),
@@ -185,13 +211,18 @@ impl ErrorRenderer for DefaultErrorRenderer {
                     ErrorKind::Unauthorized => "authentication_error",
                     ErrorKind::Forbidden => "permission_error",
                     ErrorKind::NotFound | ErrorKind::ModelNotFound => "not_found_error",
-                    ErrorKind::BadRequest | ErrorKind::NotImplemented => "invalid_request_error",
-                    ErrorKind::Internal | ErrorKind::BadGateway => "api_error",
+                    ErrorKind::BadRequest
+                    | ErrorKind::NotImplemented
+                    | ErrorKind::MethodNotAllowed => "invalid_request_error",
+                    ErrorKind::PayloadTooLarge => "request_too_large",
+                    ErrorKind::Internal | ErrorKind::BadGateway | ErrorKind::RequestTimeout => {
+                        "api_error"
+                    }
                     ErrorKind::Unavailable => "overloaded_error",
                 };
                 json!({ "type": "error", "error": { "type": kind_name, "message": message } })
             }
-            Family::Base | Family::Ollama | Family::Admin | Family::Other => {
+            Family::Base | Family::Ollama | Family::SystemOne | Family::Admin | Family::Other => {
                 json!({ "error": message })
             }
         };
@@ -202,6 +233,63 @@ impl ErrorRenderer for DefaultErrorRenderer {
         }
         resp
     }
+}
+
+/// Client-safe wording of an error status that a layer (body limit, timeout, panic catcher,
+/// method router, fallback) answered without a dialect body.
+fn status_message(status: StatusCode) -> String {
+    match status {
+        StatusCode::NOT_FOUND => "404 page not found".to_owned(),
+        StatusCode::METHOD_NOT_ALLOWED => "405 method not allowed".to_owned(),
+        StatusCode::PAYLOAD_TOO_LARGE => "request body is too large".to_owned(),
+        StatusCode::REQUEST_TIMEOUT => "request timed out".to_owned(),
+        StatusCode::INTERNAL_SERVER_ERROR => "internal server error".to_owned(),
+        s => s
+            .canonical_reason()
+            .map_or_else(|| s.as_str().to_owned(), str::to_lowercase),
+    }
+}
+
+/// Middleware that gives every error response the shape of its endpoint's dialect
+/// (ALK-SP-0005.R5). Handlers and the authentication layer already answer in dialect; this
+/// catches what tower layers and axum produce on their own (404 fallback, 405, 408, 413,
+/// caught panics), which carry an empty or plain-text body that SDKs cannot parse.
+/// Responses that already carry a JSON body, and every non-error response (streams
+/// included), pass through untouched.
+pub async fn dialect_errors(
+    State(errors): State<Arc<dyn ErrorRenderer>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let family = Family::of_path(req.uri().path());
+    let resp = next.run(req).await;
+    let status = resp.status();
+    if !(status.is_client_error() || status.is_server_error()) {
+        return resp;
+    }
+    let is_json = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.starts_with("application/json"));
+    if is_json {
+        return resp;
+    }
+    let mut rendered = errors.render(
+        family,
+        ErrorKind::from_status(status.as_u16()),
+        &status_message(status),
+    );
+    // Keep the exact status (`from_status` folds unknown 4xx into 400) and the headers the
+    // layer set (`Allow` on 405, request ids).
+    *rendered.status_mut() = status;
+    let (parts, _) = resp.into_parts();
+    for (name, value) in &parts.headers {
+        if name != header::CONTENT_TYPE && name != header::CONTENT_LENGTH {
+            rendered.headers_mut().insert(name.clone(), value.clone());
+        }
+    }
+    rendered
 }
 
 #[cfg(test)]
@@ -222,7 +310,7 @@ mod tests {
             Family::Anthropic
         );
         assert_eq!(Family::of_path("/v1/messagesx"), Family::OpenAi);
-        assert_eq!(Family::of_path("/v1/systemone"), Family::Decisions);
+        assert_eq!(Family::of_path("/v1/systemone"), Family::SystemOne);
         assert_eq!(Family::of_path("/v1/decisions/x"), Family::Decisions);
         assert_eq!(Family::of_path("/alkahest/v1/keys"), Family::Admin);
     }

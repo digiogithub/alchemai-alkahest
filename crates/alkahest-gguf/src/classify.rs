@@ -2,8 +2,10 @@
 //!
 //! Lives in `alkahest-gguf` because the strongest signals are GGUF metadata; Ollama
 //! capabilities and Hugging Face tags are passed in as plain strings so this crate needs no
-//! registry client. Rule order (first match wins): explicit `decision.type`, Hugging Face
-//! `pipeline_tag`, GGUF architecture and pooling, Ollama capabilities, then chat.
+//! registry client. Rule order (first match wins): decision evidence (explicit
+//! `decision.type`, GGUF `tokenizer.chat_template.systemone`, the GGUF `decision-model` tag,
+//! the Ollama `decision` capability), Hugging Face `pipeline_tag`, GGUF architecture and
+//! pooling, Ollama capabilities, then chat.
 
 use crate::accessors::PoolingType;
 use crate::reader::Gguf;
@@ -29,7 +31,8 @@ pub enum ModelKind {
     Image,
     /// Video generation.
     Video,
-    /// Decision model (`decision.type`, systemone API).
+    /// Decision model (`decision.type`, `systemone` template, `decision-model` tag or the
+    /// Ollama `decision` capability; served through the systemone API).
     Decision,
 }
 
@@ -295,10 +298,11 @@ fn format_of(i: &ClassifyInput<'_>) -> ModelFormat {
 /// Classifies a model from all available evidence. Always returns a result; with no evidence
 /// at all the answer is `Chat` in `Gguf`.
 pub fn classify(input: &ClassifyInput<'_>) -> Classification {
-    let decision = input
-        .decision_type
-        .or_else(|| input.gguf.and_then(|g| g.get_str("decision.type")))
-        .is_some_and(|d| !d.is_empty());
+    // Decision evidence comes first: such GGUFs also carry an ordinary chat template (the
+    // scorer renders through it), which would otherwise make them `Chat`.
+    let decision = input.decision_type.is_some_and(|d| !d.is_empty())
+        || input.gguf.is_some_and(Gguf::is_decision_model)
+        || input.ollama_capabilities.iter().any(|c| c == "decision");
 
     let mut kind = if decision {
         ModelKind::Decision

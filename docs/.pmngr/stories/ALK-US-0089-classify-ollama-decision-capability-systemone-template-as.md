@@ -2,15 +2,16 @@
 id: ALK-US-0089
 type: story
 title: Classify Ollama `decision` capability / systemone template as ModelKind::Decision
-status: in_progress
+status: done
 priority: high
 parent: ALK-EP-0012
 milestone: ALK-M-0004
 author: mcp
 labels: [decision, gguf]
 created: 2026-10-17T01:45:57Z
-updated: 2026-10-17T01:47:30Z
+updated: 2026-10-17T02:30:36Z
 started: 2026-10-17T01:47:30Z
+closed: 2026-10-17T02:30:36Z
 inbox:
   status: accepted
   source: mcp

@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 alkahest-core.workspace = true
+alkahest-decision.workspace = true
 alkahest-engine.workspace = true
 alkahest-fetch.workspace = true
 alkahest-hf.workspace = true

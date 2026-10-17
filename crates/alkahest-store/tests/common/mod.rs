@@ -17,6 +17,17 @@ fn s(out: &mut Vec<u8>, v: &str) {
 
 /// Bytes of a tiny GGUF v3 file: header only, one 2-D Q4_K tensor.
 pub fn gguf_bytes(arch: &str, file_type: u32, ctx: u32, template: Option<&str>) -> Vec<u8> {
+    gguf_bytes_with(arch, file_type, ctx, template, &[])
+}
+
+/// [`gguf_bytes`] with extra string metadata keys.
+pub fn gguf_bytes_with(
+    arch: &str,
+    file_type: u32,
+    ctx: u32,
+    template: Option<&str>,
+    extra: &[(&str, &str)],
+) -> Vec<u8> {
     let mut kv: Vec<(String, Result<u32, String>)> = vec![
         ("general.architecture".into(), Err(arch.into())),
         ("general.file_type".into(), Ok(file_type)),
@@ -25,6 +36,9 @@ pub fn gguf_bytes(arch: &str, file_type: u32, ctx: u32, template: Option<&str>) 
     ];
     if let Some(t) = template {
         kv.push(("tokenizer.chat_template".into(), Err(t.into())));
+    }
+    for (k, v) in extra {
+        kv.push(((*k).into(), Err((*v).into())));
     }
     if arch == "bert" || arch == "nomic-bert" {
         // pooling_type 1 = mean

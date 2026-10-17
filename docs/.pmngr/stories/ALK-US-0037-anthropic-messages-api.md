@@ -2,14 +2,15 @@
 id: ALK-US-0037
 type: story
 title: Anthropic Messages API
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0007
 milestone: ALK-M-0004
 labels: [api, anthropic]
 estimate: 5
 created: 2026-10-16T22:40:52Z
-updated: 2026-10-16T22:40:56Z
+updated: 2026-10-17T02:30:48Z
+started: 2026-10-17T02:30:48Z
 links:
   - { kind: implements, target: ALK-SP-0005.R3 }
 ---

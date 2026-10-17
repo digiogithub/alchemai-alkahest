@@ -61,6 +61,25 @@ async fn ps_version_and_stop() {
 }
 
 #[tokio::test]
+async fn load_sends_an_empty_generate_with_keep_alive() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/generate"))
+        .and(body_partial_json(
+            json!({"model": "llama3.2", "keep_alive": "10m", "stream": false}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"model": "llama3.2", "done": true, "done_reason": "load"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    c.load("llama3.2", Some(json!("10m"))).await.unwrap();
+}
+
+#[tokio::test]
 async fn api_errors_carry_the_message() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

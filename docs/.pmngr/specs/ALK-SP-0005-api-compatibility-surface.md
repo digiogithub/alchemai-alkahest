@@ -5,7 +5,7 @@ title: API compatibility surface
 status: backlog
 labels: [api]
 created: 2026-10-16T22:37:35Z
-updated: 2026-10-17T01:44:49Z
+updated: 2026-10-17T02:26:31Z
 requirements:
   R1:
     status: backlog
@@ -60,11 +60,19 @@ requirements:
       code:
         - crates/alkahest-api/src/dialect.rs#DefaultErrorRenderer
         - crates/alkahest-api/src/dialect.rs#ErrorKind
+        - crates/alkahest-api/src/dialect.rs#dialect_errors
         - crates/alkahest-api/src/service.rs#respond
         - crates/alkahest-api/src/service.rs#HttpError
       tests:
         - crates/alkahest-api/tests/openai.rs#unknown_model
         - crates/alkahest-api/tests/ollama.rs#unknown_model_is_404_in_ollama_shape
+        - crates/alkahest-api/tests/errors.rs#unknown_model
+        - crates/alkahest-api/tests/errors.rs#unknown_routes_and_methods_answer_in_dialect
+        - crates/alkahest-api/tests/errors.rs#oversized_bodies_answer_413_in_dialect
+        - crates/alkahest-api/tests/errors.rs#malformed_requests_are_400_in_dialect
+        - crates/alkahest-api/tests/errors.rs#every_kind_renders_in_every_family_shape
+        - crates/alkahest-api/tests/conformance.rs#ollama_python_conformance
+        - crates/alkahest-api/tests/conformance.rs#openai_python_conformance
   R6:
     status: backlog
 ---

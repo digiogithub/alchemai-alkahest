@@ -93,6 +93,9 @@ regex = "=1.13.1"
 semver = { version = "=1.0.28", features = ["serde"] }
 bytesize = "=2.7.0"
 
+# Terminal line editing (`alkahest run`); file history only, no fuzzy search or dirs.
+rustyline = { version = "=18.0.1", default-features = false, features = ["with-file-history"] }
+
 # Security
 keyring = "=4.2.0"
 rpassword = "=7.4.0"

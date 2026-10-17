@@ -460,6 +460,18 @@ impl Client {
         Ok(())
     }
 
+    /// Loads `model` without generating (`/api/generate` with no prompt, the Ollama
+    /// convention), so the first message of an interactive session does not wait for the
+    /// load. `keep_alive` as in Ollama (`"5m"`, seconds, `-1`).
+    pub async fn load(&self, model: &str, keep_alive: Option<Value>) -> Result<()> {
+        let mut body = json!({ "model": model, "stream": false });
+        if let Some(k) = keep_alive {
+            body["keep_alive"] = k;
+        }
+        let _: Value = self.post_json("/api/generate", &body).await?;
+        Ok(())
+    }
+
     /// `POST /api/generate`, streamed.
     pub async fn generate(&self, req: &GenerateRequest) -> Result<JsonStream<GenerateChunk>> {
         let mut body = serde_json::to_value(req).map_err(|e| ClientError::Decode(e.to_string()))?;

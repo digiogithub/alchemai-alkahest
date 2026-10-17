@@ -2,15 +2,16 @@
 id: ALK-US-0038
 type: story
 title: Dialect-correct errors and conformance suite
-status: in_progress
+status: done
 priority: high
 parent: ALK-EP-0007
 milestone: ALK-M-0003
 labels: [api, test]
 estimate: 3
 created: 2026-10-16T22:40:57Z
-updated: 2026-10-17T01:47:30Z
+updated: 2026-10-17T02:30:36Z
 started: 2026-10-17T01:47:30Z
+closed: 2026-10-17T02:30:36Z
 links:
   - { kind: implements, target: ALK-SP-0005.R5 }
 ---
