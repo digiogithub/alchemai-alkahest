@@ -6,7 +6,7 @@ status: backlog
 author: mcp
 labels: [catalog, recipes, models, security]
 created: 2026-10-17T18:38:01Z
-updated: 2026-10-17T19:08:59Z
+updated: 2026-10-17T19:45:25Z
 links:
   - { kind: relates_to, target: ALK-US-0117 }
 requirements:
@@ -81,6 +81,20 @@ requirements:
         - crates/alkahest-recipes/tests/dependencies.rs#real_native_llama_cpp_build
   R7:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-catalog/src/model.rs#ModelEntry
+        - crates/alkahest-catalog/src/model.rs#validate
+        - crates/alkahest-catalog/src/pull.rs#plan_files
+        - crates/alkahest-catalog/src/pull.rs#fetch_file
+        - xtask/src/catalog.rs#check_model
+      tests:
+        - crates/alkahest-catalog/src/model.rs#a_valid_entry_passes
+        - crates/alkahest-catalog/src/model.rs#missing_sha256_refused
+        - crates/alkahest-catalog/src/model.rs#url_and_urls_exclusive
+        - crates/alkahest-catalog/tests/pull.rs#mirrors_tried_in_order
+        - xtask/src/catalog_tests.rs#missing_sha256_refused
+        - xtask/src/catalog_tests.rs#url_and_urls_exclusive
   R8:
     status: backlog
     trace:
@@ -149,6 +163,8 @@ requirements:
         - crates/alkahest-recipes/src/catalog.rs#RecipeLayer
         - crates/alkahest-catalog/src/layers.rs#recipe_catalog
         - crates/alkahest-catalog/src/layers.rs#layered_models
+        - crates/alkahest-catalog/src/layers.rs#search_models
+        - crates/alkahest-catalog/src/pull.rs#resolve_model
         - crates/alkahest/src/engines_cmd.rs#load_catalog
         - crates/alkahest-api/src/admin/engines.rs#RecipeEngineManager
       tests:
@@ -157,22 +173,54 @@ requirements:
         - crates/alkahest-catalog/tests/layers.rs#later_catalog_overrides_earlier
         - crates/alkahest-catalog/tests/layers.rs#disabled_catalog_contributes_nothing
         - crates/alkahest/tests/catalog.rs#engines_show_the_catalog_origin
+        - crates/alkahest-catalog/tests/pull.rs#catalog_selected_explicitly
+        - crates/alkahest-catalog/tests/pull.rs#search_lists_catalog_models
   R13:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-store/src/reference.rs#CATALOG_HOST
+        - crates/alkahest-store/src/catalog.rs#resolve
+        - crates/alkahest-catalog/src/pull.rs#resolve_model
+        - crates/alkahest-catalog/src/pull.rs#pull_catalog
+        - crates/alkahest-api/src/pull.rs#PullService
+        - crates/alkahest-ollama/src/pull.rs#pull_ollama
+        - crates/alkahest/src/pull_cmd.rs#run
+        - crates/alkahest/src/search_cmd.rs#build_listing
+        - crates/alkahest-api/src/admin/discover.rs#catalog_search
+      tests:
+        - crates/alkahest-store/src/reference.rs#reference_parses_and_formats_back
+        - crates/alkahest-store/tests/reference_props.rs#catalog_name_round_trips
+        - crates/alkahest-store/tests/catalog.rs#catalog_model_without_tag_resolves_to_its_only_tag
+        - crates/alkahest-catalog/tests/pull.rs#default_tag
+        - crates/alkahest-catalog/tests/pull.rs#catalog_selected_explicitly
+        - crates/alkahest-catalog/tests/pull.rs#wrong_digest_leaves_nothing
+        - crates/alkahest-catalog/tests/pull.rs#a_failed_pull_removes_the_blobs_it_added
+        - crates/alkahest-catalog/tests/pull.rs#unknown_catalog_entry
+        - crates/alkahest/tests/catalog_models.rs#pulled_catalog_model_is_listed_and_shown
+        - crates/alkahest/tests/catalog_models.rs#wrong_digest_leaves_nothing
+        - crates/alkahest/tests/catalog_models.rs#unknown_catalog_entry
+        - crates/alkahest-api/tests/admin_api.rs#catalog_search_lists_snapshot_models
   R14:
     status: backlog
     trace:
       code:
         - crates/alkahest-catalog/src/http.rs#KeyringCredentials
         - crates/alkahest-catalog/src/http.rs#Token
+        - crates/alkahest-catalog/src/http.rs#host_token_env_var
         - crates/alkahest-catalog/src/archive.rs#extract_catalog
         - crates/alkahest-catalog/src/sync.rs#Limits
+        - crates/alkahest-catalog/src/pull.rs#plan_files
+        - crates/alkahest-catalog/src/pull.rs#rollback
       tests:
         - crates/alkahest-catalog/tests/sync.rs#sync_never_executes
         - crates/alkahest-catalog/tests/sync.rs#token_never_logged
         - crates/alkahest-catalog/tests/sync.rs#token_not_forwarded_across_hosts
         - crates/alkahest-catalog/tests/sync.rs#oversized_catalog_refused
         - crates/alkahest-catalog/tests/sync.rs#path_traversal_refused
+        - crates/alkahest-catalog/src/pull.rs#model_file_first_and_token_only_for_its_host
+        - crates/alkahest-catalog/src/pull.rs#host_matching
+        - crates/alkahest-catalog/tests/pull.rs#wrong_digest_leaves_nothing
 ---
 
 ## Purpose
@@ -303,7 +351,7 @@ A variant MAY set `native = true`. A native variant SHALL have a `source` table 
 
 ### ALK-SP-0011.R7 — Model entries
 
-`models/<namespace>/<model>.toml` SHALL hold one model entry: `name` (`<namespace>/<model>`, equal to the path), `description`, `license` (SPDX id or `other`), optional `homepage` and `tags` (list of words used by search), and one or more `[[variants]]`. Each variant SHALL have `tag` (unique within the entry; the first variant is the default tag), optional `format` (`gguf` default, or `safetensors`), optional `quant`, optional `engine` (an engine id; [[ALK-SP-0003]] R2 selection applies when absent), either `template` (a named built-in template such as `chatml`) or `template_text` with `template_format` (`jinja` or `go`), optional `params` (a table of Ollama-style parameters: `num_ctx`, `temperature`, `stop`, ...), and one or more `[[variants.files]]`. Each file SHALL have `kind` (`model`, `projector`, `adapter`, `vae`, `text-encoder`, `tokenizer`, `config`), either `url` or `urls` (a non-empty list of https mirrors tried in order), `sha256` (mandatory), `size` (mandatory, bytes), optional `filename` (the name inside the store, default the last URL segment) and optional `auth` (a host name whose token is read from the keyring, R14). Exactly one file per variant SHALL have `kind = "model"`.
+`models/<namespace>/<model>.toml` SHALL hold one model entry: `name` (`<namespace>/<model>`, equal to the path), `description`, `license` (SPDX id or `other`), optional `homepage` and `tags` (list of words used by search), and one or more `[[variants]]`. Each variant SHALL have `tag` (unique within the entry; the first variant is the default tag), optional `format` (`gguf` default, or `safetensors`), optional `quant`, optional `engine` (an engine id; [[ALK-SP-0003]] R2 selection applies when absent), either `template` (a named built-in template such as `chatml`) or `template_text` with `template_format` (`jinja` or `go`), optional `params` (a table of Ollama-style parameters: `num_ctx`, `temperature`, `stop`, ...), and one or more `[[variants.files]]`. Each file SHALL have `kind` (`model`, `projector`, `adapter`, `vae`, `text-encoder`, `tokenizer`, `config`), either `url` or `urls` (a non-empty list of https mirrors tried in order; plain `http` only to a loopback host, the rule of R9 for sources, for local mirrors and tests), `sha256` (mandatory), `size` (mandatory, bytes, greater than zero), optional `filename` (the name inside the store, default the last URL segment) and optional `auth` (a host name whose token is read from the keyring, R14). Exactly one file per variant SHALL have `kind = "model"`.
 
 #### Scenario: model entry parses
 - **GIVEN** `models/acme/assistant.toml` with two variants `q4_k_m` and `q8_0`, each with one model file
@@ -429,26 +477,31 @@ Engine recipes SHALL be layered, lowest first: built-in recipes compiled into th
 - **WHEN** the models are loaded
 - **THEN** the `acme` entry is used
 
-### ALK-SP-0011.R13 — catalog: model reference
+### ALK-SP-0011.R13 — alkahest/ catalog model names
 
-The model reference grammar of [[ALK-SP-0001]] (R3) SHALL accept `catalogref = "catalog:" [ source "::" ] namespace "/" model [ ":" tag ]`, where `source` names a configured catalog (default: the highest layer that has the entry, R12) and `tag` defaults to the entry's first variant. `alkahest pull catalog:<...>` SHALL download every file of the variant with `alkahest-fetch` (resumable, parallel, mirror fallback, sha256-checked) into the Alkahest store, never the Ollama store, and write a manifest named `catalog/<namespace>/<model>:<tag>` whose config records engine, template, params and the origin (catalog name and commit). After a pull, `catalog:<namespace>/<model>:<tag>` and `catalog/<namespace>/<model>:<tag>` SHALL resolve to that local model; a bare `catalog/...` name SHALL never be pulled from an OCI registry host called `catalog`. A digest mismatch SHALL fail the pull and leave no manifest and no partial blob.
+Catalog models SHALL be named with the pseudo-host `alkahest` in the model reference grammar of [[ALK-SP-0001]] (R3): `catalogname = "alkahest/" namespace "/" model [ ":" tag ]`, parsed like `hf.co/<org>/<repo>` (the first of three segments is the host; the namespace MAY contain `.` like a catalog name, R1). There is no `catalog:` prefix: `alkahest:` stays the store scope of ALK-SP-0001.R3, so `alkahest:alkahest/acme/assistant` means "the catalog model, looked up in the Alkahest store only". A missing tag, or the tag `latest` when the entry has no variant `latest`, SHALL select the entry's first variant, and the concrete variant tag SHALL be the stored tag. `alkahest pull` and `alkahest search` SHALL accept `--catalog <name>` to use one configured catalog; without it the highest layer that has the entry decides (R12). `alkahest pull alkahest/<...>` SHALL download every file of the variant with `alkahest-fetch` (resumable, parallel, mirror fallback, sha256- and size-checked) into the Alkahest store, never the Ollama store, and write a manifest named `alkahest/<namespace>/<model>:<tag>` whose config records engine, template, params and the origin (catalog name and commit). After a pull, `alkahest/<namespace>/<model>:<tag>` SHALL resolve to that local model, and `alkahest/<namespace>/<model>` SHALL resolve to it when it is the only local tag of that model. The host `alkahest` SHALL never be contacted as an OCI registry. A digest mismatch SHALL fail the pull and leave no manifest and no blob of the model in the store (verified downloads may stay in the partial download area for a resume).
 
 #### Scenario: reference parses and formats back
-- **WHEN** `catalog:acme::acme/assistant:q8_0` is parsed and formatted
-- **THEN** source `acme`, name `acme/assistant`, tag `q8_0` round-trip to the same string
+- **WHEN** `alkahest/acme/assistant:q8_0` and `alkahest:alkahest/acme/assistant:q8_0` are parsed and formatted
+- **THEN** host `alkahest`, name `acme/assistant`, tag `q8_0` (and scope `alkahest` for the second) round-trip to the same strings
 
 #### Scenario: default tag
 - **GIVEN** an entry whose first variant is `q4_k_m`
-- **WHEN** `alkahest pull catalog:acme/assistant` runs
-- **THEN** the `q4_k_m` variant is pulled and stored as `catalog/acme/assistant:q4_k_m`
+- **WHEN** `alkahest pull alkahest/acme/assistant` runs
+- **THEN** the `q4_k_m` variant is pulled and stored as `alkahest/acme/assistant:q4_k_m`
+
+#### Scenario: catalog selected explicitly
+- **GIVEN** catalogs `official` then `acme`, both with `acme/assistant`
+- **WHEN** `alkahest pull alkahest/acme/assistant --catalog official` runs
+- **THEN** the `official` entry is pulled and its origin records `official`
 
 #### Scenario: wrong digest leaves nothing
 - **GIVEN** a fixture server that serves a model file whose sha256 differs from the entry
 - **WHEN** the model is pulled
-- **THEN** the pull fails naming the file, and `alkahest ls` does not list the model and no blob of it remains
+- **THEN** the pull fails naming the file, and `alkahest ls` does not list the model and no blob of it remains in the store
 
 #### Scenario: unknown catalog entry
-- **WHEN** `alkahest pull catalog:acme/missing` runs
+- **WHEN** `alkahest pull alkahest/acme/missing` runs
 - **THEN** it fails with "no catalog entry acme/missing" and lists the catalogs searched
 
 ### ALK-SP-0011.R14 — Catalog security
