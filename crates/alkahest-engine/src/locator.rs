@@ -114,9 +114,15 @@ impl FsLocator {
         }
     }
 
-    /// The locator the server uses: `ResolvedPaths::engines_dir` plus `engines.overrides`.
+    /// The locator the server uses: `ResolvedPaths::engines_dir` plus `engines.overrides`, and
+    /// the engines shipped with the package next to the running executable
+    /// ([`alkahest_recipes::bundled_roots`], ALK-T-0222).
     pub fn from_config(config: &Config, paths: &ResolvedPaths) -> Self {
+        let roots = std::env::current_exe()
+            .map(|exe| alkahest_recipes::bundled_roots(&exe))
+            .unwrap_or_default();
         Self::new(paths.engines_dir.clone(), config.engines.overrides.clone())
+            .with_extra_roots(roots)
     }
 
     /// Replaces the `PATH` value searched (`None` disables the `PATH` lookup). For tests and

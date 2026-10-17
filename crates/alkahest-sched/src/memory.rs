@@ -28,6 +28,8 @@ pub const DEFAULT_VRAM_FRACTION: f64 = 0.8;
 pub const GPU_RUNTIME_OVERHEAD_BYTES: u64 = 300 << 20;
 /// Fixed encoder graph cost added to the mmproj weights (heuristic).
 pub const MMPROJ_GRAPH_BYTES: u64 = 128 << 20;
+/// KV cache cells are allocated in multiples of this many per sequence (llama.cpp b11669).
+const KV_CELL_PAD: u64 = 256;
 const MIB: u64 = 1 << 20;
 
 /// Errors building a [`ModelProfile`].
@@ -261,8 +263,12 @@ impl MemoryEstimate {
 
 /// KV cache bytes of one block for `cfg`.
 pub fn kv_bytes_per_layer(p: &ModelProfile, cfg: &EstimateConfig) -> u64 {
+    // llama.cpp rounds each sequence's cache up to a multiple of 256 cells (measured on
+    // b11669, docs/research/memory-estimator-calibration.md).
     let cells = cfg
         .context_length
+        .div_ceil(KV_CELL_PAD)
+        .saturating_mul(KV_CELL_PAD)
         .saturating_mul(u64::from(cfg.num_parallel.max(1)));
     let per_cell_bits = p.head_count_kv as f64
         * (p.key_length as f64 * cfg.cache_type_k.bits_per_element()

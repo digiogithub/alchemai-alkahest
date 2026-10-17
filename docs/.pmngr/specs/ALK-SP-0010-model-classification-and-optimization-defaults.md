@@ -5,7 +5,7 @@ title: Model classification and optimization defaults
 status: backlog
 labels: [gguf, config]
 created: 2026-10-16T22:37:40Z
-updated: 2026-10-16T23:53:13Z
+updated: 2026-10-17T00:54:11Z
 requirements:
   R1:
     status: backlog
@@ -18,9 +18,12 @@ requirements:
       code:
         - crates/alkahest-gguf/src/accessors.rs#Gguf
         - crates/alkahest-gguf/src/reader.rs#Gguf
+        - crates/alkahest-engine/src/llama_cpp.rs#template_source
+        - crates/alkahest-engine/src/llama_cpp.rs#builtin_template_for_go
       tests:
         - crates/alkahest-gguf/tests/gguf_reader.rs#template_gives_tools_and_thinking
         - crates/alkahest-gguf/tests/gguf_reader.rs#reads_v3_header_metadata_and_tensors
+        - crates/alkahest-engine/tests/llama_cpp.rs#template_precedence_follows_adr_0001
   R3:
     status: backlog
     trace:

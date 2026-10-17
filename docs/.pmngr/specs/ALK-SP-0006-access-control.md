@@ -5,22 +5,88 @@ title: Access control
 status: backlog
 labels: [security]
 created: 2026-10-16T22:37:36Z
-updated: 2026-10-16T22:37:36Z
+updated: 2026-10-17T00:39:01Z
 requirements:
   R1:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-core/src/config.rs#ServerConfig
+        - crates/alkahest-core/src/config.rs#AuthConfig
+        - crates/alkahest-api/src/auth.rs#AuthPolicy
+        - crates/alkahest-api/src/auth.rs#authenticate
+        - crates/alkahest/src/serve_cmd.rs#serve
+      tests:
+        - crates/alkahest-api/tests/server.rs#default_bind
+        - crates/alkahest-api/tests/auth.rs#loopback_needs_no_key
+        - crates/alkahest-api/tests/auth.rs#require_on_loopback_demands_keys_locally
+        - crates/alkahest-api/src/auth.rs#ipv4_and_ipv6_loopback_and_mapped_addresses_are_local
+        - crates/alkahest/tests/serve.rs#serve_binds_the_host_flag_and_answers_version
   R2:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/auth.rs#authenticate
+        - crates/alkahest-api/src/auth.rs#presented_key
+        - crates/alkahest-api/src/auth.rs#check_exposure
+        - crates/alkahest-api/src/dialect.rs#DefaultErrorRenderer
+      tests:
+        - crates/alkahest-api/tests/auth.rs#missing_key
+        - crates/alkahest-api/tests/auth.rs#remote_with_valid_key_via_bearer_or_x_api_key
+        - crates/alkahest-api/tests/auth.rs#wrong_and_unknown_keys_get_the_same_answer
+        - crates/alkahest-api/tests/auth.rs#spoofed_forwarded_for_does_not_grant_loopback_trust
+        - crates/alkahest-api/src/auth.rs#startup_refusal
+        - crates/alkahest/tests/serve.rs#startup_refusal_without_keys_on_a_network_bind
   R3:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/keys/token.rs#generate_key
+        - crates/alkahest-api/src/keys/token.rs#hash_key
+        - crates/alkahest-api/src/keys/store.rs#KeyStore
+        - crates/alkahest-api/src/keys/verify.rs#FileKeyVerifier
+        - crates/alkahest/src/keys_cmd.rs#run
+      tests:
+        - crates/alkahest-api/src/keys/verify.rs#revocation
+        - crates/alkahest-api/src/keys/store.rs#create_stores_only_a_salted_hash
+        - crates/alkahest-api/src/keys/store.rs#store_file_is_owner_only
+        - crates/alkahest-api/tests/auth.rs#revoked_key_is_refused_on_the_next_request
+        - crates/alkahest/tests/keys.rs#create_shows_the_key_once_and_stores_only_a_hash
   R4:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/dialect.rs#requires_admin
+        - crates/alkahest-api/src/keys/verify.rs#Principal
+        - crates/alkahest-api/src/auth.rs#authenticate
+      tests:
+        - crates/alkahest-api/tests/auth.rs#inference_key
+        - crates/alkahest-api/tests/auth.rs#opted_out_remote_access_is_anonymous_but_never_admin
+        - crates/alkahest-api/src/dialect.rs#admin_routes
   R5:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/audit.rs#UsageTracker
+        - crates/alkahest-api/src/audit.rs#AuditLog
+        - crates/alkahest-api/src/auth.rs#authenticate
+        - crates/alkahest/src/keys_cmd.rs#ls
+      tests:
+        - crates/alkahest-api/tests/audit.rs#last_used
+        - crates/alkahest-api/tests/audit.rs#refusals_are_audited_without_secrets_and_local_traffic_is_not
+        - crates/alkahest/tests/serve.rs#last_used_shows_in_keys_ls_and_the_audit_log
   R6:
     status: backlog
   R7:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-core/src/config.rs#EndpointsConfig
+        - crates/alkahest-api/src/dialect.rs#Family
+        - crates/alkahest-api/src/router.rs#cors_layer
+      tests:
+        - crates/alkahest-api/tests/auth.rs#disabled_family
+        - crates/alkahest-api/tests/auth.rs#cors_is_off_by_default_and_follows_configured_origins
 ---
 
 ## Purpose

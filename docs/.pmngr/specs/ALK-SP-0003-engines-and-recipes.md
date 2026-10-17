@@ -5,7 +5,7 @@ title: Engines and recipes
 status: backlog
 labels: [engine, recipes]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-17T00:17:43Z
+updated: 2026-10-17T00:54:11Z
 requirements:
   R1:
     status: backlog
@@ -31,6 +31,7 @@ requirements:
         - crates/alkahest-engine/src/select.rs#Platform
         - crates/alkahest-engine/src/registry.rs#EngineRegistry::plan
         - crates/alkahest-engine/src/error.rs#EngineError
+        - crates/alkahest-engine/src/llama_cpp.rs#LlamaCppEngine
       tests:
         - crates/alkahest-engine/tests/selection.rs#bonsai_routing
         - crates/alkahest-engine/tests/selection.rs#rules_by_format_kind_and_quant
@@ -38,6 +39,7 @@ requirements:
         - crates/alkahest-engine/tests/selection.rs#vllm_only_where_supported
         - crates/alkahest-engine/tests/selection.rs#not_installed_names_the_install_command
         - crates/alkahest-engine/tests/selection.rs#agrees_with_the_catalog_default_engine
+        - crates/alkahest-engine/tests/llama_cpp.rs#real_llama_server_serves_and_stops
   R3:
     status: backlog
   R4:

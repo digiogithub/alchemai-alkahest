@@ -2,14 +2,16 @@
 id: ALK-US-0045
 type: story
 title: Linux systemd service
-status: backlog
+status: done
 priority: critical
 parent: ALK-EP-0009
 milestone: ALK-M-0003
 labels: [service, linux]
 estimate: 3
 created: 2026-10-16T22:41:23Z
-updated: 2026-10-16T22:41:29Z
+updated: 2026-10-17T00:55:10Z
+started: 2026-10-17T00:41:24Z
+closed: 2026-10-17T00:55:10Z
 links:
   - { kind: implements, target: ALK-SP-0009.R1 }
   - { kind: implements, target: ALK-SP-0009.R2 }

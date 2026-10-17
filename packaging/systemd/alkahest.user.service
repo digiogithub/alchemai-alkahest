@@ -1,0 +1,17 @@
+# Alkahest per-user service (ALK-SP-0009.R1, `alkahest service install --user`). Starts with
+# the user's systemd instance; run `loginctl enable-linger $USER` to start it at boot.
+[Unit]
+Description=Alkahest local AI model server (user)
+Documentation=https://github.com/digio/alkahest
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@EXEC_START@ serve
+Restart=always
+RestartSec=2
+TimeoutStopSec=45
+# Output goes to the user journal: `journalctl --user -u alkahest`.
+
+[Install]
+WantedBy=default.target

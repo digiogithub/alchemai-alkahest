@@ -177,7 +177,12 @@ pub enum Command {
         model: String,
     },
     /// Start the API server.
-    Serve,
+    Serve {
+        /// Start on a non-loopback address even though remote clients would not need a key
+        /// (`auth.require_key_for_remote = false`) or no API key exists yet.
+        #[arg(long)]
+        allow_unauthenticated: bool,
+    },
     /// Open the desktop app (needs a build with the `desktop` feature).
     Desktop,
     /// Manage the Hugging Face token (`login`, `logout`, `whoami`).
@@ -236,14 +241,23 @@ pub enum KeysAction {
     /// List keys.
     #[command(visible_alias = "list")]
     Ls,
-    /// Create a key.
+    /// Create a key and print it once; only a salted hash is stored.
     Create {
-        /// Label of the new key.
+        /// Label of the new key (unique among active keys).
         name: String,
+        /// Scope to grant: `inference` (default) or `admin` (includes inference). Repeatable.
+        #[arg(long = "scope", value_name = "SCOPE")]
+        scopes: Vec<String>,
+        /// Restrict the key to this model. Repeatable; default: every model.
+        #[arg(long = "model", value_name = "MODEL")]
+        models: Vec<String>,
+        /// Expiry: a duration such as `12h`, `30d`, `8w`, or an RFC 3339 time.
+        #[arg(long, value_name = "WHEN")]
+        expires: Option<String>,
     },
-    /// Revoke a key.
+    /// Revoke a key; the next request with it is refused.
     Revoke {
-        /// Key id.
+        /// Key id (`abcd1234` or `alk_abcd1234`) or active key name.
         id: String,
     },
 }
@@ -270,12 +284,33 @@ pub enum EnginesAction {
 /// `alkahest service ...`
 #[derive(Debug, Subcommand)]
 pub enum ServiceAction {
-    /// Install the service unit.
-    Install,
-    /// Remove the service unit.
-    Uninstall,
-    /// Show service status.
-    Status,
+    /// Install the service unit and start it.
+    Install(ServiceArgs),
+    /// Stop the service and remove the unit (the service user and its data stay).
+    Uninstall(ServiceArgs),
+    /// Start the installed service.
+    Start(ServiceArgs),
+    /// Stop the installed service.
+    Stop(ServiceArgs),
+    /// Show whether the service is running and where it listens.
+    Status(ServiceArgs),
+}
+
+/// Options shared by the `service` actions.
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct ServiceArgs {
+    /// Manage a per-user service (`systemctl --user`) instead of the system service.
+    #[arg(long)]
+    pub user: bool,
+    /// Print the unit and the commands without writing or running anything.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Write below this directory and run no command (packaging, tests).
+    #[arg(long, value_name = "DIR")]
+    pub root: Option<std::path::PathBuf>,
+    /// Binary the unit starts; defaults to the running executable.
+    #[arg(long, value_name = "PATH")]
+    pub bin: Option<std::path::PathBuf>,
 }
 
 /// `alkahest config ...`
@@ -325,14 +360,14 @@ impl Command {
             Self::Ps | Self::Stop { .. } => "ALK-US-0031",
             Self::Rm { .. } | Self::Cp { .. } | Self::Gc { .. } => "ALK-US-0013",
             Self::Run { .. } => "ALK-US-0039",
-            Self::Serve => "ALK-US-0033",
             Self::Desktop => "ALK-US-0064",
-            Self::Keys { .. } => "ALK-US-0041",
             Self::Service { .. } => "ALK-US-0045",
             Self::Pull { .. }
             | Self::Config { .. }
             | Self::Completions { .. }
             | Self::Sysinfo
+            | Self::Serve { .. }
+            | Self::Keys { .. }
             | Self::Engines { .. }
             | Self::Hf { .. } => {
                 return None;
@@ -353,7 +388,7 @@ impl Command {
             Self::Cp { .. } => "cp",
             Self::Run { .. } => "run",
             Self::Stop { .. } => "stop",
-            Self::Serve => "serve",
+            Self::Serve { .. } => "serve",
             Self::Desktop => "desktop",
             Self::Hf { .. } => "hf",
             Self::Keys { .. } => "keys",

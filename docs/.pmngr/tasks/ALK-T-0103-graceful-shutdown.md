@@ -2,14 +2,15 @@
 id: ALK-T-0103
 type: task
 title: Graceful shutdown
-status: backlog
+status: done
 priority: critical
 parent: ALK-US-0033
 milestone: ALK-M-0003
 labels: [api]
 effort: 1
 created: 2026-10-16T22:40:35Z
-updated: 2026-10-16T22:40:35Z
+updated: 2026-10-17T00:38:40Z
+closed: 2026-10-17T00:38:40Z
 ---
 
 ## Description

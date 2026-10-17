@@ -23,6 +23,7 @@ default = []
 desktop = ["dep:alkahest-desktop"]
 
 [dependencies]
+alkahest-api.workspace = true
 alkahest-core.workspace = true
 alkahest-fetch.workspace = true
 alkahest-desktop = { workspace = true, optional = true }
@@ -42,9 +43,13 @@ serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 toml.workspace = true
+time.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+alkahest-engine.workspace = true
+alkahest-gguf.workspace = true
+alkahest-sched.workspace = true
 assert_cmd.workspace = true
 predicates.workspace = true
 tempfile.workspace = true

@@ -17,7 +17,9 @@ pub mod capability;
 pub mod engine;
 pub mod error;
 pub mod id;
+pub mod install;
 pub mod launch;
+pub mod llama_cpp;
 pub mod locator;
 pub mod registry;
 pub mod select;
@@ -27,7 +29,9 @@ pub use capability::{Capabilities, Capability, CapabilityError, kind_capabilitie
 pub use engine::Engine;
 pub use error::{EngineError, Result};
 pub use id::{ApiDialect, EngineId};
+pub use install::{EngineInstaller, InstallFuture, RecipeInstaller};
 pub use launch::{HealthCheck, LaunchRequest, LaunchSpec, ReadyPredicate};
+pub use llama_cpp::{LlamaCppEngine, TemplateSource, builtin_template_for_go, template_source};
 pub use locator::{EngineInstall, EngineLocator, FsLocator, InstallSource, LocateQuery};
 pub use registry::{EnginePlan, EngineRegistry, PreparedLaunch};
 pub use select::{
