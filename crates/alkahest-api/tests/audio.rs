@@ -204,3 +204,30 @@ async fn undecodable_audio_explains_wav_and_ffmpeg() {
     let msg = e["error"]["message"].as_str().unwrap();
     assert!(msg.contains("ffmpeg") && msg.contains("WAV"), "{msg}");
 }
+
+/// ADR 0003: no TTS engine ships; the route answers a clear 501 and still validates the body.
+#[tokio::test]
+async fn speech_is_a_clear_501_until_an_engine_exists() {
+    let h = Harness::start(&models()).await;
+    let resp = h
+        .post(
+            "/v1/audio/speech",
+            serde_json::json!({"model": "tts-1", "input": "hello", "voice": "alloy"}),
+        )
+        .await;
+    assert_eq!(resp.status(), 501);
+    let e: Value = resp.json().await.unwrap();
+    assert_eq!(e["error"]["code"], "not_implemented");
+    let msg = e["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("text to speech") && msg.contains("ADR 0003"),
+        "{msg}"
+    );
+
+    for bad in [
+        serde_json::json!({"input": "hello"}),
+        serde_json::json!({"model": "tts-1"}),
+    ] {
+        assert_eq!(h.post("/v1/audio/speech", bad).await.status(), 400);
+    }
+}
