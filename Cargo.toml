@@ -116,8 +116,14 @@ zip = { version = "=9.0.3", default-features = false, features = ["deflate"] }
 parking_lot = "=0.12.5"
 dashmap = "=6.1.0"
 
+# Desktop app (only `alkahest-desktop` may depend on it; `cargo xtask check-deps`). Same pin as
+# the reference apps Bitacora and Pando Assistant; it brings `gpui-pre` 0.3.8.
+gpui-kit = "=0.7.1"
+
 # Repository automation (xtask)
 cargo_metadata = "=0.23.1"
+# `cargo xtask icons`: SVG rasterizer (Apache-2.0 OR MIT), same version gpui-pre already locks.
+resvg = { version = "=0.45.1", default-features = false }
 
 # Tests
 tempfile = "=3.27.0"

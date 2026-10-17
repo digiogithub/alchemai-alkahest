@@ -20,7 +20,7 @@ path = "src/main.rs"
 default = []
 # Links the GPUI desktop app for `alkahest desktop`. A build without it must not
 # link GPUI, X11, Wayland or Vulkan.
-desktop = ["dep:alkahest-desktop"]
+desktop = ["dep:alkahest-desktop", "alkahest-desktop/gui"]
 
 [dependencies]
 alkahest-api.workspace = true

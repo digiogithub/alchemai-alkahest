@@ -52,14 +52,16 @@ fn unbuilt_commands_name_their_story_and_exit_2() {
     }
 }
 
+/// ALK-SP-0008.R1 scenario "headless build": a server-only build prints a clear message and
+/// exits 2.
 #[cfg(not(feature = "desktop"))]
 #[test]
-fn desktop_without_the_feature_explains_and_fails() {
+fn headless_build() {
     let tmp = tempfile::tempdir().unwrap();
     alkahest(tmp.path())
         .arg("desktop")
         .assert()
-        .failure()
+        .code(2)
         .stderr(contains("--features desktop"));
 }
 

@@ -12,4 +12,22 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+default = []
+# The GPUI window. Off by default so `cargo build --workspace` (and every server-side story)
+# does not compile GPUI; `alkahest --features desktop` turns it on. Without it the crate only
+# holds the GPUI-free logic (connection state machine, server launcher, settings, tokens).
+gui = ["dep:gpui-kit"]
+# GPUI headless test contexts for the GUI unit tests (desktop CI job only).
+gui-test = ["gui", "gpui-kit/test-support"]
+
 [dependencies]
+alkahest-client.workspace = true
+gpui-kit = { workspace = true, optional = true }
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
