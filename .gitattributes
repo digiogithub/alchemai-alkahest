@@ -1,0 +1,14 @@
+# Check text out with LF on every platform. Sources embed files with `include_str!` (systemd
+# units, recipes, licence texts, fixtures) and tests compare generated files byte for byte;
+# a Windows checkout with `core.autocrlf=true` would otherwise turn them into CRLF.
+* text=auto eol=lf
+
+# Binary assets: never converted.
+*.png binary
+*.ico binary
+*.icns binary
+*.ttf binary
+*.gguf binary
+
+# Upstream licence text committed with CRLF; shipped byte for byte as received.
+crates/alkahest-desktop/assets/fonts/OFL-IBMPlexMono.txt -text

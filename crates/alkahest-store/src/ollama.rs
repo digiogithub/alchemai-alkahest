@@ -322,8 +322,11 @@ impl ModelSource for OllamaStore {
         let v2 = self.manifests_v2_dir();
         let legacy = self.legacy_manifests_dir();
         for path in self.manifest_candidates(name) {
-            if fs::symlink_metadata(&path).is_ok() {
-                let tree = if path.starts_with(&v2) { &v2 } else { &legacy };
+            let tree = if path.starts_with(&v2) { &v2 } else { &legacy };
+            // On case-insensitive filesystems a differently cased name opens the stored file
+            // too; only an exact spelling may take the shortcut, so the entry keeps the stored
+            // name and the scan below handles the rest.
+            if fsutil::exists_with_exact_case(tree, &path) {
                 return self.load(name.clone(), path, tree).map(Some);
             }
         }

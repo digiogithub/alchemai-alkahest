@@ -72,8 +72,32 @@ fn first_field_exists(file: &Path, name: &str) -> bool {
 /// `root` joined with the absolute `path` (`/` stays the real root).
 pub(crate) fn under(root: Option<&Path>, path: &str) -> PathBuf {
     match root {
-        Some(r) => r.join(path.trim_start_matches('/')),
+        Some(r) => posix_join(r, path.trim_start_matches('/')),
         None => PathBuf::from(path),
+    }
+}
+
+/// `base` joined with the `/`-separated relative path `rel`, keeping `/` separators on every
+/// host.
+///
+/// Service files and commands target Linux (systemd) and macOS (launchd). A plan rendered on
+/// another host, such as a `--dry-run` on Windows, must still print the paths the target
+/// uses, and `Path::join` would put `\` in them there. Windows accepts `/` for real file
+/// writes under `--root`, and on Unix this is exactly `Path::join`.
+pub(crate) fn posix_join(base: &Path, rel: &str) -> PathBuf {
+    #[cfg(unix)]
+    {
+        base.join(rel)
+    }
+    #[cfg(not(unix))]
+    {
+        let mut joined = base.as_os_str().to_owned();
+        let text = base.to_string_lossy();
+        if !text.is_empty() && !text.ends_with(['/', '\\']) {
+            joined.push("/");
+        }
+        joined.push(rel);
+        PathBuf::from(joined)
     }
 }
 
@@ -107,12 +131,12 @@ pub fn render_user_unit(bin: &Path) -> String {
 fn unit_path(user: bool, root: Option<&Path>, host: &Host<'_>) -> PathBuf {
     if user {
         let base = match root {
-            Some(r) => r.join(".config"),
+            Some(r) => posix_join(r, ".config"),
             None => host.user_config_dir.clone(),
         };
-        base.join("systemd/user").join(UNIT_NAME)
+        posix_join(&base, &format!("systemd/user/{UNIT_NAME}"))
     } else {
-        under(root, "/etc/systemd/system").join(UNIT_NAME)
+        under(root, &format!("/etc/systemd/system/{UNIT_NAME}"))
     }
 }
 

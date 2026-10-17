@@ -321,7 +321,9 @@ impl AlkahestStore {
     /// semantics). `None` when absent.
     pub fn read_manifest(&self, name: &ModelName) -> Result<Option<StoredManifest>> {
         let exact = self.manifest_path(name);
-        if exact.is_file() {
+        // The exact-case test keeps the stored spelling on case-insensitive filesystems,
+        // where `exact` also opens for a differently cased name.
+        if exact.is_file() && fsutil::exists_with_exact_case(&self.manifests_dir(), &exact) {
             return self.load_manifest(name.clone(), exact).map(Some);
         }
         Ok(self
@@ -485,8 +487,15 @@ impl BlobWriter {
             .sync_all()
             .map_err(|e| StoreError::io("sync", tmp.path(), e))?;
         fsutil::set_readable(tmp.as_file(), tmp.path())?;
-        tmp.persist(&dest)
-            .map_err(|e| StoreError::io("rename", &dest, e.error))?;
+        if let Err(e) = fsutil::persist(tmp, &dest) {
+            // Blobs are content-addressed: when a concurrent writer committed the same digest
+            // first (Windows refuses to replace it while that rename is in flight), its copy
+            // is byte-identical to ours and the commit has succeeded.
+            if dest.is_file() {
+                return Ok(actual);
+            }
+            return Err(StoreError::io("rename", &dest, e));
+        }
         fsutil::fsync_dir(&blobs_dir)?;
         Ok(actual)
     }

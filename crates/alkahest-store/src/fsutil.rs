@@ -61,6 +61,33 @@ pub(crate) fn mtime(path: &Path) -> Result<SystemTime> {
         .map_err(|e| StoreError::io("stat", path, e))
 }
 
+/// Whether `path` exists with exactly the spelling given in every component below `base`.
+///
+/// Case-insensitive filesystems (APFS and NTFS by default) open `QWEN3/LATEST` when only
+/// `qwen3/latest` exists, so a plain existence test would make a lookup report the spelling
+/// that was asked for instead of the one that is stored. Only reads directories. Components
+/// above `base` are not compared (only existence is tested when `path` is outside `base`).
+pub(crate) fn exists_with_exact_case(base: &Path, path: &Path) -> bool {
+    if fs::symlink_metadata(path).is_err() {
+        return false;
+    }
+    let Ok(rel) = path.strip_prefix(base) else {
+        return true;
+    };
+    let mut dir = base.to_path_buf();
+    for component in rel.components() {
+        let name = component.as_os_str();
+        let found = fs::read_dir(&dir).is_ok_and(|mut entries| {
+            entries.any(|e| e.is_ok_and(|e| e.file_name().as_os_str() == name))
+        });
+        if !found {
+            return false;
+        }
+        dir.push(name);
+    }
+    true
+}
+
 /// Lists the entries of a directory, sorted by name; a missing directory is empty.
 pub(crate) fn list_dir(dir: &Path) -> Result<Vec<(String, PathBuf)>> {
     let rd = match fs::read_dir(dir) {
@@ -152,7 +179,36 @@ pub(crate) fn write_atomic(staging: &Path, dest: &Path, bytes: &[u8]) -> Result<
     set_readable(tmp.as_file(), tmp.path())?;
     let parent = dest.parent().unwrap_or(staging);
     fs::create_dir_all(parent).map_err(|e| StoreError::io("create", parent, e))?;
-    tmp.persist(dest)
-        .map_err(|e| StoreError::io("rename", dest, e.error))?;
+    persist(tmp, dest).map_err(|e| StoreError::io("rename", dest, e))?;
     fsync_dir(parent)
+}
+
+/// How often [`persist`] retries a rename that Windows refused with "access denied".
+const PERSIST_RETRIES: u32 = 8;
+
+/// Renames a finished temp file over `dest`, replacing it.
+///
+/// On Windows, replacing a file fails with "access denied" while another handle is open on
+/// it or while a concurrent writer is replacing it at the same moment (two pulls committing
+/// the same blob or manifest). Those conditions clear within milliseconds, so the rename is
+/// retried with a short backoff there; on Unix a rename replaces atomically and is tried once.
+/// The temp file is deleted when the rename finally fails.
+pub(crate) fn persist(tmp: tempfile::NamedTempFile, dest: &Path) -> io::Result<()> {
+    let mut tmp = tmp;
+    let mut attempt = 0u32;
+    loop {
+        match tmp.persist(dest) {
+            Ok(_) => return Ok(()),
+            Err(e)
+                if cfg!(windows)
+                    && e.error.kind() == io::ErrorKind::PermissionDenied
+                    && attempt < PERSIST_RETRIES =>
+            {
+                attempt += 1;
+                tmp = e.file;
+                std::thread::sleep(std::time::Duration::from_millis(5u64 << attempt.min(5)));
+            }
+            Err(e) => return Err(e.error),
+        }
+    }
 }

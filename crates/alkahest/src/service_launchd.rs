@@ -21,7 +21,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 
 use crate::cli::ServiceArgs;
-use crate::service_cmd::{Step, apply_steps, executes, shell_line, under, write_files};
+use crate::service_cmd::{Step, apply_steps, executes, posix_join, shell_line, under, write_files};
 
 /// launchd job label (reverse DNS, same id as the desktop app).
 pub const LABEL: &str = "es.digio.alkahest";
@@ -147,14 +147,11 @@ pub fn render_plist(spec: &JobSpec) -> String {
 
 /// Where the plist goes.
 pub fn plist_path(user: bool, root: Option<&Path>, host: &MacHost) -> PathBuf {
-    let name = format!("{LABEL}.plist");
     if user {
-        match root {
-            Some(r) => r.join("Library/LaunchAgents").join(name),
-            None => host.home.join("Library/LaunchAgents").join(name),
-        }
+        let home = root.unwrap_or(&host.home);
+        posix_join(home, &format!("Library/LaunchAgents/{LABEL}.plist"))
     } else {
-        under(root, "/Library/LaunchDaemons").join(name)
+        under(root, &format!("/Library/LaunchDaemons/{LABEL}.plist"))
     }
 }
 
@@ -222,13 +219,13 @@ pub fn plan_install(args: &ServiceArgs, bin: &Path, host: &MacHost) -> LaunchdPl
     let program = vec![bin.display().to_string(), "serve".to_string()];
     let mut plan = LaunchdPlan::default();
     if args.user {
-        let log_dir = host.home.join("Library/Logs/Alkahest");
+        let log_dir = posix_join(&host.home, "Library/Logs/Alkahest");
         let spec = JobSpec {
             program,
             user_name: None,
             environment: Vec::new(),
             working_directory: None,
-            log_file: log_dir.join("alkahest.log").display().to_string(),
+            log_file: posix_join(&log_dir, "alkahest.log").display().to_string(),
         };
         plan.files.push((plist, render_plist(&spec)));
         plan.steps.push(Step::new(argv(&[
