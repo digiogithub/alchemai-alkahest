@@ -30,6 +30,10 @@ fn profile() -> ModelProfile {
         block_weight_bytes: vec![128 << 20; 32],
         input_weight_bytes: 0,
         output_weight_bytes: 0,
+        output_tied_bytes: 0,
+        attention_blocks: Vec::new(),
+        causal: true,
+        recurrent_state_bytes: 0,
     }
 }
 

@@ -5,13 +5,17 @@
 //! they can be tested without hardware; the scheduler combines them under its load gate.
 
 use std::fmt;
+use std::sync::Arc;
 
-use alkahest_engine::ApiDialect;
+use alkahest_engine::{ApiDialect, EngineId};
+use alkahest_gguf::ModelKind;
 use parking_lot::Mutex;
 use serde::Serialize;
 
 use crate::backend::ResolvedModel;
-use crate::memory::{EstimateConfig, GpuLayers, KvCacheType, MemoryEstimate, estimate};
+use crate::memory::{
+    EstimateConfig, GgmlWorkload, GpuLayers, KvCacheType, MemoryEstimate, estimate, estimate_ggml,
+};
 use crate::scheduler::{SchedulerOptions, context_length};
 
 /// Free and total memory at one moment.
@@ -43,29 +47,36 @@ pub trait MemoryProbe: Send + Sync + fmt::Debug {
 /// The real machine through `alkahest-sysinfo` (RAM from the OS, VRAM from NVML or sysfs).
 ///
 /// Apple unified memory is reported as VRAM equal to the free RAM, so a model placed on the
-/// GPU is limited by the same pool.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct SystemMemoryProbe;
+/// GPU is limited by the same pool. It keeps an [`alkahest_sysinfo::MemoryMonitor`] (NVML
+/// stays open between calls), so the snapshot taken before every load is a memory-only
+/// refresh and not a full hardware detection, and [`MemoryProbe::process_vram`] reports what
+/// the driver attributes to an engine process (NVML, or DRM `fdinfo` on AMD).
+#[derive(Debug, Default, Clone)]
+pub struct SystemMemoryProbe {
+    monitor: Arc<alkahest_sysinfo::MemoryMonitor>,
+}
+
+impl SystemMemoryProbe {
+    /// A probe over the real machine; opens NVML once.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
 
 impl MemoryProbe for SystemMemoryProbe {
     fn snapshot(&self) -> MemorySnapshot {
-        let info = alkahest_sysinfo::detect();
-        let (total_vram, free_vram, gpu_count) = if info.metal.is_some() {
-            (info.memory.total_bytes, info.memory.available_bytes, 1)
-        } else {
-            (
-                info.gpus.iter().map(|g| g.vram_total_bytes).sum(),
-                info.free_accelerator_memory_bytes().unwrap_or(0),
-                u32::try_from(info.gpus.len()).unwrap_or(u32::MAX),
-            )
-        };
+        let m = self.monitor.snapshot();
         MemorySnapshot {
-            total_ram: info.memory.total_bytes,
-            free_ram: info.memory.available_bytes,
-            total_vram,
-            free_vram,
-            gpu_count,
+            total_ram: m.total_ram,
+            free_ram: m.available_ram,
+            total_vram: m.total_vram,
+            free_vram: m.free_vram,
+            gpu_count: m.gpu_count,
         }
+    }
+
+    fn process_vram(&self, pid: u32) -> Option<u64> {
+        self.monitor.process_vram(pid)
     }
 }
 
@@ -215,6 +226,11 @@ pub fn placement(
                     opts.parallel(),
                 );
             }
+            // whisper.cpp and stable-diffusion.cpp: weights file plus a documented overhead.
+            if let Some(w) = ggml_workload(model) {
+                let on_gpu = policy != GpuLayers::None;
+                return estimate_ggml(w, model.weights_bytes, on_gpu);
+            }
             let bytes = model
                 .weights_bytes
                 .saturating_add(model.projector_bytes.unwrap_or(0));
@@ -231,6 +247,18 @@ pub fn placement(
                 ram_bytes: if on_gpu { 0 } else { bytes },
             }
         }
+    }
+}
+
+/// The ggml workload class of a model run by whisper.cpp or stable-diffusion.cpp.
+fn ggml_workload(model: &ResolvedModel) -> Option<GgmlWorkload> {
+    match model.engine {
+        EngineId::WhisperCpp => Some(GgmlWorkload::Whisper),
+        EngineId::StableDiffusionCpp if model.request.kind == ModelKind::Video => {
+            Some(GgmlWorkload::Video)
+        }
+        EngineId::StableDiffusionCpp => Some(GgmlWorkload::Image),
+        _ => None,
     }
 }
 

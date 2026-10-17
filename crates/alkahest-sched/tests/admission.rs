@@ -30,6 +30,10 @@ fn profile(blocks: u32, block_mib: u64) -> ModelProfile {
         block_weight_bytes: vec![block_mib << 20; blocks as usize],
         input_weight_bytes: 0,
         output_weight_bytes: 0,
+        output_tied_bytes: 0,
+        attention_blocks: Vec::new(),
+        causal: true,
+        recurrent_state_bytes: 0,
     }
 }
 
