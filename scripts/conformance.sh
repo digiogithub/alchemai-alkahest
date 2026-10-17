@@ -25,9 +25,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 venv="target/conformance/venv"
-if [[ ! -x "$venv/bin/python" ]]; then
+# target/ is restored from the CI cache, which can bring back a venv whose interpreter
+# symlink still resolves but whose pip is gone; rebuild it unless pip actually runs.
+if ! "$venv/bin/python" -m pip --version >/dev/null 2>&1; then
   echo "==> creating $venv"
-  python3 -m venv "$venv"
+  python3 -m venv --clear "$venv"
 fi
 # shellcheck disable=SC2086
 "$venv/bin/pip" install --quiet --disable-pip-version-check ${ALKAHEST_CONFORMANCE_PACKAGES:-ollama openai anthropic}
