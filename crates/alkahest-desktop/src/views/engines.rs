@@ -287,7 +287,12 @@ impl EnginesView {
                     ));
                     v.reload(cx);
                 }
-                Err(e) => v.notice = Some((true, format!("Cannot remove: {e}"))),
+                Err(e) => {
+                    v.notice = Some((
+                        true,
+                        crate::engines::remove_failure(&ask.engine_name, &ask.build.label, &e),
+                    ));
+                }
             },
         );
     }

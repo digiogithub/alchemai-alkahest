@@ -430,6 +430,20 @@ pub fn machine_facts(system: &Value) -> Vec<String> {
 /// Accelerator preference order shown in the strip.
 pub const PREFERENCE: &str = "Metal \u{203a} CUDA \u{203a} ROCm \u{203a} Vulkan \u{203a} CPU";
 
+/// The notice for a refused or failed removal of `build`. `error` is the client error text
+/// (`<message> (HTTP <status>)`): the server answers 409 while loaded models still run on the
+/// build, and its message names them.
+pub fn remove_failure(engine_name: &str, build: &str, error: &str) -> String {
+    match error.strip_suffix(" (HTTP 409)") {
+        Some(message) => format!(
+            "{engine_name} {build} was not removed: {}. Stop those models from the Running screen \
+             first.",
+            message.trim_end_matches('.')
+        ),
+        None => format!("Cannot remove {engine_name} {build}: {error}"),
+    }
+}
+
 /// A pending remove confirmation (screen 17.13).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoveAsk {
@@ -673,5 +687,28 @@ mod tests {
         let c = cards(&l, &[], &[]);
         let ask = RemoveAsk::new(&c[0], &c[0].installed[0]);
         assert!(ask.consequence().contains("fall back to"));
+    }
+
+    #[test]
+    fn removing_a_build_in_use_is_explained() {
+        let busy = alkahest_client::ClientError::Api {
+            status: 409,
+            message: "engine llama-cpp b11669 is used by the loaded models qwen3:8b".into(),
+        }
+        .to_string();
+        let m = remove_failure("llama.cpp", "b11669 \u{b7} cpu", &busy);
+        assert!(
+            m.contains("was not removed") && m.contains("qwen3:8b") && m.contains("Running"),
+            "{m}"
+        );
+        assert!(!m.contains("HTTP"), "{m}");
+        let other = alkahest_client::ClientError::Api {
+            status: 500,
+            message: "boom".into(),
+        }
+        .to_string();
+        assert!(
+            remove_failure("llama.cpp", "b1", &other).starts_with("Cannot remove llama.cpp b1")
+        );
     }
 }

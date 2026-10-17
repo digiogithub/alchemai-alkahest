@@ -17,7 +17,7 @@ use crate::connection::{ConnectionState, Snapshot};
 use crate::discover::{
     DiscoverState, Fetch, Fit, Hardware, HfFormat, HfSort, HfTask, OllamaRow, PasteTarget,
     QuantRow, Source, card_summary, check_token, hf_row, ollama_row, parse_paste,
-    recommended_block, repo_header, token_pill,
+    recommended_block, repo_header, tag_rows, token_pill,
 };
 use crate::downloads::{DownloadRow, DownloadStatus, DownloadsState, FailureKind, Transition};
 use crate::theme::tokens::{Palette, radius, size, space, text};
@@ -86,6 +86,7 @@ pub struct DiscoverView {
     paste_error: Option<String>,
     menu: Option<Menu>,
     search_task: Option<Task<()>>,
+    tags_task: Option<Task<()>>,
     debounce: Option<Task<()>>,
     detail_task: Option<Task<()>>,
     feed: Option<Task<()>>,
@@ -183,6 +184,7 @@ impl DiscoverView {
             paste_error: None,
             menu: None,
             search_task: None,
+            tags_task: None,
             debounce: None,
             detail_task: None,
             feed: None,
@@ -324,6 +326,7 @@ impl DiscoverView {
                     let result = flatten(call.await);
                     let _ = this.update(cx, |view, cx| {
                         view.state.finish_ollama_search(generation, result);
+                        view.load_ollama_tags(cx);
                         cx.notify();
                     });
                 }));
@@ -367,6 +370,24 @@ impl DiscoverView {
             };
             let _ = this.update(cx, |view, cx| {
                 view.state.finish_detail(generation, detail, files);
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    /// Fetches the tags of the selected Ollama library model (once per selection).
+    fn load_ollama_tags(&mut self, cx: &mut Context<Self>) {
+        let Some(name) = self.state.ollama_tags_wanted() else {
+            return;
+        };
+        let generation = self.state.begin_ollama_tags(&name);
+        let client = self.client.clone();
+        let call = tokio_bridge::spawn(cx, async move { client.ollama_tags(&name).await });
+        self.tags_task = Some(cx.spawn(async move |this, cx| {
+            let result = flatten(call.await);
+            let _ = this.update(cx, |view, cx| {
+                view.state.finish_ollama_tags(generation, result);
                 cx.notify();
             });
         }));
@@ -1198,6 +1219,7 @@ impl DiscoverView {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.state.ollama_selected = Some(name.clone());
                             this.state.ollama_tag = None;
+                            this.load_ollama_tags(cx);
                             cx.notify();
                         })),
                     );
@@ -1257,15 +1279,21 @@ impl DiscoverView {
                 p,
             ));
         } else {
-            panel = panel.child(tags).child(
-                div()
-                    .type_style(text::CAPTION)
-                    .text_color(c(p.text_muted))
-                    .child(
-                        "The library search lists size tags only; quantised tags \
-                         (qwen3:8b-q8_0) can be pulled from Paste repo / URL.",
-                    ),
-            );
+            panel = match &self.state.ollama_tags {
+                Fetch::Ready(list) if !list.is_empty() => {
+                    panel.child(self.tag_table(list, chosen.as_ref(), p, cx))
+                }
+                Fetch::Loading => panel
+                    .child(muted_line("Loading the tags of this model\u{2026}", p))
+                    .child(tags),
+                Fetch::Failed(e) => panel
+                    .child(muted_line(
+                        format!("The tag list is not available ({e}); the sizes from the search are shown."),
+                        p,
+                    ))
+                    .child(tags),
+                _ => panel.child(tags),
+            };
         }
         let pulling = chosen
             .as_ref()
@@ -1288,6 +1316,118 @@ impl DiscoverView {
             b = b.on_click(cx.listener(move |this, _, _, cx| this.pull(req.clone(), cx)));
         }
         panel.child(h_flex().justify_end().child(b))
+    }
+
+    /// The tags of the selected library model: one row each with size, quantisation, context
+    /// and age; a click chooses it, the row button pulls it at once.
+    fn tag_table(
+        &self,
+        list: &[alkahest_client::LibraryTag],
+        chosen: Option<&PullRequest>,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut rows = v_flex().gap(px(space::S1));
+        for (i, row) in tag_rows(list).into_iter().enumerate() {
+            let on = chosen.is_some_and(|c| c.model == row.name);
+            let pulling = self.downloads.is_pulling(&row.name);
+            let cell = |s: String, w: f32, color: Hsla| {
+                div()
+                    .w(px(w))
+                    .flex_shrink_0()
+                    .truncate()
+                    .type_style(text::MONO)
+                    .text_size(px(text::CAPTION.size))
+                    .text_color(color)
+                    .child(SharedString::from(s))
+            };
+            let mut name = h_flex().gap(px(space::S2)).items_center().child(cell(
+                row.tag.clone(),
+                130.0,
+                c(p.text_primary),
+            ));
+            if let Some(alias) = &row.alias_of {
+                name = name.child(
+                    div()
+                        .type_style(text::CAPTION)
+                        .text_color(c(p.text_muted))
+                        .child(format!("= {alias}")),
+                );
+            }
+            let choose = row.name.clone();
+            let req = PullRequest {
+                model: row.name.clone(),
+                ..PullRequest::default()
+            };
+            let mut pull = button(
+                SharedString::from(format!("ollama-tag-pull-{i}")),
+                if pulling {
+                    "Downloading\u{2026}"
+                } else {
+                    "Pull"
+                },
+                ButtonKind::Secondary,
+                size::CONTROL_SMALL,
+                pulling || !self.connected,
+                p,
+            );
+            if !pulling && self.connected {
+                pull = pull.on_click(cx.listener(move |this, _, _, cx| {
+                    this.pull(req.clone(), cx);
+                    cx.stop_propagation();
+                }));
+            }
+            rows = rows.child(
+                h_flex()
+                    .id(SharedString::from(format!("ollama-tag-row-{i}")))
+                    .items_center()
+                    .gap(px(space::S3))
+                    .px(px(space::S3))
+                    .py(px(space::S1))
+                    .rounded(px(radius::MD))
+                    .border_1()
+                    .border_color(c(if on { p.accent_default } else { p.line_default }))
+                    .cursor_pointer()
+                    .child(div().w(px(200.0)).flex_shrink_0().child(name))
+                    .child(cell(row.size.clone(), 80.0, c(p.text_primary)))
+                    .child(cell(row.quant.clone(), 80.0, c(p.text_secondary)))
+                    .child(cell(row.context.clone(), 50.0, c(p.text_secondary)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .type_style(text::MONO)
+                            .text_size(px(text::CAPTION.size))
+                            .text_color(c(p.text_muted))
+                            .child(SharedString::from(row.updated.clone())),
+                    )
+                    .child(pull)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.state.ollama_tag = Some(choose.clone());
+                        cx.notify();
+                    })),
+            );
+        }
+        v_flex()
+            .gap(px(space::S2))
+            .child(
+                h_flex()
+                    .gap(px(space::S3))
+                    .px(px(space::S3))
+                    .child(div().w(px(200.0)).child(column_label("Tag", p)))
+                    .child(div().w(px(80.0)).child(column_label("Size", p)))
+                    .child(div().w(px(80.0)).child(column_label("Quant", p)))
+                    .child(div().w(px(50.0)).child(column_label("Ctx", p)))
+                    .child(column_label("Updated", p)),
+            )
+            .child(
+                div()
+                    .id("ollama-tags")
+                    .max_h(px(340.0))
+                    .overflow_y_scroll()
+                    .child(rows),
+            )
     }
 
     fn paste_body(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
@@ -1724,12 +1864,12 @@ fn mono_text(t: String, p: &Palette) -> Div {
         .child(t)
 }
 
-fn muted_line(t: &'static str, p: &Palette) -> Div {
+fn muted_line(t: impl Into<SharedString>, p: &Palette) -> Div {
     div()
         .py(px(space::S2))
         .type_style(text::SMALL)
         .text_color(c(p.text_muted))
-        .child(t)
+        .child(t.into())
 }
 
 /// Brass lock pill for gated repositories (design 17.7).

@@ -9,10 +9,13 @@
 //! filters, the fetch states and the selection, with request generations so a slow answer
 //! for an old query never overwrites a newer one.
 
+use alkahest_client::LibraryTag;
 use alkahest_client::admin::{
     HfFiles, HfModel, HfModelInfo, HfSearch, HfTokenStatus, LibraryModel as OllamaModel,
     PullRequest,
 };
+use std::collections::HashMap;
+
 use alkahest_gguf::ModelKind;
 use serde_json::Value;
 
@@ -909,6 +912,61 @@ pub fn ollama_row(m: &OllamaModel) -> OllamaRow {
     }
 }
 
+/// One tag of an Ollama library model (`GET /alkahest/v1/ollama/tags`), ready to draw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagRow {
+    /// Pullable reference (`qwen3:8b-q4_K_M`).
+    pub name: String,
+    /// The tag alone (`8b-q4_K_M`).
+    pub tag: String,
+    /// Download size (`5.2 GB`), `—` when the site shows none.
+    pub size: String,
+    /// Quantisation named by the tag, `—` when none.
+    pub quant: String,
+    /// Context window (`40K`), `—` when unknown.
+    pub context: String,
+    /// Relative update time (`3 months ago`).
+    pub updated: String,
+    /// Image input (`vision`) badge.
+    pub vision: bool,
+    /// The earlier tag with the same digest, when this one is an alias of it.
+    pub alias_of: Option<String>,
+}
+
+/// The rows of `tags`, in the site's order; tags sharing a digest name the first one.
+pub fn tag_rows(tags: &[LibraryTag]) -> Vec<TagRow> {
+    let dash = || "\u{2014}".to_string();
+    let mut first: HashMap<&str, &str> = HashMap::new();
+    tags.iter()
+        .map(|t| {
+            let alias_of = match t.digest.as_deref() {
+                Some(d) => match first.get(d) {
+                    Some(f) => Some((*f).to_string()),
+                    None => {
+                        first.insert(d, t.tag.as_str());
+                        None
+                    }
+                },
+                None => None,
+            };
+            TagRow {
+                name: t.name.clone(),
+                tag: t.tag.clone(),
+                size: t
+                    .size_bytes
+                    .map(format_bytes)
+                    .or_else(|| t.size.clone())
+                    .unwrap_or_else(dash),
+                quant: t.quantization.clone().unwrap_or_else(dash),
+                context: t.context.clone().unwrap_or_else(dash),
+                updated: t.updated.clone().unwrap_or_else(dash),
+                vision: t.inputs.iter().any(|i| i == "image"),
+                alias_of,
+            }
+        })
+        .collect()
+}
+
 /// What the "Paste repo / URL" field names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PasteTarget {
@@ -1055,6 +1113,10 @@ pub struct DiscoverState {
     pub ollama_selected: Option<String>,
     /// Tag chosen for it.
     pub ollama_tag: Option<String>,
+    /// Every tag of the selected library model (`ollama_tags_for`).
+    pub ollama_tags: Fetch<Vec<LibraryTag>>,
+    /// The model `ollama_tags` belongs to.
+    pub ollama_tags_for: Option<String>,
     /// Paste field value and its parse error.
     pub paste: String,
     /// Detected memory.
@@ -1071,6 +1133,7 @@ pub struct DiscoverState {
     pub notice: Option<String>,
     generation: u64,
     detail_generation: u64,
+    tags_generation: u64,
 }
 
 impl DiscoverState {
@@ -1205,6 +1268,33 @@ impl DiscoverState {
         gated && !self.token.as_ref().is_some_and(|t| t.present)
     }
 
+    /// The model whose tags must be fetched now: the selected one, unless its tags were asked
+    /// already. Cloud-only models have nothing to pull.
+    pub fn ollama_tags_wanted(&self) -> Option<String> {
+        let row = self.ollama_row()?;
+        (!row.cloud && self.ollama_tags_for.as_deref() != Some(row.name.as_str()))
+            .then_some(row.name)
+    }
+
+    /// Starts fetching the tags of `name`; returns the request generation.
+    pub fn begin_ollama_tags(&mut self, name: &str) -> u64 {
+        self.tags_generation += 1;
+        self.ollama_tags_for = Some(name.to_string());
+        self.ollama_tags = Fetch::Loading;
+        self.tags_generation
+    }
+
+    /// Applies the tags of request `generation` (ignored when a newer one started).
+    pub fn finish_ollama_tags(&mut self, generation: u64, result: Result<Vec<LibraryTag>, String>) {
+        if generation != self.tags_generation {
+            return;
+        }
+        self.ollama_tags = match result {
+            Ok(tags) => Fetch::Ready(tags),
+            Err(e) => Fetch::Failed(e),
+        };
+    }
+
     /// The selected Ollama model row.
     pub fn ollama_row(&self) -> Option<OllamaRow> {
         let name = self.ollama_selected.as_deref()?;
@@ -1221,11 +1311,21 @@ impl DiscoverState {
         if row.cloud {
             return None;
         }
-        let tag = self
-            .ollama_tag
-            .clone()
-            .filter(|t| row.tags.contains(t))
-            .or_else(|| row.tags.first().cloned())?;
+        let listed = self.ollama_tags.ready().filter(|t| {
+            !t.is_empty() && self.ollama_tags_for.as_deref() == Some(row.name.as_str())
+        });
+        let known = |t: &String| {
+            row.tags.contains(t) || listed.is_some_and(|l| l.iter().any(|x| &x.name == t))
+        };
+        let default = listed
+            .and_then(|l| {
+                l.iter()
+                    .find(|t| t.tag == "latest")
+                    .or_else(|| l.first())
+                    .map(|t| t.name.clone())
+            })
+            .or_else(|| row.tags.first().cloned());
+        let tag = self.ollama_tag.clone().filter(known).or(default)?;
         Some(PullRequest {
             model: tag,
             ..PullRequest::default()
@@ -1527,6 +1627,63 @@ mod tests {
             .unwrap(),
             "Read the Gemma 3 Technical Report first, please."
         );
+    }
+
+    fn lib_tag(tag: &str, digest: &str, size: u64, quant: Option<&str>) -> LibraryTag {
+        LibraryTag {
+            name: format!("qwen3:{tag}"),
+            tag: tag.into(),
+            digest: Some(digest.into()),
+            size_bytes: Some(size),
+            context: Some("40K".into()),
+            updated: Some("3 months ago".into()),
+            quantization: quant.map(str::to_string),
+            ..LibraryTag::default()
+        }
+    }
+
+    #[test]
+    fn library_tags_become_rows_and_the_default_pull_prefers_latest() {
+        let tags = vec![
+            lib_tag("8b-q8_0", "aaa", 8_700_000_000, Some("Q8_0")),
+            lib_tag("latest", "bbb", 5_200_000_000, Some("Q4_K_M")),
+            lib_tag("8b", "bbb", 5_200_000_000, Some("Q4_K_M")),
+        ];
+        let rows = tag_rows(&tags);
+        assert_eq!(rows[1].size, "5.2 GB");
+        assert_eq!(rows[1].quant, "Q4_K_M");
+        assert_eq!(rows[2].alias_of.as_deref(), Some("latest"));
+        assert_eq!(rows[0].alias_of, None);
+        let none = tag_rows(&[LibraryTag::default()]);
+        assert_eq!(none[0].size, "\u{2014}");
+
+        let m = OllamaModel {
+            name: "qwen3".into(),
+            sizes: vec!["8b".into()],
+            ..OllamaModel::default()
+        };
+        let mut s = DiscoverState {
+            source: Source::Ollama,
+            ..DiscoverState::default()
+        };
+        let g = s.begin_search();
+        s.finish_ollama_search(g, Ok(vec![m]));
+        assert_eq!(s.ollama_tags_wanted().as_deref(), Some("qwen3"));
+        assert_eq!(
+            s.ollama_pull().unwrap().model,
+            "qwen3:8b",
+            "before the tags arrive"
+        );
+        let t = s.begin_ollama_tags("qwen3");
+        assert_eq!(s.ollama_tags_wanted(), None, "asked once");
+        s.finish_ollama_tags(t + 1, Ok(Vec::new()));
+        assert!(s.ollama_tags.is_loading(), "a stale answer is ignored");
+        s.finish_ollama_tags(t, Ok(tags));
+        assert_eq!(s.ollama_pull().unwrap().model, "qwen3:latest");
+        s.ollama_tag = Some("qwen3:8b-q8_0".into());
+        assert_eq!(s.ollama_pull().unwrap().model, "qwen3:8b-q8_0");
+        s.ollama_tag = Some("qwen3:nope".into());
+        assert_eq!(s.ollama_pull().unwrap().model, "qwen3:latest");
     }
 
     #[test]
