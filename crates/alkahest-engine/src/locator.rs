@@ -320,7 +320,7 @@ pub fn split_install_dir(name: &str) -> (&str, Option<&str>) {
 
 fn is_variant_label(s: &str) -> bool {
     match s {
-        "cpu" | "rocm" | "vulkan" | "metal" => true,
+        "cpu" | "rocm" | "vulkan" | "metal" | "sycl" => true,
         _ => parse_cuda(s).is_some(),
     }
 }

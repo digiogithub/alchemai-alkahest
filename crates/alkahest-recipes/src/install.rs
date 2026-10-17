@@ -7,9 +7,12 @@ use alkahest_fetch::{DownloadRequest, Downloader, FetchConfig, ProgressFn};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
+use sha2::{Digest, Sha256};
+
 use crate::archive::extract;
+use crate::build::{BuildTools, build_from_source};
 use crate::error::{RecipeError, Result};
-use crate::recipe::{Host, Recipe};
+use crate::recipe::{Host, Recipe, tag_number};
 
 /// File written at the root of every installed engine; its presence marks a complete install.
 pub const MARKER_FILE: &str = ".alkahest-engine.json";
@@ -22,10 +25,19 @@ struct Marker {
     tag: String,
     /// Executable path relative to the install directory.
     executable: PathBuf,
-    /// Archive URL the engine came from.
+    /// Archive URL (or `git <url>@<rev>`) the engine came from.
     source: String,
-    /// SHA-256 of that archive.
+    /// SHA-256 of the archive; empty for a source build.
     sha256: String,
+    /// The digest was not pinned in the recipe and was recorded on first use.
+    #[serde(default)]
+    tofu: bool,
+    /// The engine was built locally instead of downloaded.
+    #[serde(default)]
+    from_source: bool,
+    /// Library directories relative to the install directory.
+    #[serde(default)]
+    library_dirs: Vec<String>,
 }
 
 /// An engine present on disk.
@@ -41,6 +53,11 @@ pub struct InstalledEngine {
     pub dir: PathBuf,
     /// Absolute path of the server executable.
     pub executable: PathBuf,
+    /// Directories to put on the child's library search path (`LD_LIBRARY_PATH`, `PATH` on
+    /// Windows) in addition to the executable's own directory; absolute.
+    pub library_dirs: Vec<PathBuf>,
+    /// Built locally from source rather than downloaded.
+    pub from_source: bool,
 }
 
 /// Knobs of [`install`].
@@ -54,6 +71,12 @@ pub struct InstallOptions {
     pub fetch: FetchConfig,
     /// Download progress callback.
     pub progress: Option<ProgressFn>,
+    /// Build from the recipe's `source` steps instead of downloading the prebuilt asset.
+    pub from_source: bool,
+    /// The programs a source build runs.
+    pub build_tools: BuildTools,
+    /// Directory for source-build logs; `<engines_dir>/.logs` when `None`.
+    pub log_dir: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for InstallOptions {
@@ -61,6 +84,8 @@ impl std::fmt::Debug for InstallOptions {
         f.debug_struct("InstallOptions")
             .field("host", &self.host)
             .field("force", &self.force)
+            .field("from_source", &self.from_source)
+            .field("from_source", &self.from_source)
             .finish_non_exhaustive()
     }
 }
@@ -70,7 +95,9 @@ impl std::fmt::Debug for InstallOptions {
 ///
 /// The archive is downloaded to `<engines_dir>/.downloads/` (resumable, SHA-256 verified),
 /// unpacked into a `.partial` sibling of the final directory and moved into place last, so an
-/// interrupted install never leaves a directory that looks installed.
+/// interrupted install never leaves a directory that looks installed. With
+/// `opts.from_source` the recipe's `source` steps run instead (git, cmake, ninja; output in
+/// the log directory) and only the build products are kept.
 pub async fn install(
     recipe: &Recipe,
     engines_dir: &Path,
@@ -78,14 +105,6 @@ pub async fn install(
     cancel: &CancellationToken,
 ) -> Result<InstalledEngine> {
     let host = opts.host.clone().unwrap_or_else(Host::current);
-    let asset = recipe
-        .asset_for(&host)
-        .ok_or_else(|| RecipeError::UnsupportedHost {
-            id: recipe.id.clone(),
-            variant: recipe.variant.clone(),
-            os: host.os.clone(),
-            arch: host.arch.clone(),
-        })?;
     let final_dir = recipe.install_dir(engines_dir);
     let exe_rel = recipe.executable_for(&host);
     if !opts.force
@@ -93,53 +112,91 @@ pub async fn install(
     {
         return Ok(done);
     }
-
-    let downloads = engines_dir.join(".downloads");
-    fs::create_dir_all(&downloads).map_err(|e| RecipeError::io(&downloads, e))?;
-    let file_name = asset
-        .url
-        .rsplit('/')
-        .next()
-        .filter(|n| !n.is_empty())
-        .unwrap_or("engine-archive");
-    let archive = downloads.join(file_name);
-    let mut req = DownloadRequest::new(&asset.url, &archive).with_sha256(&asset.sha256);
-    if let Some(size) = asset.size {
-        req = req.with_size(size);
-    }
-    let mut downloader =
-        Downloader::new(opts.fetch.clone()).map_err(|source| RecipeError::Fetch {
-            url: asset.url.clone(),
-            source,
-        })?;
-    if let Some(p) = &opts.progress {
-        downloader = downloader.with_progress(p.clone());
-    }
-    downloader
-        .download(&req, cancel)
-        .await
-        .map_err(|source| RecipeError::Fetch {
-            url: asset.url.clone(),
-            source,
-        })?;
-
     let partial = final_dir.with_file_name(format!("{}.partial", recipe.dir_name()));
     if partial.exists() {
         fs::remove_dir_all(&partial).map_err(|e| RecipeError::io(&partial, e))?;
     }
-    // Unpacking is blocking file work; keep it off the async worker threads.
-    let (src, dst, format, strip) = (
-        archive.clone(),
-        partial.clone(),
-        asset.format,
-        asset.strip_components,
-    );
-    tokio::task::spawn_blocking(move || extract(&src, format, strip, &dst))
-        .await
-        .map_err(|e| RecipeError::Archive {
-            archive: archive.clone(),
-            reason: e.to_string(),
-        })??;
+
+    let (source, sha256, tofu) = if opts.from_source {
+        let src = recipe
+            .source
+            .as_ref()
+            .ok_or_else(|| RecipeError::NoSource {
+                id: recipe.id.clone(),
+                variant: recipe.variant.clone(),
+            })?;
+        fs::create_dir_all(&partial).map_err(|e| RecipeError::io(&partial, e))?;
+        let log_dir = opts
+            .log_dir
+            .clone()
+            .unwrap_or_else(|| engines_dir.join(".logs"));
+        let log = log_dir.join(format!("{}-{}.log", recipe.id, recipe.dir_name()));
+        if let Err(e) = build_from_source(src, &opts.build_tools, &partial, &log, cancel).await {
+            let _ = fs::remove_dir_all(&partial);
+            return Err(e);
+        }
+        (format!("git {}@{}", src.git, src.rev), String::new(), false)
+    } else {
+        let asset = recipe
+            .asset_for(&host)
+            .ok_or_else(|| RecipeError::UnsupportedHost {
+                id: recipe.id.clone(),
+                variant: recipe.variant.clone(),
+                os: host.os.clone(),
+                arch: host.arch.clone(),
+            })?;
+        let downloads = engines_dir.join(".downloads");
+        fs::create_dir_all(&downloads).map_err(|e| RecipeError::io(&downloads, e))?;
+        let file_name = asset
+            .url
+            .rsplit('/')
+            .next()
+            .filter(|n| !n.is_empty())
+            .unwrap_or("engine-archive");
+        let archive = downloads.join(file_name);
+        let mut req = DownloadRequest::new(&asset.url, &archive);
+        if let Some(d) = &asset.sha256 {
+            req = req.with_sha256(d);
+        }
+        if let Some(size) = asset.size {
+            req = req.with_size(size);
+        }
+        let mut downloader =
+            Downloader::new(opts.fetch.clone()).map_err(|source| RecipeError::Fetch {
+                url: asset.url.clone(),
+                source,
+            })?;
+        if let Some(p) = &opts.progress {
+            downloader = downloader.with_progress(p.clone());
+        }
+        downloader
+            .download(&req, cancel)
+            .await
+            .map_err(|source| RecipeError::Fetch {
+                url: asset.url.clone(),
+                source,
+            })?;
+        let digest = match &asset.sha256 {
+            Some(d) => d.clone(),
+            None => hash_file(&archive)?,
+        };
+        // Unpacking is blocking file work; keep it off the async worker threads.
+        let (src, dst, format, strip) = (
+            archive.clone(),
+            partial.clone(),
+            asset.format,
+            asset.strip_components,
+        );
+        tokio::task::spawn_blocking(move || extract(&src, format, strip, &dst))
+            .await
+            .map_err(|e| RecipeError::Archive {
+                archive: archive.clone(),
+                reason: e.to_string(),
+            })??;
+        // The archive is only a cache; keeping it would double the disk use.
+        let _ = fs::remove_file(&archive);
+        (asset.url.clone(), digest, asset.tofu)
+    };
 
     if !partial.join(&exe_rel).is_file() {
         let _ = fs::remove_dir_all(&partial);
@@ -150,8 +207,11 @@ pub async fn install(
         variant: recipe.variant.clone(),
         tag: recipe.tag.clone(),
         executable: exe_rel,
-        source: asset.url.clone(),
-        sha256: asset.sha256.clone(),
+        source,
+        sha256,
+        tofu,
+        from_source: opts.from_source,
+        library_dirs: recipe.library_dirs.clone(),
     };
     let marker_path = partial.join(MARKER_FILE);
     let json = serde_json::to_vec_pretty(&marker).map_err(|e| RecipeError::Archive {
@@ -164,10 +224,27 @@ pub async fn install(
         fs::remove_dir_all(&final_dir).map_err(|e| RecipeError::io(&final_dir, e))?;
     }
     fs::rename(&partial, &final_dir).map_err(|e| RecipeError::io(&final_dir, e))?;
-    // The archive is only a cache; keeping it would double the disk use.
-    let _ = fs::remove_file(&archive);
 
     read_installed(&final_dir).ok_or(RecipeError::MissingExecutable(marker.executable))
+}
+
+/// SHA-256 of a file, lower-case hex (for trust-on-first-use assets).
+fn hash_file(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path).map_err(|e| RecipeError::io(path, e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        let n = std::io::Read::read(&mut file, &mut buf).map_err(|e| RecipeError::io(path, e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// Reads the marker of `dir`; `None` when `dir` is not a complete install.
@@ -181,6 +258,8 @@ fn read_installed(dir: &Path) -> Option<InstalledEngine> {
         tag: m.tag,
         dir: dir.to_path_buf(),
         executable,
+        library_dirs: m.library_dirs.iter().map(|d| dir.join(d)).collect(),
+        from_source: m.from_source,
     })
 }
 
@@ -208,10 +287,39 @@ pub fn list_installed(root: &Path) -> Vec<InstalledEngine> {
     found
 }
 
-/// Numeric part of a build tag (`b11669` is 11669); tags without digits sort first.
-fn tag_number(tag: &str) -> u64 {
-    let digits: String = tag.chars().filter(char::is_ascii_digit).collect();
-    digits.parse().unwrap_or(0)
+/// Removes the installations of engine `id` that match `version` and `variant` (all when
+/// `None`) below `engines_dir` and returns what was removed. Only directories carrying the
+/// install marker are touched, so a stray folder is never deleted.
+///
+/// # Errors
+///
+/// [`RecipeError::NotInstalled`] when nothing matches.
+pub fn remove_installed(
+    engines_dir: &Path,
+    id: &str,
+    version: Option<&str>,
+    variant: Option<&str>,
+) -> Result<Vec<InstalledEngine>> {
+    let hits: Vec<InstalledEngine> = list_installed(engines_dir)
+        .into_iter()
+        .filter(|e| {
+            e.id == id
+                && version.is_none_or(|v| e.tag == v)
+                && variant.is_none_or(|v| e.variant == v)
+        })
+        .collect();
+    if hits.is_empty() {
+        let what = [Some(id), version, variant]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Err(RecipeError::NotInstalled(what));
+    }
+    for e in &hits {
+        fs::remove_dir_all(&e.dir).map_err(|err| RecipeError::io(&e.dir, err))?;
+    }
+    Ok(hits)
 }
 
 /// Directories shipped next to the binary that may hold bundled engines: `<exe dir>/engines`

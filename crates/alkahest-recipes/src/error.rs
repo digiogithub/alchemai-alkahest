@@ -24,6 +24,52 @@ pub enum RecipeError {
     /// No recipe has this id.
     #[error("unknown engine `{0}`; `alkahest engines ls` lists the available ones")]
     UnknownEngine(String),
+    /// The engine has recipes, but not for this version.
+    #[error("engine `{id}` has no recipe for version `{version}` (known: {})", known.join(", "))]
+    UnknownVersion {
+        /// Engine id.
+        id: String,
+        /// Requested version.
+        version: String,
+        /// Versions that exist.
+        known: Vec<String>,
+    },
+    /// The engine has recipes, but not this variant.
+    #[error("engine `{id}` has no variant `{variant}` (known: {})", known.join(", "))]
+    UnknownVariant {
+        /// Engine id.
+        id: String,
+        /// Requested variant.
+        variant: String,
+        /// Variants that exist.
+        known: Vec<String>,
+    },
+    /// `--from-source` was requested for a variant without build steps.
+    #[error("engine `{id}` ({variant}) has no `source` build steps in its recipe")]
+    NoSource {
+        /// Recipe id.
+        id: String,
+        /// Variant name.
+        variant: String,
+    },
+    /// A program the source build needs is not installed.
+    #[error("building from source needs `{0}`, which was not found on PATH")]
+    BuildToolMissing(String),
+    /// A build step failed.
+    #[error("build step `{step}` failed ({status}); log: {log}\n{tail}")]
+    BuildFailed {
+        /// The step (`git fetch`, `cmake configure`, ...).
+        step: String,
+        /// Exit status text.
+        status: String,
+        /// Full log file.
+        log: PathBuf,
+        /// Last lines of the log.
+        tail: String,
+    },
+    /// Nothing matches the engine to remove.
+    #[error("no installed engine matches `{0}`")]
+    NotInstalled(String),
     /// The recipe has no asset for this platform.
     #[error("engine `{id}` ({variant}) has no prebuilt asset for {os}/{arch}")]
     UnsupportedHost {

@@ -6,8 +6,8 @@ use std::io::Write;
 use std::path::Path;
 
 use alkahest_recipes::{
-    ArchiveFormat, Asset, Host, InstallOptions, Recipe, RecipeError, RecipeKind, builtin_recipes,
-    bundled_roots, extract, install, list_installed, locate,
+    AcceleratorKind, ArchiveFormat, Asset, Host, InstallOptions, Recipe, RecipeError,
+    builtin_recipes, bundled_roots, extract, install, list_installed, locate,
 };
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
@@ -56,7 +56,11 @@ fn test_recipe(url: &str, bytes: &[u8], format: ArchiveFormat, strip: usize) -> 
     Recipe {
         id: "llama-cpp".into(),
         variant: "cpu".into(),
-        kind: RecipeKind::Prebuilt,
+        accelerator: AcceleratorKind::Cpu,
+        cuda: None,
+        notes: String::new(),
+        library_dirs: vec![],
+        source: None,
         description: String::new(),
         license: None,
         homepage: None,
@@ -66,7 +70,8 @@ fn test_recipe(url: &str, bytes: &[u8], format: ArchiveFormat, strip: usize) -> 
             os: host.os,
             arch: host.arch,
             url: url.into(),
-            sha256: sha256_hex(bytes),
+            sha256: Some(sha256_hex(bytes)),
+            tofu: false,
             size: Some(bytes.len() as u64),
             format,
             strip_components: strip,
@@ -165,7 +170,7 @@ async fn digest_mismatch_installs_nothing() {
         ArchiveFormat::TarGz,
         1,
     );
-    recipe.assets[0].sha256 = "0".repeat(64);
+    recipe.assets[0].sha256 = Some("0".repeat(64));
     recipe.assets[0].size = None;
     let engines = tempfile::tempdir().unwrap();
 
@@ -339,7 +344,7 @@ async fn real_cpu_llama_server_runs() {
     }
     let recipe = builtin_recipes()
         .into_iter()
-        .find(|r| r.id == "llama-cpp")
+        .find(|r| r.id == "llama-cpp" && r.variant == "cpu")
         .unwrap();
     if recipe.asset_for(&Host::current()).is_none() {
         return;

@@ -50,14 +50,20 @@ fn ls_shows_an_installed_engine_once_with_its_path() {
         .clone();
     let rows: serde_json::Value = serde_json::from_slice(&out).unwrap();
     let rows = rows.as_array().unwrap();
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0]["state"], "installed");
+    // The installed variant appears once, as installed, not again as available.
+    let cpu: Vec<_> = rows
+        .iter()
+        .filter(|r| r["engine"] == "llama-cpp" && r["variant"] == "cpu")
+        .collect();
+    assert_eq!(cpu.len(), 1, "{rows:?}");
+    assert_eq!(cpu[0]["state"], "installed");
     assert!(
-        rows[0]["path"]
+        cpu[0]["path"]
             .as_str()
             .unwrap()
             .ends_with("b11669-cpu/llama-server")
     );
+    assert_eq!(rows.iter().filter(|r| r["state"] == "installed").count(), 1);
 }
 
 #[test]

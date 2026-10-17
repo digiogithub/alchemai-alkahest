@@ -1,10 +1,11 @@
 //! ggml tensor type table and `general.file_type` names.
 //!
-//! Ids of the mainline types follow `ggml.h`. `Q2_0 = 42` and `PQ2_0 = 142` come from the
-//! story acceptance criteria. `PTQ1_0 = 143` is an UNCONFIRMED guess (the PrismML fork source
-//! was not available offline); it is isolated in [`GgmlType::PTQ1_0_ID`] so one constant fixes
-//! it. Block geometry of the three Bonsai types is likewise approximate (it only feeds memory
-//! estimates, never decoding).
+//! Ids of the mainline types follow `ggml.h`. `Q2_0 = 42`, `PQ2_0 = 142` and `PTQ1_0 = 143`
+//! were confirmed against `ggml/include/ggml.h` of PrismML-Eng/llama.cpp at the pin
+//! `prism-b10777-e3de715` (ALK-T-0220), as were the block geometries from `ggml-common.h`:
+//! `block_q2_0` is 64 elements in 18 bytes, `block_pq2_0` 128 in 34 (fp16 scale plus 2-bit
+//! quants), `block_ptq1_0` 128 in 28 (24 bytes of base-3 trits, 2 bytes of high trits, fp16
+//! scale). The layouts only feed memory estimates, never decoding.
 
 use std::fmt;
 
@@ -101,7 +102,7 @@ impl GgmlType {
     pub const Q2_0_ID: u32 = 42;
     /// Type id of `PQ2_0`.
     pub const PQ2_0_ID: u32 = 142;
-    /// Type id of `PTQ1_0`. UNCONFIRMED, see the module docs.
+    /// Type id of `PTQ1_0` (`GGML_TYPE_PTQ1_0 = 143` in the fork's `ggml.h`).
     pub const PTQ1_0_ID: u32 = 143;
 
     /// Decodes a wire type id.
@@ -221,8 +222,8 @@ impl GgmlType {
         }
     }
 
-    /// `(elements per block, bytes per block)`, or `None` for unknown types. Bonsai types are
-    /// approximations good enough for memory estimates.
+    /// `(elements per block, bytes per block)`, or `None` for unknown types. The Bonsai types
+    /// follow the PrismML fork's `ggml-common.h` (see the module docs).
     pub fn block_layout(self) -> Option<(u64, u64)> {
         Some(match self {
             Self::F32 | Self::I32 => (1, 4),
@@ -250,9 +251,9 @@ impl GgmlType {
             Self::IQ1M => (256, 56),
             Self::TQ1_0 => (256, 54),
             Self::MXFP4 => (32, 17),
-            Self::Q2_0 => (32, 10),
-            Self::PQ2_0 => (256, 68),
-            Self::PTQ1_0 => (256, 56),
+            Self::Q2_0 => (64, 18),
+            Self::PQ2_0 => (128, 34),
+            Self::PTQ1_0 => (128, 28),
             Self::Unknown(_) => return None,
         })
     }

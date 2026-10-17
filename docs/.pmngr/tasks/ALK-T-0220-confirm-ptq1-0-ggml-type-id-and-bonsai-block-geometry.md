@@ -2,13 +2,14 @@
 id: ALK-T-0220
 type: task
 title: Confirm PTQ1_0 ggml type id and Bonsai block geometry against PrismML fork source
-status: backlog
+status: done
 priority: medium
 parent: ALK-US-0051
 author: mcp
 labels: [gguf]
 created: 2026-10-16T23:12:15Z
-updated: 2026-10-17T00:19:24Z
+updated: 2026-10-17T01:19:24Z
+closed: 2026-10-17T01:19:24Z
 inbox:
   status: accepted
   source: mcp

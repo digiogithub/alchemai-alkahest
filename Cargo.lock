@@ -245,6 +245,7 @@ name = "alkahest-recipes"
 version = "0.1.0"
 dependencies = [
  "alkahest-fetch",
+ "alkahest-sysinfo",
  "flate2",
  "hex",
  "serde",
