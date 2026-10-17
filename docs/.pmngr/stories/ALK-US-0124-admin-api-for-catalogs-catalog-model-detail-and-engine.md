@@ -2,7 +2,7 @@
 id: ALK-US-0124
 type: story
 title: Admin API for catalogs, catalog model detail and engine catalog fields
-status: in_progress
+status: in_review
 priority: high
 parent: ALK-EP-0015
 milestone: ALK-M-0006
@@ -10,7 +10,7 @@ author: mcp
 labels: [catalog, api, security]
 estimate: 5
 created: 2026-10-17T20:14:10Z
-updated: 2026-10-17T20:14:16Z
+updated: 2026-10-17T21:01:43Z
 started: 2026-10-17T20:14:16Z
 ---
 
