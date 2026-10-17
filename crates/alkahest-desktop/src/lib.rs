@@ -31,6 +31,7 @@ pub mod running;
 pub mod settings;
 pub mod settings_screen;
 pub mod theme;
+pub mod tls;
 pub mod tray;
 
 #[cfg(feature = "gui")]
@@ -53,6 +54,10 @@ pub struct LaunchOptions {
     /// Base URL of the configured server (`http://127.0.0.1:11435`). A `server_url` in the
     /// desktop settings file overrides it.
     pub server_url: String,
+    /// The CA certificate `alkahest certs generate` wrote (`<data_dir>/tls/ca.pem`), set when
+    /// the configured server has TLS enabled. Trusted for the configured server when the file
+    /// exists; `ALKAHEST_CA_CERT` and the desktop settings take precedence ([`tls`]).
+    pub generated_ca: Option<std::path::PathBuf>,
     /// API key from the environment (`ALKAHEST_API_KEY`); otherwise the OS keyring is asked.
     pub api_key: Option<String>,
     /// The desktop settings file (`<config dir>/desktop.toml`); `None` uses the defaults.
@@ -70,6 +75,7 @@ impl Default for LaunchOptions {
     fn default() -> Self {
         Self {
             server_url: format!("http://127.0.0.1:{}", alkahest_client::DEFAULT_PORT),
+            generated_ca: None,
             api_key: None,
             settings_file: None,
             serve_program: None,

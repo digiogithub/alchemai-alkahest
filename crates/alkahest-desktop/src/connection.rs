@@ -25,6 +25,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::launcher::{LaunchMethod, ServerLauncher};
 use crate::nav::{NavCounters, ServiceCard, Tone, display_address};
+use crate::tls::{TlsIssue, classify};
 
 /// First reconnect delay; doubles on every failure.
 pub const BACKOFF_START: Duration = Duration::from_millis(500);
@@ -59,6 +60,8 @@ pub enum ProbeError {
     NotRunning,
     /// The server wants an API key (or a better one): HTTP 401 / 403.
     Unauthorized,
+    /// The TLS handshake failed: untrusted or mismatching certificate, or no TLS there.
+    Tls(String),
     /// Anything else (timeouts, unexpected answers).
     Other(String),
 }
@@ -70,6 +73,7 @@ impl From<ClientError> for ProbeError {
             ClientError::Api {
                 status: 401 | 403, ..
             } => Self::Unauthorized,
+            ClientError::Tls { message, .. } => Self::Tls(message),
             other => Self::Other(other.to_string()),
         }
     }
@@ -131,6 +135,14 @@ pub enum ConnectionState {
     },
     /// The server refuses our API key (or wants one).
     Unauthorized,
+    /// The secure connection failed (screen 17 error style): untrusted or mismatching
+    /// certificate, an expired one, or no TLS on that port.
+    Tls {
+        /// What went wrong, as far as the error tells.
+        issue: TlsIssue,
+        /// The error text of the TLS library.
+        detail: String,
+    },
     /// The server answered with something unexpected.
     Error(String),
 }
@@ -265,6 +277,13 @@ impl Machine {
             }
             (Err(ProbeError::Unauthorized), _) => {
                 self.state = ConnectionState::Unauthorized;
+                self.backoff.next_delay()
+            }
+            (Err(ProbeError::Tls(message)), _) => {
+                self.state = ConnectionState::Tls {
+                    issue: classify(&message),
+                    detail: message,
+                };
                 self.backoff.next_delay()
             }
             (Err(ProbeError::Other(message)), _) => {
@@ -404,6 +423,12 @@ impl Snapshot {
                 "API key needed".to_string(),
                 "Set the server's API key in the desktop settings".to_string(),
             ),
+            // The raw library text is long; the banner shows it, the card keeps the fix.
+            ConnectionState::Tls { issue, .. } => (
+                Tone::Danger,
+                issue.title().to_string(),
+                issue.hint().to_string(),
+            ),
             ConnectionState::Error(message) => (
                 Tone::Danger,
                 "Connection error".to_string(),
@@ -424,6 +449,7 @@ impl Snapshot {
             ConnectionState::NotRunning { .. } if self.can_start => Some(CardAction::StartServer),
             ConnectionState::NotRunning { .. }
             | ConnectionState::Unauthorized
+            | ConnectionState::Tls { .. }
             | ConnectionState::Error(_) => Some(CardAction::Retry),
             ConnectionState::Connecting
             | ConnectionState::Connected(_)
@@ -910,6 +936,32 @@ mod tests {
 
         let s = snapshot(ConnectionState::Unauthorized, false);
         assert_eq!(s.service_card().tone, Tone::Attention);
+        assert_eq!(s.card_action(), Some(CardAction::Retry));
+    }
+
+    #[test]
+    fn tls_failures_get_their_own_state_and_card() {
+        let e = ClientError::Tls {
+            url: "https://x".into(),
+            message: "invalid peer certificate: UnknownIssuer".into(),
+        };
+        let probe = ProbeError::from(e);
+        assert!(matches!(probe, ProbeError::Tls(_)));
+        let mut m = Machine::new(true);
+        m.on_probe(Err(probe), Instant::now());
+        let ConnectionState::Tls { issue, .. } = m.state().clone() else {
+            panic!("expected a TLS state, got {:?}", m.state());
+        };
+        assert_eq!(issue, TlsIssue::Untrusted);
+        assert!(
+            !m.offers_start(),
+            "starting a server does not fix a certificate"
+        );
+        let s = snapshot(m.state().clone(), true);
+        let card = s.service_card();
+        assert_eq!(card.tone, Tone::Danger);
+        assert_eq!(card.title, "Untrusted certificate");
+        assert!(card.detail.contains("ca.pem"));
         assert_eq!(s.card_action(), Some(CardAction::Retry));
     }
 

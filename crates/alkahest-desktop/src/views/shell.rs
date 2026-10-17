@@ -619,6 +619,65 @@ impl Shell {
                 }
                 Some(el)
             }
+            ConnectionState::Tls { issue, detail } => {
+                // Secure connection failed: same frame as 17.5, with the cause and the fix.
+                Some(
+                    banner_frame(p)
+                        .border_color(c(p.accent_border))
+                        .bg(c(p.accent_subtle))
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(px(space::S1))
+                                .child(
+                                    div()
+                                        .type_style(text::TITLE)
+                                        .text_color(c(p.accent_text))
+                                        .child(format!(
+                                            "\u{1f512} {} \u{b7} {}",
+                                            issue.title(),
+                                            display_address(&snap.server_url)
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .type_style(text::SMALL)
+                                        .text_color(c(p.text_secondary))
+                                        .child(issue.hint()),
+                                )
+                                .child(
+                                    mono_caption(detail.clone(), p).text_color(c(p.danger_text)),
+                                ),
+                        )
+                        .child(
+                            button(
+                                "banner-tls-settings",
+                                "Open settings",
+                                ButtonKind::Secondary,
+                                size::CONTROL,
+                                false,
+                                p,
+                            )
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.select(Screen::Settings, cx)),
+                            ),
+                        )
+                        .child(
+                            button(
+                                "banner-tls-retry",
+                                "Retry now",
+                                ButtonKind::Primary,
+                                size::CONTROL,
+                                false,
+                                p,
+                            )
+                            .on_click(cx.listener(|this, _, _, _| {
+                                let _ = this.commands.send(Command::Retry);
+                            })),
+                        ),
+                )
+            }
             ConnectionState::NotRunning { .. } | ConnectionState::Error(_) => {
                 // 17.5: remote server lost (Start not offered).
                 let raw = match &snap.state {
