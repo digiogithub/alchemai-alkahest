@@ -15,6 +15,7 @@
 - [Configuration](guide/configuration.md)
 - [Desktop app](guide/desktop.md)
 - [Running as a service](guide/service.md)
+- [Docker](guide/docker.md)
 
 # Reference
 

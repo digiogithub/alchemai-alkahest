@@ -23,7 +23,8 @@ rules: `AGENTS.md`.
 
 ```sh
 cargo build -p alkahest --no-default-features   # headless (server and CLI)
-cargo build -p alkahest --features desktop      # with the desktop app
+cargo build -p alkahest --features desktop      # with the desktop app (alias: cargo desktop)
+cargo desktop-run                                # build and start `alkahest desktop`
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. Verification commands are listed in

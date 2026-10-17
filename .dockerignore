@@ -1,0 +1,10 @@
+# Build context: sources only. The image builds its own target/.
+target/
+dist/
+.pando/
+.claude/
+.git/
+.jj/
+design/
+docs/
+**/*.gguf

@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --quiet --package xtask --"
+# The `alkahest` binary with the GPUI desktop app linked (`desktop` is off by default so
+# workspace builds never compile GPUI). `cargo desktop` builds it; `cargo desktop-run` runs
+# `alkahest desktop`; extra arguments follow `--`.
+desktop = "build --package alkahest --features desktop"
+desktop-run = "run --package alkahest --features desktop -- desktop"
