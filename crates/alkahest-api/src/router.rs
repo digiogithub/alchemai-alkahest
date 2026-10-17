@@ -118,8 +118,17 @@ impl ApiRouter {
                 timeout,
             ));
         }
+        let mut policy = self.settings.auth.clone();
+        // The browser guard honours the CORS origins actually served.
+        policy.allowed_origins = self
+            .settings
+            .cors_origins
+            .iter()
+            .map(|o| o.trim().to_ascii_lowercase())
+            .filter(|o| !o.is_empty() && o != "*")
+            .collect();
         let auth = AuthState {
-            policy: Arc::new(self.settings.auth.clone()),
+            policy: Arc::new(policy),
             verifier: self.state.keys(),
             errors: self.state.errors(),
             usage: self.state.usage(),
@@ -211,6 +220,7 @@ fn cors_layer(origins: &[String]) -> Option<CorsLayer> {
                 Method::POST,
                 Method::PUT,
                 Method::DELETE,
+                Method::PATCH,
                 Method::HEAD,
                 Method::OPTIONS,
             ])

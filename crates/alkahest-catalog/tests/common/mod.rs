@@ -199,7 +199,7 @@ impl FixedToken {
 }
 
 impl CredentialSource for FixedToken {
-    fn catalog_token(&self, _name: &str) -> Option<Token> {
+    fn catalog_token(&self, _source: &CatalogSource) -> Option<Token> {
         self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Token::new(self.0)
     }
@@ -216,6 +216,8 @@ pub fn context(data_dir: &Path) -> SyncContext {
         credentials: Arc::new(NoCredentials),
         alkahest_version: alkahest_catalog::running_version(),
         deadline: None,
+        progress: None,
+        source_check: None,
     }
 }
 

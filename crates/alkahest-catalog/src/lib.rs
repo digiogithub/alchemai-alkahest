@@ -13,8 +13,9 @@
 //!   and [`find_model`] expose model entries; [`search_models`] backs `alkahest search` and
 //!   [`pull_catalog`] installs a model named `alkahest/<namespace>/<model>[:<tag>]` into the
 //!   Alkahest store (ALK-US-0120, ALK-SP-0011.R13).
-//! - [`edit`] adds and removes `[[catalogs]]` sources in the configuration file, keeping
-//!   comments.
+//! - [`edit`] adds, removes and changes `[[catalogs]]` sources in the configuration file,
+//!   keeping comments; [`manage`] builds on it for the CLI and the admin API (listing
+//!   document, private catalog tokens in the keyring, the live [`CatalogSet`] of a server).
 //!
 //! Catalog content is untrusted data: a sync downloads and parses TOML only, never runs a
 //! program and never downloads an asset or model file (ALK-SP-0011.R14); model files are
@@ -28,6 +29,7 @@ pub mod hosts;
 mod http;
 mod layers;
 pub mod layout;
+pub mod manage;
 pub mod manifest;
 pub mod model;
 pub mod pull;
@@ -37,6 +39,7 @@ pub mod snapshot;
 mod sync;
 
 pub use content::{CatalogContent, EngineFile, ValidateOptions, validate};
+pub use edit::{Removal, SourcePatch};
 pub use error::{CatalogError, FileIssue, Result};
 pub use http::{
     CredentialSource, HttpClient, KEYRING_SERVICE, KeyringCredentials, NoCredentials, Token,
@@ -46,10 +49,16 @@ pub use layers::{
     CatalogModel, CatalogState, RETRY_AFTER_ERROR, find_model, layered_models, load_states,
     recipe_catalog, search_models,
 };
+pub use manage::{
+    CatalogInfo, CatalogSet, CatalogTokenStore, KeyringTokenStore, MemoryTokenStore,
+    StoreCredentials, StoredToken, TokenPolicy, TokenSource,
+};
 pub use model::{ModelEntry, ModelFile, ModelFileKind, ModelFormat, ModelVariant, TemplateFormat};
 pub use pull::{CatalogPullError, CatalogPullOutcome, pull_catalog, resolve_model};
 pub use snapshot::SnapshotMeta;
-pub use sync::{Limits, SyncContext, SyncOutcome, SyncReport, mark_error_reported, sync};
+pub use sync::{
+    Limits, SyncContext, SyncOutcome, SyncProgress, SyncReport, SyncStep, mark_error_reported, sync,
+};
 
 /// The version of the running Alkahest, checked against `min_alkahest`.
 pub fn running_version() -> semver::Version {

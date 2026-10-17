@@ -503,7 +503,11 @@ alkahest catalog [OPTIONS] <COMMAND>
 | `ls` | List the configured catalogs: ref, commit, last sync, entry counts and issues [alias: list] |
 | `sync` | Fetch catalogs now (every enabled one, or the one named) |
 | `add` | Add a catalog source after the existing ones (a later catalog overrides earlier ones) |
-| `rm` | Remove a catalog source and its snapshot [alias: remove] |
+| `rm` | Remove a catalog source and its snapshot. The official catalog is disabled instead [alias: remove] |
+| `enable` | Turn a catalog on (it contributes entries again) |
+| `disable` | Turn a catalog off without removing it (its snapshot is kept) |
+| `edit` | Change a catalog source: ref, subdir, pin, refresh interval |
+| `token` | Manage the access token of a private catalog (OS keyring, service `alkahest`, user `catalog:<name>`) |
 | `index` | Write `index.toml` for a catalog directory (catalog authors) |
 
 Options (besides the global ones):
@@ -560,10 +564,114 @@ Options (besides the global ones):
 
 ### alkahest catalog rm
 
-Remove a catalog source and its snapshot
+Remove a catalog source and its snapshot. The official catalog is disabled instead
 
 ```text
 alkahest catalog rm [OPTIONS] <NAME>
+```
+
+Arguments:
+
+```text
+  <NAME>  Catalog name
+```
+
+Options (besides the global ones):
+
+```text
+      --delete-token        Also delete the catalog's token from the OS keyring
+```
+
+### alkahest catalog enable
+
+Turn a catalog on (it contributes entries again)
+
+```text
+alkahest catalog enable [OPTIONS] <NAME>
+```
+
+Arguments:
+
+```text
+  <NAME>  Catalog name
+```
+
+### alkahest catalog disable
+
+Turn a catalog off without removing it (its snapshot is kept)
+
+```text
+alkahest catalog disable [OPTIONS] <NAME>
+```
+
+Arguments:
+
+```text
+  <NAME>  Catalog name
+```
+
+### alkahest catalog edit
+
+Change a catalog source: ref, subdir, pin, refresh interval
+
+```text
+alkahest catalog edit [OPTIONS] <NAME>
+```
+
+Arguments:
+
+```text
+  <NAME>  Catalog name
+```
+
+Options (besides the global ones):
+
+```text
+      --ref <GIT_REF>
+          Branch or tag to follow
+      --subdir <SUBDIR>
+          Folder of the catalog inside the repository
+      --pin <PIN>
+          Freeze the catalog at this commit id (never refreshed)
+      --unpin
+          Remove the pin: follow the ref again
+      --refresh-interval <REFRESH_INTERVAL>
+          Refresh interval (`24h`, `30m`)
+```
+
+### alkahest catalog token
+
+Manage the access token of a private catalog (OS keyring, service `alkahest`, user `catalog:<name>`)
+
+```text
+alkahest catalog token [OPTIONS] <COMMAND>
+```
+
+| Subcommand | Purpose |
+|---|---|
+| `set` | Store the token of a private catalog in the OS keyring. The token is read from stdin (a prompt without echo on a terminal, one line when piped), never from the command line, and never printed |
+| `clear` | Remove the token of a catalog from the OS keyring [alias: rm] |
+
+#### alkahest catalog token set
+
+Store the token of a private catalog in the OS keyring. The token is read from stdin (a prompt without echo on a terminal, one line when piped), never from the command line, and never printed
+
+```text
+alkahest catalog token set [OPTIONS] <NAME>
+```
+
+Arguments:
+
+```text
+  <NAME>  Catalog name
+```
+
+#### alkahest catalog token clear
+
+Remove the token of a catalog from the OS keyring
+
+```text
+alkahest catalog token clear [OPTIONS] <NAME>
 ```
 
 Arguments:

@@ -476,16 +476,74 @@ pub enum CatalogAction {
         #[arg(long)]
         pin: Option<String>,
     },
-    /// Remove a catalog source and its snapshot.
+    /// Remove a catalog source and its snapshot. The official catalog is disabled instead.
     #[command(visible_alias = "remove")]
     Rm {
         /// Catalog name.
         name: String,
+        /// Also delete the catalog's token from the OS keyring.
+        #[arg(long)]
+        delete_token: bool,
+    },
+    /// Turn a catalog on (it contributes entries again).
+    Enable {
+        /// Catalog name.
+        name: String,
+    },
+    /// Turn a catalog off without removing it (its snapshot is kept).
+    Disable {
+        /// Catalog name.
+        name: String,
+    },
+    /// Change a catalog source: ref, subdir, pin, refresh interval.
+    Edit {
+        /// Catalog name.
+        name: String,
+        /// Branch or tag to follow.
+        #[arg(long = "ref")]
+        git_ref: Option<String>,
+        /// Folder of the catalog inside the repository.
+        #[arg(long)]
+        subdir: Option<String>,
+        /// Freeze the catalog at this commit id (never refreshed).
+        #[arg(long, conflicts_with = "unpin")]
+        pin: Option<String>,
+        /// Remove the pin: follow the ref again.
+        #[arg(long)]
+        unpin: bool,
+        /// Refresh interval (`24h`, `30m`).
+        #[arg(long)]
+        refresh_interval: Option<String>,
+    },
+    /// Manage the access token of a private catalog (OS keyring, service `alkahest`, user
+    /// `catalog:<name>`).
+    Token {
+        /// Token action.
+        #[command(subcommand)]
+        action: CatalogTokenAction,
     },
     /// Write `index.toml` for a catalog directory (catalog authors).
     Index {
         /// Catalog directory (holding `catalog.toml`).
         dir: std::path::PathBuf,
+    },
+}
+
+/// `alkahest catalog token ...`
+#[derive(Debug, Subcommand)]
+pub enum CatalogTokenAction {
+    /// Store the token of a private catalog in the OS keyring. The token is read from stdin (a
+    /// prompt without echo on a terminal, one line when piped), never from the command line,
+    /// and never printed.
+    Set {
+        /// Catalog name.
+        name: String,
+    },
+    /// Remove the token of a catalog from the OS keyring.
+    #[command(visible_alias = "rm")]
+    Clear {
+        /// Catalog name.
+        name: String,
     },
 }
 

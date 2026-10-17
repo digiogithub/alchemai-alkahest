@@ -136,6 +136,117 @@ fn add_and_remove_a_catalog() {
     assert!(!std::fs::read_to_string(&cfg).unwrap().contains("acme"));
 }
 
+/// ALK-US-0124: `catalog enable|disable|edit` edit the source in place (comments kept);
+/// `catalog rm official` disables the official catalog instead of removing it.
+#[test]
+fn enable_disable_edit_and_official_is_only_disabled() {
+    let home = tempfile::tempdir().unwrap();
+    let cfg = home.path().join("c.toml");
+    std::fs::write(&cfg, "# keep me\n[server]\nport = 12345 # mine\n").unwrap();
+    alkahest(home.path(), &cfg)
+        .args([
+            "catalog",
+            "add",
+            "acme",
+            "https://git.example.org/acme/catalog",
+        ])
+        .assert()
+        .success();
+    alkahest(home.path(), &cfg)
+        .args(["catalog", "disable", "acme"])
+        .assert()
+        .success()
+        .stdout(contains("catalog acme: disabled"));
+    alkahest(home.path(), &cfg)
+        .args([
+            "catalog",
+            "edit",
+            "acme",
+            "--ref",
+            "stable",
+            "--pin",
+            "2d45ae95a500e22fa79fcd1c3c6c4ecdc4ea5a29",
+            "--refresh-interval",
+            "1h",
+        ])
+        .assert()
+        .success();
+    let text = std::fs::read_to_string(&cfg).unwrap();
+    assert!(
+        text.starts_with("# keep me\n[server]\nport = 12345 # mine"),
+        "{text}"
+    );
+    assert!(text.contains("enabled = false"), "{text}");
+    assert!(text.contains("ref = \"stable\""), "{text}");
+    assert!(text.contains("refresh_interval = \"1h\""), "{text}");
+    alkahest(home.path(), &cfg)
+        .args(["catalog", "edit", "acme", "--unpin"])
+        .assert()
+        .success();
+    alkahest(home.path(), &cfg)
+        .args(["catalog", "enable", "acme"])
+        .assert()
+        .success();
+    let text = std::fs::read_to_string(&cfg).unwrap();
+    assert!(
+        !text.contains("pin =") && !text.contains("enabled = false"),
+        "{text}"
+    );
+    alkahest(home.path(), &cfg)
+        .args(["catalog", "edit", "acme", "--pin", "main"])
+        .assert()
+        .failure()
+        .stderr(contains("full commit id"));
+    alkahest(home.path(), &cfg)
+        .args(["catalog", "edit", "nope", "--ref", "x"])
+        .assert()
+        .failure();
+
+    alkahest(home.path(), &cfg)
+        .args(["catalog", "rm", "official"])
+        .assert()
+        .success()
+        .stdout(contains("cannot be removed"));
+    let out = alkahest(home.path(), &cfg)
+        .env("ALKAHEST_CATALOG_AUTO_SYNC", "0")
+        .args(["catalog", "ls", "--json"])
+        .output()
+        .unwrap();
+    let rows: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(rows[0]["name"], "official");
+    assert_eq!(rows[0]["enabled"], false);
+    assert_eq!(rows[0]["official"], true);
+    assert_eq!(rows[1]["name"], "acme");
+    assert_eq!(rows[1]["position"], 2);
+    assert!(rows[1]["token_present"].is_boolean());
+}
+
+/// ALK-US-0124 / R14: `catalog token set` never takes the token as an argument, and refuses
+/// unknown catalogs and an empty stdin before touching the keyring.
+#[test]
+fn catalog_token_is_never_an_argument() {
+    let home = tempfile::tempdir().unwrap();
+    let cfg = home.path().join("c.toml");
+    std::fs::write(&cfg, "").unwrap();
+    alkahest(home.path(), &cfg)
+        .args(["catalog", "token", "set", "official", "s3cr3t-token"])
+        .assert()
+        .failure()
+        .stderr(contains("unexpected argument"));
+    alkahest(home.path(), &cfg)
+        .args(["catalog", "token", "set", "nope"])
+        .write_stdin("s3cr3t-token\n")
+        .assert()
+        .failure()
+        .stderr(contains("no catalog named `nope`"));
+    alkahest(home.path(), &cfg)
+        .args(["catalog", "token", "set", "official"])
+        .write_stdin("\n")
+        .assert()
+        .failure()
+        .stderr(contains("no token on stdin"));
+}
+
 /// R10 "fresh install offline": built-in recipes listed and one notice, only once.
 #[test]
 fn fresh_install_offline() {

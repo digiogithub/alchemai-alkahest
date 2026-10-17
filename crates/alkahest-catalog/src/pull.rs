@@ -659,7 +659,10 @@ auth = "b.example.org"
 
     struct Fixed;
     impl CredentialSource for Fixed {
-        fn catalog_token(&self, _name: &str) -> Option<crate::Token> {
+        fn catalog_token(
+            &self,
+            _source: &alkahest_core::config::CatalogSource,
+        ) -> Option<crate::Token> {
             None
         }
         fn host_token(&self, host: &str) -> Option<crate::Token> {

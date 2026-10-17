@@ -188,7 +188,9 @@ pub(super) async fn kill(
 /// sources exist.
 pub(super) async fn events(State(state): State<AppState>) -> Response {
     let scheduler = state.service::<Scheduler>();
-    let jobs = admin(&state).ok().map(|c| c.jobs.subscribe());
+    let ctx = admin(&state).ok();
+    let jobs = ctx.as_ref().map(|c| c.jobs.subscribe());
+    let catalog_events = ctx.as_ref().map(|c| c.subscribe_catalog_events());
     if scheduler.is_none() && jobs.is_none() {
         return respond(
             &state,
@@ -202,6 +204,9 @@ pub(super) async fn events(State(state): State<AppState>) -> Response {
     }
     if let Some(rx) = jobs {
         streams.push(job_events(rx).boxed());
+    }
+    if let Some(rx) = catalog_events {
+        streams.push(catalog_events_stream(rx).boxed());
     }
     streams.push(request_events(state.requests().subscribe()).boxed());
     Sse::new(futures::stream::select_all(streams))
@@ -242,6 +247,24 @@ fn request_events(
                 Ok(r) => match Event::default().event("request").json_data(&r) {
                     Ok(ev) => yield Ok(ev),
                     Err(e) => tracing::warn!(error = %e, "cannot encode a request event"),
+                },
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    }
+}
+
+/// `catalog` events: a background catalog sync failed for the first time.
+fn catalog_events_stream(
+    mut rx: broadcast::Receiver<super::catalogs::CatalogEvent>,
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    async_stream::stream! {
+        loop {
+            match rx.recv().await {
+                Ok(e) => match Event::default().event("catalog").json_data(&e) {
+                    Ok(ev) => yield Ok(ev),
+                    Err(err) => tracing::warn!(error = %err, "cannot encode a catalog event"),
                 },
                 Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return,

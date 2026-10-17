@@ -9,13 +9,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use alkahest_catalog::{CatalogSet, CatalogTokenStore, KeyringTokenStore};
 use alkahest_core::Config;
 use alkahest_core::config::ResolvedPaths;
 use alkahest_hf::{KeyringStore, TokenStore};
 use alkahest_ollama::DEFAULT_LIBRARY_URL;
 use alkahest_sysinfo::SystemInfo;
 use parking_lot::{Mutex, RwLock};
+use tokio::sync::broadcast;
 
+use super::catalogs::CatalogEvent;
 use super::engines::EngineManager;
 use super::jobs::JobManager;
 use super::pulls::PullRunner;
@@ -30,6 +33,12 @@ pub type SharedEnv = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// A token store usable from handlers.
 pub type SharedTokenStore = Arc<dyn TokenStore + Send + Sync>;
+
+/// The store of private catalog tokens (OS keyring by default).
+pub type SharedCatalogTokens = Arc<dyn CatalogTokenStore>;
+
+/// Capacity of the catalog event channel.
+const CATALOG_EVENTS: usize = 32;
 
 /// State of the admin API. Build it with [`AdminContext::builder`].
 pub struct AdminContext {
@@ -51,6 +60,17 @@ pub struct AdminContext {
     pub(crate) saved_overrides:
         Mutex<std::collections::BTreeMap<String, alkahest_core::config::EngineOverride>>,
     pub(crate) sources: Vec<String>,
+    /// The catalog sources and limits in force (edited live by the catalog routes).
+    pub(crate) catalogs: CatalogSet,
+    /// Private catalog tokens.
+    pub(crate) catalog_tokens: SharedCatalogTokens,
+    /// The catalog sources of the configuration the server started with: the only sources an
+    /// environment token or an unbound legacy keyring token may serve.
+    pub(crate) catalog_trusted: Vec<alkahest_core::config::CatalogSource>,
+    /// Serialises catalog configuration edits (add, remove, patch, limits).
+    pub(crate) catalog_edit: Mutex<()>,
+    /// `catalog` events of `/alkahest/v1/events` (background sync failures).
+    pub(crate) catalog_events: broadcast::Sender<CatalogEvent>,
 }
 
 impl std::fmt::Debug for AdminContext {
@@ -83,10 +103,23 @@ impl AdminContext {
             system: None,
             jobs: JobManager::new(),
             sources: Vec::new(),
+            catalogs: None,
+            catalog_tokens: Arc::new(KeyringTokenStore),
         }
     }
 
-    /// The job manager (pulls and engine installs).
+    /// The catalog sources and limits in force; share it with the engine manager and the pull
+    /// service so catalog edits apply to them at once.
+    pub fn catalogs(&self) -> &CatalogSet {
+        &self.catalogs
+    }
+
+    /// `catalog` events: a background sync failed for the first time.
+    pub fn subscribe_catalog_events(&self) -> broadcast::Receiver<CatalogEvent> {
+        self.catalog_events.subscribe()
+    }
+
+    /// The job manager (pulls, engine installs and catalog syncs).
     pub fn jobs(&self) -> &JobManager {
         &self.jobs
     }
@@ -132,6 +165,8 @@ pub struct AdminContextBuilder {
     system: Option<SystemInfo>,
     jobs: JobManager,
     sources: Vec<String>,
+    catalogs: Option<CatalogSet>,
+    catalog_tokens: SharedCatalogTokens,
 }
 
 impl std::fmt::Debug for AdminContextBuilder {
@@ -187,6 +222,19 @@ impl AdminContextBuilder {
         self
     }
 
+    /// The live catalog set shared with the engine manager and the pull service (default: a
+    /// new set from the configuration's `[[catalogs]]` and `[catalog_limits]`).
+    pub fn catalog_set(mut self, set: CatalogSet) -> Self {
+        self.catalogs = Some(set);
+        self
+    }
+
+    /// Where private catalog tokens live (default: the OS keyring).
+    pub fn catalog_token_store(mut self, store: SharedCatalogTokens) -> Self {
+        self.catalog_tokens = store;
+        self
+    }
+
     /// Finishes the context.
     pub fn build(self) -> Arc<AdminContext> {
         let ollama_library = self
@@ -196,6 +244,11 @@ impl AdminContextBuilder {
         let saved = NetworkSettings::from_config(&self.config);
         let saved_server = ServerSettings::from_config(&self.config);
         let saved_overrides = self.config.engines.overrides.clone();
+        let catalogs = self.catalogs.unwrap_or_else(|| {
+            CatalogSet::new(self.config.catalogs.clone(), self.config.catalog_limits)
+        });
+        let (catalog_events, _) = broadcast::channel(CATALOG_EVENTS);
+        let catalog_trusted = self.config.catalogs.clone();
         Arc::new(AdminContext {
             config: self.config,
             paths: self.paths,
@@ -213,6 +266,11 @@ impl AdminContextBuilder {
             saved_server: Mutex::new(saved_server),
             saved_overrides: Mutex::new(saved_overrides),
             sources: self.sources,
+            catalogs,
+            catalog_tokens: self.catalog_tokens,
+            catalog_trusted,
+            catalog_edit: Mutex::new(()),
+            catalog_events,
         })
     }
 }

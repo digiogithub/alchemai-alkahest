@@ -74,7 +74,54 @@ pub struct SyncContext {
     pub alkahest_version: semver::Version,
     /// Overall deadline of one sync; a sync cut short records the timeout like any failure.
     pub deadline: Option<Duration>,
+    /// Receives the steps of a sync (the admin API turns them into job progress).
+    pub progress: Option<SyncProgress>,
+    /// Checked once the catalog lock is held: `false` means the source was removed or its
+    /// URL or folder changed meanwhile, and the sync stops without writing anything.
+    pub source_check: Option<SourceCheck>,
 }
+
+/// See [`SyncContext::source_check`].
+pub type SourceCheck = Arc<dyn Fn(&CatalogSource) -> bool + Send + Sync>;
+
+/// One step of a sync, reported through [`SyncContext::progress`] (desktop screen 16b shows
+/// it as `Syncing…` with the step).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "step", rename_all = "snake_case")]
+pub enum SyncStep {
+    /// Resolving the configured ref to a commit over git smart HTTP.
+    ResolvingRef,
+    /// Reading a `file://` catalog directory.
+    ReadingDirectory,
+    /// Downloading changed files (`index.toml` included) or the commit archive (one file).
+    Downloading {
+        /// Files downloaded so far.
+        done: usize,
+        /// Files to download.
+        total: usize,
+    },
+    /// Extracting the catalog folder from the commit archive.
+    ExtractingArchive,
+    /// Validating the new snapshot (all-or-nothing) and swapping it in.
+    Validating,
+}
+
+impl std::fmt::Display for SyncStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ResolvingRef => f.write_str("resolving ref"),
+            Self::ReadingDirectory => f.write_str("reading directory"),
+            Self::Downloading { done, total } => {
+                write!(f, "downloading changed files {done} / {total}")
+            }
+            Self::ExtractingArchive => f.write_str("extracting archive"),
+            Self::Validating => f.write_str("validating"),
+        }
+    }
+}
+
+/// Receiver of [`SyncStep`]s.
+pub type SyncProgress = Arc<dyn Fn(SyncStep) + Send + Sync>;
 
 impl std::fmt::Debug for SyncContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -101,7 +148,36 @@ impl SyncContext {
             credentials: Arc::new(KeyringCredentials),
             alkahest_version: crate::running_version(),
             deadline: None,
+            progress: None,
+            source_check: None,
         })
+    }
+
+    /// Stops a sync whose source no longer passes `check` once the lock is held (a server
+    /// passes "still configured with the same URL and folder").
+    pub fn with_source_check(mut self, check: SourceCheck) -> Self {
+        self.source_check = Some(check);
+        self
+    }
+
+    /// Uses `credentials` to find a token after a 401/403 (the admin API passes its token
+    /// store, so a token set through the API is used at once).
+    pub fn with_credentials(mut self, credentials: Arc<dyn CredentialSource>) -> Self {
+        self.credentials = credentials;
+        self
+    }
+
+    /// Reports the steps of every sync to `progress`.
+    pub fn with_progress(mut self, progress: SyncProgress) -> Self {
+        self.progress = Some(progress);
+        self
+    }
+
+    /// Reports `step` to the progress receiver, if any.
+    fn step(&self, step: SyncStep) {
+        if let Some(p) = &self.progress {
+            p(step);
+        }
     }
 
     /// Uses `limits`.
@@ -181,6 +257,14 @@ pub async fn sync(source: &CatalogSource, ctx: &SyncContext) -> Result<SyncRepor
         let (root, name) = (root.clone(), source.name.clone());
         blocking(move || SyncLock::acquire(&root, &name)).await??
     };
+    if let Some(check) = &ctx.source_check
+        && !check(source)
+    {
+        // Removed or changed while waiting: nothing is written, not even an error record, so
+        // no snapshot directory of a removed catalog is created again.
+        drop(lock);
+        return Err(CatalogError::Unknown(source.name.clone()));
+    }
     let dir = root.join(&source.name);
     let previous = {
         let dir = dir.clone();
@@ -205,8 +289,8 @@ pub async fn sync(source: &CatalogSource, ctx: &SyncContext) -> Result<SyncRepor
         // Only now, for a host that refused anonymous access, look for a token: a public
         // catalog never touches the keyring.
         let creds = ctx.credentials.clone();
-        let name = source.name.clone();
-        let Some(token) = blocking(move || creds.catalog_token(&name)).await? else {
+        let src = source.clone();
+        let Some(token) = blocking(move || creds.catalog_token(&src)).await? else {
             return first;
         };
         let kind = HostKind::detect(&source.url);
@@ -319,6 +403,7 @@ async fn run(
     };
 
     if let Some(path) = source.url.strip_prefix("file://") {
+        ctx.step(SyncStep::ReadingDirectory);
         let path = PathBuf::from(path);
         let (files, commit) = blocking(move || {
             let files = read_files(&path);
@@ -362,7 +447,10 @@ async fn run(
             }
             pin.clone()
         }
-        None => refs::resolve(&ctx.http, name, &source.url, &source.r#ref, cred).await?,
+        None => {
+            ctx.step(SyncStep::ResolvingRef);
+            refs::resolve(&ctx.http, name, &source.url, &source.r#ref, cred).await?
+        }
     };
     if !is_commit_id(&commit) {
         return Err(CatalogError::Protocol {
@@ -376,6 +464,7 @@ async fn run(
 
     // Raw files guided by the index.
     if let Some(index_url) = raw_url(source, &kind, &commit, layout::INDEX) {
+        ctx.step(SyncStep::Downloading { done: 0, total: 1 });
         match ctx
             .http
             .get(
@@ -414,10 +503,13 @@ async fn run(
             redact_url(&source.url)
         )));
     };
+    ctx.step(SyncStep::Downloading { done: 0, total: 1 });
     let data = ctx
         .http
         .get(&url, cred, AuthStyle::Bearer, ctx.limits.max_archive_bytes)
         .await?;
+    ctx.step(SyncStep::Downloading { done: 1, total: 1 });
+    ctx.step(SyncStep::ExtractingArchive);
     // Built-in hosts write the commit into the archive (pax `comment`); a custom
     // `archive_url` host may not, which is only a warning.
     let require_commit = source.archive_url.is_none() && kind != HostKind::Other;
@@ -541,6 +633,17 @@ async fn fetch_raw(
         Some((m, f)) if same_source(m, source) => f,
         _ => &empty,
     };
+    let unchanged = |f: &crate::manifest::IndexEntry| {
+        old_files
+            .get(&f.path)
+            .is_some_and(|old| sha256_hex(old) == f.sha256 && old.len() as u64 == f.size)
+    };
+    // The index plus every changed file.
+    let to_fetch = 1 + index.files.iter().filter(|f| !unchanged(f)).count();
+    ctx.step(SyncStep::Downloading {
+        done: 1,
+        total: to_fetch,
+    });
     let mut files = BTreeMap::new();
     let mut downloaded = vec![layout::INDEX.to_string()];
     let mut reused = Vec::new();
@@ -579,6 +682,10 @@ async fn fetch_raw(
         }
         files.insert(f.path.clone(), bytes);
         downloaded.push(f.path.clone());
+        ctx.step(SyncStep::Downloading {
+            done: downloaded.len(),
+            total: to_fetch,
+        });
     }
     files.insert(layout::INDEX.to_string(), index_bytes);
     commit_snapshot(
@@ -602,7 +709,7 @@ async fn fetch_raw(
 #[allow(clippy::too_many_arguments)]
 async fn commit_snapshot(
     source: &CatalogSource,
-    _ctx: &SyncContext,
+    ctx: &SyncContext,
     dir: &Path,
     previous: Option<&SnapshotMeta>,
     files: BTreeMap<String, Vec<u8>>,
@@ -612,6 +719,7 @@ async fn commit_snapshot(
     reused: Vec<String>,
     transport: &str,
 ) -> Result<SyncReport> {
+    ctx.step(SyncStep::Validating);
     let (version, warnings) = {
         let (dir, name, commit, opts) = (
             dir.to_path_buf(),

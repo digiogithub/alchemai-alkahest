@@ -104,8 +104,16 @@ the `catalog/` folder of `github.com/digiogithub/alchemai-alkahest` at `main`.
 alkahest catalog ls                       # catalogs, commit, age, entry counts, problems
 alkahest catalog sync [<name>]            # fetch now
 alkahest catalog add acme https://git.example.org/acme/catalog --ref stable [--subdir .] [--pin <commit>]
-alkahest catalog rm acme                  # removes the source and its snapshot
+alkahest catalog rm acme [--delete-token]  # removes the source and its snapshot
+alkahest catalog disable acme             # keeps it configured, contributes nothing
+alkahest catalog enable acme
+alkahest catalog edit acme --ref v2 [--subdir .] [--pin <commit> | --unpin] [--refresh-interval 6h]
+alkahest catalog token set acme           # reads the token from a hidden prompt or stdin
+alkahest catalog token clear acme
 ```
+
+`official` cannot be removed: `catalog rm official` disables it. The desktop app and remote
+tools do the same through the admin API (`/alkahest/v1/catalogs`, see the API reference).
 
 - **Layers.** Lowest first: built-in recipes, then the catalogs in configured order (a catalog
   added later overrides earlier ones), then `recipes/` next to the binary, then
@@ -129,8 +137,9 @@ alkahest catalog rm acme                  # removes the source and its snapshot
   changed files of that commit are downloaded (HTTPS, system proxy settings honoured). GitHub,
   GitLab and Gitea/Forgejo work as is; other hosts need `raw_url` and `archive_url` templates
   in the `[[catalogs]]` entry. A `file://` URL reads a plain directory (air-gapped installs).
-- **Private catalogs.** Store the token in the OS keyring (service `alkahest`, user
-  `catalog:<name>`) or set `ALKAHEST_CATALOG_TOKEN_<NAME>` (name upper-cased, `-` and `.` as
+- **Private catalogs.** Store the token with `alkahest catalog token set <name>` (it goes to
+  the OS keyring, service `alkahest`, user `catalog:<name>`; never pass it as an argument) or
+  set `ALKAHEST_CATALOG_TOKEN_<NAME>` (name upper-cased, `-` and `.` as
   `_`). It is looked up only after the host refuses anonymous access (401/403), sent only to
   the repository's own host, and never written to configuration, snapshots or logs.
 - **Safety.** A sync only downloads and parses TOML. It never runs anything and never

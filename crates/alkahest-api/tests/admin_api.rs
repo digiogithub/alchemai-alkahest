@@ -166,6 +166,11 @@ fn variant(id: &str, variant: &str, installed: bool) -> EngineVariant {
         path: installed.then(|| PathBuf::from("/e/llama-server")),
         bundled: false,
         download_bytes: Some(12_000_000),
+        origin: Some("built-in".into()),
+        origin_commit: None,
+        native: false,
+        native_stale: false,
+        dependencies: Vec::new(),
     }
 }
 

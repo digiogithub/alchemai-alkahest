@@ -81,13 +81,53 @@ impl Default for Config {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CatalogLimits {
-    /// Largest catalog snapshot in bytes (all its files together).
+    /// Largest catalog snapshot in bytes (all its files together); at most 1 GiB.
     pub max_snapshot_bytes: u64,
-    /// Largest single catalog file in bytes.
+    /// Largest single catalog file in bytes; at most 256 MiB.
     pub max_file_bytes: u64,
-    /// Largest commit archive (`tar.gz`, the fallback transport) in bytes; its decompressed
-    /// stream is bounded to four times this.
+    /// Largest commit archive (`tar.gz`, the fallback transport) in bytes, at most 4 GiB; its
+    /// decompressed stream is bounded to four times this.
     pub max_archive_bytes: u64,
+}
+
+impl CatalogLimits {
+    /// Hard ceiling of `max_file_bytes` (256 MiB).
+    pub const MAX_FILE_CEILING: u64 = 256 * 1024 * 1024;
+    /// Hard ceiling of `max_snapshot_bytes` (1 GiB).
+    pub const MAX_SNAPSHOT_CEILING: u64 = 1024 * 1024 * 1024;
+    /// Hard ceiling of `max_archive_bytes` (4 GiB).
+    pub const MAX_ARCHIVE_CEILING: u64 = 4 * 1024 * 1024 * 1024;
+
+    /// Checks the floors (1 KiB, snapshot at least one file) and the hard ceilings, so a
+    /// catalog can never make a sync read an unbounded amount of data.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidConfig`] naming the rule.
+    pub fn validate(&self) -> Result<()> {
+        if self.max_file_bytes < 1024
+            || self.max_snapshot_bytes < self.max_file_bytes
+            || self.max_archive_bytes < 1024
+        {
+            return Err(Error::InvalidConfig(
+                "catalog_limits: max_file_bytes and max_archive_bytes must be at least 1024, \
+                 and max_snapshot_bytes at least max_file_bytes"
+                    .into(),
+            ));
+        }
+        if self.max_file_bytes > Self::MAX_FILE_CEILING
+            || self.max_snapshot_bytes > Self::MAX_SNAPSHOT_CEILING
+            || self.max_archive_bytes > Self::MAX_ARCHIVE_CEILING
+        {
+            return Err(Error::InvalidConfig(format!(
+                "catalog_limits: at most {} bytes per file, {} per snapshot and {} per archive",
+                Self::MAX_FILE_CEILING,
+                Self::MAX_SNAPSHOT_CEILING,
+                Self::MAX_ARCHIVE_CEILING
+            )));
+        }
+        Ok(())
+    }
 }
 
 impl Default for CatalogLimits {
@@ -813,17 +853,7 @@ impl Config {
                 "logging.max_files must be at least 1".into(),
             ));
         }
-        let l = &self.catalog_limits;
-        if l.max_file_bytes < 1024
-            || l.max_snapshot_bytes < l.max_file_bytes
-            || l.max_archive_bytes < 1024
-        {
-            return Err(Error::InvalidConfig(
-                "catalog_limits: max_file_bytes and max_archive_bytes must be at least 1024, \
-                 and max_snapshot_bytes at least max_file_bytes"
-                    .into(),
-            ));
-        }
+        self.catalog_limits.validate()?;
         for (i, c) in self.catalogs.iter().enumerate() {
             c.validate()?;
             if self.catalogs[..i].iter().any(|o| o.name == c.name) {
@@ -1463,6 +1493,23 @@ mod tests {
         assert_eq!(c.catalog_limits.max_file_bytes, 2048);
         assert_eq!(c.catalog_limits.max_archive_bytes, 256 * 1024 * 1024);
         assert!(Config::from_toml_str("[catalog_limits]\nmax_file_bytes = 0\n").is_err());
+    }
+
+    /// Security review of ALK-US-0124, finding 3: catalog limits have hard ceilings.
+    #[test]
+    fn catalog_limits_have_upper_bounds() {
+        for bad in [
+            "[catalog_limits]\nmax_file_bytes = 268435457\nmax_snapshot_bytes = 1073741824\n",
+            "[catalog_limits]\nmax_snapshot_bytes = 1073741825\n",
+            "[catalog_limits]\nmax_archive_bytes = 4294967297\n",
+        ] {
+            assert!(Config::from_toml_str(bad).is_err(), "{bad}");
+        }
+        let ok = Config::from_toml_str(
+            "[catalog_limits]\nmax_file_bytes = 268435456\nmax_snapshot_bytes = 1073741824\n\
+             max_archive_bytes = 4294967296\n",
+        );
+        assert!(ok.is_ok(), "{ok:?}");
     }
 
     #[test]

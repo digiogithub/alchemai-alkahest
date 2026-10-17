@@ -728,3 +728,49 @@ async fn file_source_syncs_a_directory() {
             .exists()
     );
 }
+
+/// ALK-US-0124: a sync reports its steps (resolving the ref, the changed files n / m,
+/// validating), which the admin API turns into job progress.
+#[tokio::test]
+async fn sync_reports_its_steps() {
+    use alkahest_catalog::SyncStep;
+    let server = MockServer::start().await;
+    let data = tempfile::tempdir().unwrap();
+    let files = catalog_files(ENGINE_URL);
+    mount_refs(&server, C1).await;
+    mount_raw(&server, C1, &files).await;
+    let steps = Arc::new(Mutex::new(Vec::new()));
+    let seen = steps.clone();
+    let ctx = context(data.path()).with_progress(Arc::new(move |s: SyncStep| {
+        seen.lock().unwrap().push(s);
+    }));
+    sync(&source(&server), &ctx).await.unwrap();
+    let steps = steps.lock().unwrap().clone();
+    assert_eq!(steps.first(), Some(&SyncStep::ResolvingRef), "{steps:?}");
+    assert_eq!(steps.last(), Some(&SyncStep::Validating), "{steps:?}");
+    // index.toml + the three catalog files.
+    assert!(
+        steps.contains(&SyncStep::Downloading { done: 4, total: 4 }),
+        "{steps:?}"
+    );
+    assert_eq!(
+        SyncStep::Downloading { done: 2, total: 4 }.to_string(),
+        "downloading changed files 2 / 4"
+    );
+}
+
+/// Security review of ALK-US-0124, finding 4: a sync whose source was removed while it waited
+/// for the lock writes nothing (no orphan snapshot directory).
+#[tokio::test]
+async fn removed_source_is_not_synced_after_the_lock() {
+    let server = MockServer::start().await;
+    let data = tempfile::tempdir().unwrap();
+    let files = catalog_files(ENGINE_URL);
+    mount_refs(&server, C1).await;
+    mount_raw(&server, C1, &files).await;
+    let ctx = context(data.path()).with_source_check(Arc::new(|_| false));
+    let err = sync(&source(&server), &ctx).await.unwrap_err();
+    assert!(matches!(err, CatalogError::Unknown(_)), "{err}");
+    assert!(!snapshot_dir(data.path(), "acme").exists());
+    assert!(requested(&server).await.is_empty());
+}

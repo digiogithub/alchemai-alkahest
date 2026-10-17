@@ -3,7 +3,9 @@
 //! * `GET /alkahest/v1/engines`: installed builds and installable recipe variants, with the
 //!   detected accelerators.
 //! * `POST /alkahest/v1/engines/install` `{"engine": "llama-cpp", "version": null,
-//!   "variant": null, "from_source": false, "force": false}`: starts an install job.
+//!   "variant": null, "from_source": false, "force": false, "with": ["cuda-runtime"],
+//!   "native": false}`: starts an install job. `with` names optional dependencies to install
+//!   too; `native` installs the native variant built for this CPU (ALK-SP-0011.R5, R6).
 //! * `DELETE /alkahest/v1/engines/{id}?version=&variant=`: removes managed installs (409
 //!   while a loaded model runs on one).
 //! * `POST /alkahest/v1/engines/reload`: re-reads the recipe directories and reports the
@@ -20,11 +22,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use alkahest_catalog::CatalogSet;
 use alkahest_core::config::{CatalogSource, EngineOverride};
 use alkahest_fetch::{FetchConfig, ProgressEvent};
 use alkahest_recipes::{
-    Catalog, Host, InstallOptions, InstalledEngine, Recipe, bundled_roots, install, list_installed,
-    remove_installed,
+    Catalog, Host, InstallOptions, InstalledEngine, Recipe, RecipeLayer, bundled_roots, install,
+    list_installed, remove_installed,
 };
 use alkahest_sysinfo::SystemInfo;
 use axum::Json;
@@ -79,6 +82,36 @@ pub struct EngineVariant {
     /// Size of the prebuilt archive for this host, when the recipe records it.
     #[serde(default)]
     pub download_bytes: Option<u64>,
+    /// Recipe layer the variant comes from: `built-in`, `catalog:<name>` or `dir:<path>`
+    /// (ALK-SP-0011.R12); `None` for an installed build whose recipe is gone.
+    #[serde(default)]
+    pub origin: Option<String>,
+    /// Commit of the catalog snapshot, for `catalog:<name>` origins.
+    #[serde(default)]
+    pub origin_commit: Option<String>,
+    /// A native variant, built for the host CPU (ALK-SP-0011.R6); installed only on request.
+    #[serde(default)]
+    pub native: bool,
+    /// An installed native build whose recorded CPU features this machine lacks ("built for
+    /// another CPU").
+    #[serde(default)]
+    pub native_stale: bool,
+    /// Dependencies of the variant for this host (ALK-SP-0011.R5).
+    #[serde(default)]
+    pub dependencies: Vec<EngineDependency>,
+}
+
+/// One dependency download of an engine variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineDependency {
+    /// Identifier (`vulkan-loader`, `cuda-runtime`).
+    pub id: String,
+    /// Installed only on request (`with`).
+    pub optional: bool,
+    /// Download size in bytes, when known.
+    pub size: Option<u64>,
+    /// Present in the installed build (always `false` for a variant not installed).
+    pub installed: bool,
 }
 
 /// `GET /alkahest/v1/engines`.
@@ -104,6 +137,11 @@ pub struct EngineInstallRequest {
     pub from_source: bool,
     /// Reinstall over a complete install.
     pub force: bool,
+    /// Optional dependencies to install too (ids; ALK-SP-0011.R5).
+    pub with: Vec<String>,
+    /// Install the native variant of this machine (built from source for the host CPU;
+    /// ALK-SP-0011.R6). Conflicts with `variant`.
+    pub native: bool,
 }
 
 /// Byte progress of an install: `(done, total)`.
@@ -157,8 +195,8 @@ pub struct RecipeEngineManager {
     engines_dir: PathBuf,
     recipe_dirs: Vec<PathBuf>,
     /// `<data_dir>` and the git catalog sources whose snapshots layer between the built-in
-    /// recipes and `recipe_dirs` (ALK-SP-0011.R12).
-    catalogs: Option<(PathBuf, Vec<CatalogSource>)>,
+    /// recipes and `recipe_dirs` (ALK-SP-0011.R12), read live on every use.
+    catalogs: Option<(PathBuf, CatalogSet)>,
     bundled: Vec<PathBuf>,
     fetch: FetchConfig,
     system: SystemInfo,
@@ -206,8 +244,14 @@ impl RecipeEngineManager {
 
     /// Layers the snapshots of the git catalogs `sources` (stored under
     /// `<data_dir>/catalogs/`) between the built-in recipes and the recipe directories.
-    pub fn with_catalogs(mut self, data_dir: &Path, sources: Vec<CatalogSource>) -> Self {
-        self.catalogs = Some((data_dir.to_path_buf(), sources));
+    pub fn with_catalogs(self, data_dir: &Path, sources: Vec<CatalogSource>) -> Self {
+        self.with_catalog_set(data_dir, CatalogSet::new(sources, Default::default()))
+    }
+
+    /// Like [`RecipeEngineManager::with_catalogs`] over a live set: catalog edits through the
+    /// admin API apply to the next listing or install.
+    pub fn with_catalog_set(mut self, data_dir: &Path, set: CatalogSet) -> Self {
+        self.catalogs = Some((data_dir.to_path_buf(), set));
         self
     }
 
@@ -218,7 +262,7 @@ impl RecipeEngineManager {
     /// The recipe catalog and the files that were ignored (path, reason).
     fn catalog_with_issues(&self) -> (Catalog, Vec<(PathBuf, String)>) {
         let states = match &self.catalogs {
-            Some((data_dir, sources)) => alkahest_catalog::load_states(data_dir, sources),
+            Some((data_dir, set)) => alkahest_catalog::load_states(data_dir, &set.sources()),
             None => Vec::new(),
         };
         let (catalog, issues) = alkahest_catalog::recipe_catalog(&states, &self.recipe_dirs);
@@ -257,22 +301,57 @@ impl RecipeEngineManager {
                 ),
             ));
         }
-        let recipe = catalog
-            .resolve(
+        if req.native && req.variant.is_some() {
+            return Err(HttpError::bad_request(
+                "set either native or variant: native picks the native variant of this machine",
+            ));
+        }
+        let recipe = if req.native {
+            catalog.resolve_native(
+                &req.engine,
+                req.version.as_deref(),
+                &self.system,
+                &self.host,
+            )
+        } else {
+            catalog.resolve(
                 &req.engine,
                 req.version.as_deref(),
                 req.variant.as_deref(),
                 Some(&self.system),
                 &self.host,
             )
-            .map_err(|e| HttpError::bad_request(e.to_string()))?;
-        if req.from_source && recipe.source.is_none() {
+        }
+        .map_err(|e| HttpError::bad_request(e.to_string()))?;
+        let known: Vec<String> = recipe
+            .dependencies_for(&self.host)
+            .into_iter()
+            .filter(|d| d.optional)
+            .map(|d| d.id)
+            .collect();
+        if let Some(bad) = req.with.iter().find(|w| !known.contains(w)) {
+            return Err(HttpError::bad_request(format!(
+                "{} {} ({}) has no optional dependency `{bad}` for {}/{} (optional: {})",
+                recipe.id,
+                recipe.tag,
+                recipe.variant,
+                self.host.os,
+                self.host.arch,
+                if known.is_empty() {
+                    "none".to_string()
+                } else {
+                    known.join(", ")
+                }
+            )));
+        }
+        let from_source = req.from_source || recipe.native;
+        if from_source && recipe.source.is_none() {
             return Err(HttpError::bad_request(format!(
                 "{} {} ({}) has no source build steps in its recipe",
                 recipe.id, recipe.tag, recipe.variant
             )));
         }
-        if !req.from_source && !recipe.installable_on(&self.host) {
+        if !from_source && !recipe.installable_on(&self.host) {
             return Err(HttpError::bad_request(format!(
                 "{} {} ({}) has no prebuilt archive for {}/{}; install it from source",
                 recipe.id, recipe.tag, recipe.variant, self.host.os, self.host.arch
@@ -280,6 +359,32 @@ impl RecipeEngineManager {
         }
         Ok(recipe)
     }
+}
+
+/// `built-in`, `catalog:<name>` or `dir:<path>`, and the snapshot commit of a catalog.
+fn origin_of(catalog: &Catalog, r: &Recipe) -> (Option<String>, Option<String>) {
+    match catalog.layer_of(r) {
+        Some(RecipeLayer::Builtin) => (Some("built-in".into()), None),
+        Some(RecipeLayer::GitCatalog { name, commit }) => (
+            Some(format!("catalog:{name}")),
+            Some(commit.clone()).filter(|c| !c.is_empty()),
+        ),
+        Some(RecipeLayer::Directory { path }) => (Some(format!("dir:{}", path.display())), None),
+        None => (None, None),
+    }
+}
+
+/// The dependencies of `r` on `host`; `installed` lists the ids present in an install.
+fn dependencies_of(r: &Recipe, host: &Host, installed: &[String]) -> Vec<EngineDependency> {
+    r.dependencies_for(host)
+        .into_iter()
+        .map(|d| EngineDependency {
+            installed: installed.contains(&d.id),
+            id: d.id,
+            optional: d.optional,
+            size: d.size,
+        })
+        .collect()
 }
 
 fn kind_label(r: &Recipe) -> Option<String> {
@@ -302,6 +407,9 @@ impl EngineManager for RecipeEngineManager {
             .iter()
             .map(|e| {
                 let r = recipe_of(&e.id, &e.tag, &e.variant);
+                let (origin, origin_commit) = r.map_or((None, None), |r| origin_of(&catalog, r));
+                let mut present = e.dependencies.clone();
+                present.extend(e.companions.iter().cloned());
                 EngineVariant {
                     id: e.id.clone(),
                     version: e.tag.clone(),
@@ -318,6 +426,13 @@ impl EngineManager for RecipeEngineManager {
                     path: Some(e.executable.clone()),
                     bundled: self.bundled.iter().any(|root| e.dir.starts_with(root)),
                     download_bytes: r.and_then(|r| r.asset_for(&self.host)).and_then(|a| a.size),
+                    origin,
+                    origin_commit,
+                    native: e.native_cpu_flags.is_some() || r.is_some_and(|r| r.native),
+                    native_stale: e.native_stale(&self.system.cpu.flags),
+                    dependencies: r
+                        .map(|r| dependencies_of(r, &self.host, &present))
+                        .unwrap_or_default(),
                 }
             })
             .collect();
@@ -332,6 +447,7 @@ impl EngineManager for RecipeEngineManager {
                         row.recommended = is_recommended;
                         continue;
                     }
+                    let (origin, origin_commit) = origin_of(&catalog, r);
                     let state = if !r.installable_on(&self.host) && r.source.is_none() {
                         "unsupported"
                     } else if is_recommended {
@@ -355,6 +471,11 @@ impl EngineManager for RecipeEngineManager {
                         path: None,
                         bundled: false,
                         download_bytes: r.asset_for(&self.host).and_then(|a| a.size),
+                        origin,
+                        origin_commit,
+                        native: r.native,
+                        native_stale: false,
+                        dependencies: dependencies_of(r, &self.host, &[]),
                     });
                 }
             }
@@ -397,7 +518,8 @@ impl EngineManager for RecipeEngineManager {
             });
             let opts = InstallOptions {
                 force: req.force,
-                from_source: req.from_source,
+                from_source: req.from_source || recipe.native,
+                with: req.with.clone(),
                 fetch: this.fetch.clone(),
                 progress: Some(on_bytes),
                 ..InstallOptions::default()
@@ -407,7 +529,8 @@ impl EngineManager for RecipeEngineManager {
                 .map_err(|e| format!("installing {} ({}): {e}", recipe.id, recipe.variant))?;
             Ok(
                 json!({"engine": e.id, "version": e.tag, "variant": e.variant,
-                      "path": e.executable, "from_source": e.from_source}),
+                      "path": e.executable, "from_source": e.from_source,
+                      "dependencies": e.dependencies, "native": e.native_cpu_flags.is_some()}),
             )
         })
     }
@@ -427,7 +550,7 @@ impl EngineManager for RecipeEngineManager {
     }
 
     fn install_log_path(&self, req: &EngineInstallRequest) -> Option<PathBuf> {
-        if !req.from_source {
+        if !req.from_source && !req.native {
             return None;
         }
         let catalog = self.catalog();
@@ -519,7 +642,7 @@ pub(super) async fn start_install(State(state): State<AppState>, body: Bytes) ->
                     if let Some(p) = log_path {
                         job.set_log_path(p);
                     }
-                    job.phase(if req.from_source {
+                    job.phase(if req.from_source || req.native {
                         "building"
                     } else {
                         "downloading"

@@ -9,6 +9,8 @@ use alkahest_fetch::FetchConfig;
 use reqwest::{Client, Method, RequestBuilder, StatusCode};
 use zeroize::Zeroizing;
 
+use alkahest_core::config::CatalogSource;
+
 use crate::error::{CatalogError, Result};
 use crate::hosts::{host_of, redact_url};
 
@@ -46,8 +48,9 @@ impl fmt::Display for Token {
 
 /// Where tokens come from. The real one is [`KeyringCredentials`]; tests inject their own.
 pub trait CredentialSource: Send + Sync {
-    /// The token of catalog `name`, if any.
-    fn catalog_token(&self, name: &str) -> Option<Token>;
+    /// The token `source` may use, if any. Implementations must never return a token stored
+    /// for another host (see [`crate::manage::TokenPolicy`]).
+    fn catalog_token(&self, source: &CatalogSource) -> Option<Token>;
 
     /// The token of download host `host` (a model file's `auth`, ALK-SP-0011.R7, R14), if
     /// any. The default has none.
@@ -90,18 +93,25 @@ pub fn token_env_var(name: &str) -> String {
 }
 
 /// Tokens from `ALKAHEST_CATALOG_TOKEN_<NAME>`, else the OS keyring (service `alkahest`, user
-/// `catalog:<name>`); host tokens likewise from `ALKAHEST_HOST_TOKEN_<HOST>` or user
+/// `catalog:<name>`), under [`crate::manage::TokenPolicy`] (a stored token only for the host
+/// it was stored for); host tokens likewise from `ALKAHEST_HOST_TOKEN_<HOST>` or user
 /// `host:<host>`. An unavailable keyring counts as "no token".
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeyringCredentials;
 
 impl CredentialSource for KeyringCredentials {
-    fn catalog_token(&self, name: &str) -> Option<Token> {
-        if let Some(t) = std::env::var(token_env_var(name)).ok().and_then(Token::new) {
-            return Some(t);
-        }
-        let entry = keyring::Entry::new(KEYRING_SERVICE, &format!("catalog:{name}")).ok()?;
-        entry.get_password().ok().and_then(Token::new)
+    /// The CLI reads its sources from the configuration file, so `source` is trusted for an
+    /// environment or unbound keyring token; a bound keyring token still has to match its
+    /// host (`crate::manage::TokenPolicy`).
+    fn catalog_token(&self, source: &CatalogSource) -> Option<Token> {
+        let env: crate::manage::EnvLookup = std::sync::Arc::new(|k| std::env::var(k).ok());
+        crate::manage::TokenPolicy::new(
+            std::sync::Arc::new(crate::manage::KeyringTokenStore),
+            env,
+            std::slice::from_ref(source),
+        )
+        .resolve(source)
+        .1
     }
 
     /// `ALKAHEST_HOST_TOKEN_<HOST>`, else the keyring (service `alkahest`, user `host:<host>`).
@@ -122,7 +132,7 @@ impl CredentialSource for KeyringCredentials {
 pub struct NoCredentials;
 
 impl CredentialSource for NoCredentials {
-    fn catalog_token(&self, _name: &str) -> Option<Token> {
+    fn catalog_token(&self, _source: &CatalogSource) -> Option<Token> {
         None
     }
 }

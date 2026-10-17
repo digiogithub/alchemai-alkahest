@@ -256,6 +256,58 @@ impl Catalog {
             known,
         })
     }
+
+    /// Resolves the native variant (ALK-SP-0011.R6) of engine `id` for this machine, for
+    /// `alkahest engines install <id> --native` and `POST /alkahest/v1/engines/install`
+    /// `{"native": true}`: the one matching the best accelerator in `version`, else in the
+    /// newest version that has one.
+    ///
+    /// # Errors
+    ///
+    /// [`RecipeError::UnknownEngine`], [`RecipeError::UnknownVersion`], or
+    /// [`RecipeError::UnknownVariant`] (variant `(native)`, listing the native variants that
+    /// exist) when no native variant fits.
+    pub fn resolve_native(
+        &self,
+        id: &str,
+        version: Option<&str>,
+        system: &SystemInfo,
+        host: &Host,
+    ) -> Result<&Recipe> {
+        let versions = self.versions(id);
+        if versions.is_empty() {
+            return Err(RecipeError::UnknownEngine(id.to_string()));
+        }
+        if let Some(v) = version
+            && !versions.iter().any(|x| x == v)
+        {
+            return Err(RecipeError::UnknownVersion {
+                id: id.to_string(),
+                version: v.to_string(),
+                known: versions,
+            });
+        }
+        if let Some(r) = versions
+            .iter()
+            .filter(|v| version.is_none_or(|want| want == v.as_str()))
+            .find_map(|v| crate::recipe::select_native(&self.variants(id, v), system, host))
+        {
+            return Ok(r);
+        }
+        let mut known: Vec<String> = self
+            .recipes
+            .iter()
+            .filter(|r| r.id == id && r.native && version.is_none_or(|v| v == r.tag))
+            .map(|r| r.variant.clone())
+            .collect();
+        known.sort();
+        known.dedup();
+        Err(RecipeError::UnknownVariant {
+            id: id.to_string(),
+            variant: "(native)".to_string(),
+            known,
+        })
+    }
 }
 
 /// An explicit variant: exact name, or `cudaN` for the newest CUDA `N` build.

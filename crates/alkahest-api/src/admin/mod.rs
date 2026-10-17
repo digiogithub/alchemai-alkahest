@@ -13,6 +13,7 @@
 //! Handlers find their dependencies in the [`AppState`]: the scheduler, the catalog and the
 //! [`AdminContext`] (configuration, paths, [`JobManager`], pull and engine back ends).
 
+pub mod catalogs;
 pub mod context;
 pub mod discover;
 pub mod engines;
@@ -28,14 +29,16 @@ pub mod system;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{MethodRouter, delete, get, post, put};
+use axum::routing::{MethodRouter, delete, get, patch, post, put};
 use axum::{Json, Router};
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
+pub use catalogs::{CatalogEvent, refresh_pass, spawn_refresh};
 pub use context::{AdminContext, AdminContextBuilder};
 pub use engines::{
-    EngineInstallRequest, EngineListing, EngineManager, EngineVariant, RecipeEngineManager,
+    EngineDependency, EngineInstallRequest, EngineListing, EngineManager, EngineVariant,
+    RecipeEngineManager,
 };
 pub use jobs::{Job, JobHandle, JobKind, JobManager, JobState};
 pub use pulls::PullRunner;
@@ -74,13 +77,14 @@ macro_rules! routes {
     (@m post) => { "POST" };
     (@m put) => { "PUT" };
     (@m delete) => { "DELETE" };
+    (@m patch) => { "PATCH" };
 }
 
 routes! {
     get "/alkahest/v1/openapi.json" "meta" "This description (OpenAPI 3.1)" => openapi;
     get "/alkahest/v1/info" "system" "Server version, uptime, bind, paths, store counts, hardware and accelerators" => system::info;
     get "/alkahest/v1/ps" "runtime" "Scheduler snapshot: loaded models, memory, requests" => runtime::snapshot;
-    get "/alkahest/v1/events" "runtime" "Server-sent events: `status` (scheduler) and `job` (pulls, engine installs)" => runtime::events;
+    get "/alkahest/v1/events" "runtime" "Server-sent events: `status` (scheduler), `job` (pulls, engine installs, catalog syncs), `request` and `catalog` (a background catalog sync failed for the first time)" => runtime::events;
     post "/alkahest/v1/unload" "runtime" "Unload one model (`model`) or all (`all: true`)" => runtime::unload;
     post "/alkahest/v1/models/{name}/kill" "runtime" "Kill a model's engine at once (SIGKILL), for hung engines" => runtime::kill;
     get "/alkahest/v1/requests" "runtime" "Recent inference requests: time, route, model, key, tokens, duration, status (last, limit)" => runtime::requests;
@@ -111,10 +115,19 @@ routes! {
     put "/alkahest/v1/hf/token" "discover" "Store the Hugging Face token in the server keyring" => discover::hf_token_set;
     delete "/alkahest/v1/hf/token" "discover" "Remove the stored Hugging Face token" => discover::hf_token_delete;
     get "/alkahest/v1/ollama/search" "discover" "Search the Ollama library (q, limit)" => discover::ollama_search;
+    get "/alkahest/v1/catalog/models/{ns}/{model}" "catalogs" "One catalog model: every variant's template, parameters, files (kind, size, sha256), origin catalog and commit, engine build (catalog)" => catalogs::model_detail;
     get "/alkahest/v1/catalog/search" "discover" "Search the git catalog model entries, one row per tag with size, quant, licence and origin (q, catalog, limit)" => discover::catalog_search;
     get "/alkahest/v1/ollama/tags" "discover" "Tags of one Ollama library model with digest, size, context and quantisation (name)" => discover::ollama_tags;
-    get "/alkahest/v1/engines" "engines" "Installed engine builds and installable recipe variants" => engines::list;
-    post "/alkahest/v1/engines/install" "engines" "Start an engine install job" => engines::start_install;
+    get "/alkahest/v1/catalogs" "catalogs" "Git catalogs in layer order with snapshot state, token presence (never the token) and the effective limits" => catalogs::list;
+    post "/alkahest/v1/catalogs" "catalogs" "Add a catalog source last in the layer order (optionally start its sync)" => catalogs::add;
+    post "/alkahest/v1/catalogs/sync" "catalogs" "Start a sync job of every enabled catalog" => catalogs::sync_all;
+    patch "/alkahest/v1/catalogs/{name}" "catalogs" "Change a catalog source: enabled, ref, subdir, pin, refresh_interval" => catalogs::patch;
+    delete "/alkahest/v1/catalogs/{name}" "catalogs" "Remove a catalog and its snapshot (official is disabled); delete_token=true also clears its keyring token" => catalogs::remove;
+    post "/alkahest/v1/catalogs/{name}/sync" "catalogs" "Start a sync job of one catalog" => catalogs::sync_one;
+    put "/alkahest/v1/catalogs/{name}/token" "catalogs" "Store a private catalog token in the server keyring (never returned)" => catalogs::token_set;
+    delete "/alkahest/v1/catalogs/{name}/token" "catalogs" "Remove a private catalog token from the server keyring" => catalogs::token_delete;
+    get "/alkahest/v1/engines" "engines" "Installed engine builds and installable recipe variants with origin layer, native flags and dependencies" => engines::list;
+    post "/alkahest/v1/engines/install" "engines" "Start an engine install job (optional dependencies `with`, `native` build)" => engines::start_install;
     delete "/alkahest/v1/engines/{id}" "engines" "Remove managed installs of an engine (version, variant); 409 while a loaded model uses one" => engines::remove;
     post "/alkahest/v1/engines/reload" "engines" "Re-read the recipe directories and report ignored recipes" => engines::reload;
     get "/alkahest/v1/engines/{id}/override" "engines" "Per-engine override (executable path, extra args), running and saved" => engines::get_override;
@@ -124,8 +137,8 @@ routes! {
     delete "/alkahest/v1/keys/{id}" "keys" "Revoke an API key" => keys::revoke;
     get "/alkahest/v1/settings/network" "settings" "Running and saved network settings, restart flag" => settings::get_network;
     put "/alkahest/v1/settings/network" "settings" "Save network settings to the config file (applied on restart)" => settings::put_network;
-    get "/alkahest/v1/settings/server" "settings" "Running and saved server settings (stores, loading, engines, logging), environment locks, sources" => server_settings::get_server;
-    put "/alkahest/v1/settings/server" "settings" "Save server settings to the config file (applied on restart; `null` resets a field)" => server_settings::put_server;
+    get "/alkahest/v1/settings/server" "settings" "Running and saved server settings (stores, loading, engines, logging), catalog limits, environment locks, sources" => server_settings::get_server;
+    put "/alkahest/v1/settings/server" "settings" "Save server settings to the config file (applied on restart; `null` resets a field); `catalog_limits` applies at once" => server_settings::put_server;
     get "/alkahest/v1/logs/engines" "logs" "Engine log files" => system::engine_logs;
     get "/alkahest/v1/logs/engines/{name}" "logs" "Tail of one engine log (lines)" => system::engine_log;
     get "/alkahest/v1/logs/server" "logs" "Tail of the newest server log (lines)" => system::server_log;

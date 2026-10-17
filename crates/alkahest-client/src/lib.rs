@@ -9,7 +9,9 @@
 //! start the server. Remote servers need an API key ([`Client::with_api_key`]).
 //!
 //! The [`admin`] module adds the rest of the admin API (catalog, settings, jobs, discovery,
-//! engines, keys, network settings, info, logs) as further `Client` methods.
+//! engines, keys, network settings, info, logs) as further `Client` methods; git catalogs
+//! (sources, sync jobs, tokens, limits, catalog model search and detail) are
+//! [`Client::catalogs`] and its neighbours.
 //!
 //! Response types deserialize leniently (`#[serde(default)]`): unknown fields are ignored and
 //! missing optional ones take defaults, so the client keeps working against older servers.
@@ -24,6 +26,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+mod catalog_admin;
 mod engine_admin;
 mod hf_estimate;
 mod library;
@@ -31,6 +34,11 @@ mod library_tags;
 mod monitor;
 mod rest;
 
+pub use catalog_admin::{
+    CatalogAdded, CatalogEvent, CatalogInfo, CatalogLimits, CatalogListing, CatalogModelDetail,
+    CatalogModelFile, CatalogModelVariant, CatalogPatch, CatalogRemoved, CatalogSearchRow,
+    CatalogTokenStatus, EngineBuildRef, NewCatalog,
+};
 pub use engine_admin::{EngineOverride, EngineOverrideDoc, JobLog};
 pub use hf_estimate::HfQuant;
 pub use library::{LibraryModel, OpenAiModel, OpenAiModels};
