@@ -21,7 +21,7 @@ mod vulkan;
 
 pub use accelerator::Accelerator;
 pub use amd::{AmdSysfs, parse_sysfs_u64};
-pub use cpu::{CpuInfo, MemoryInfo};
+pub use cpu::{CpuInfo, MemoryInfo, detect_flags as detect_cpu_flags};
 pub use memory::{MemoryMonitor, MemoryPools, fdinfo_vram};
 pub use metal::{MetalInfo, parse_sysctl_bytes};
 pub use probe::{GpuInfo, GpuVendor, HardwareProbe, SystemInfo, SystemProbe, detect, detect_with};

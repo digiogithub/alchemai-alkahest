@@ -46,6 +46,10 @@ pub enum ArchiveFormat {
     /// Zip.
     #[serde(rename = "zip")]
     Zip,
+    /// A single file copied as is into the destination directory (a dependency such as a
+    /// Vulkan loader DLL). Valid for dependencies only, never for engine assets.
+    #[serde(rename = "file")]
+    File,
 }
 
 /// The kind of compute backend a variant is built for.
@@ -167,7 +171,92 @@ pub struct Companion {
 }
 
 impl Companion {
+    /// The companion read as an optional [`Dependency`] unpacked at the engine root
+    /// (ALK-SP-0011.R5: `companions` keep parsing and mean optional dependencies).
+    pub fn as_dependency(&self) -> Dependency {
+        Dependency {
+            id: self.name.clone(),
+            os: self.os.clone(),
+            arch: self.arch.clone(),
+            url: self.url.clone(),
+            sha256: self.sha256.clone(),
+            size: self.size,
+            format: self.format,
+            strip_components: self.strip_components,
+            dest: default_dest(),
+            optional: true,
+        }
+    }
+
     /// The companion as a plain [`Asset`], which is how it is downloaded and unpacked.
+    pub fn as_asset(&self) -> Asset {
+        Asset {
+            os: self.os.clone(),
+            arch: self.arch.clone(),
+            url: self.url.clone(),
+            sha256: Some(self.sha256.clone()),
+            tofu: false,
+            size: self.size,
+            format: self.format,
+            strip_components: self.strip_components,
+        }
+    }
+}
+
+/// Where a recipe comes from, which decides how strict validation is (ALK-SP-0011.R4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum RecipeOrigin {
+    /// Built-in, next to the binary or in the user's recipe directory: trust-on-first-use
+    /// assets are allowed.
+    #[default]
+    Local,
+    /// A recipe synced from a git catalog: every asset and dependency needs a pinned `sha256`
+    /// and `tofu = true` is refused; a `source.rev` that looks like a branch produces a warning.
+    GitCatalog,
+}
+
+/// An extra download a variant needs on some platforms (ALK-SP-0011.R5): a runtime library
+/// set (CUDA, ROCm, oneAPI) or a single loader DLL, unpacked below the engine directory.
+///
+/// Required dependencies are installed with the engine; optional ones only on request
+/// (`--with <id>`, or `--with-runtime` for the `cuda-*` ones).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Dependency {
+    /// Identifier, unique within the variant (`vulkan-loader`, `cuda-runtime`).
+    pub id: String,
+    /// Operating system (`linux`, `macos`, `windows`).
+    pub os: String,
+    /// CPU architecture (`x86_64`, `aarch64`).
+    pub arch: String,
+    /// HTTPS download URL.
+    pub url: String,
+    /// Lower-case hex SHA-256 of the download (mandatory: a dependency is never trust-on-first-use).
+    pub sha256: String,
+    /// Download size in bytes, when known.
+    #[serde(default)]
+    pub size: Option<u64>,
+    /// Container format (`tar.gz`, `zip` or `file`).
+    pub format: ArchiveFormat,
+    /// Leading path components to drop from every archive entry.
+    #[serde(default)]
+    pub strip_components: usize,
+    /// Directory inside the engine install directory the dependency is unpacked into; never
+    /// absolute and never containing `..`.
+    #[serde(default = "default_dest")]
+    pub dest: String,
+    /// Installed only on request.
+    #[serde(default)]
+    pub optional: bool,
+}
+
+fn default_dest() -> String {
+    ".".into()
+}
+
+impl Dependency {
+    /// The download as a plain [`Asset`], which is how it is fetched and unpacked.
     pub fn as_asset(&self) -> Asset {
         Asset {
             os: self.os.clone(),
@@ -266,6 +355,10 @@ struct VariantDef {
     #[serde(default)]
     companions: Vec<Companion>,
     #[serde(default)]
+    dependencies: Vec<Dependency>,
+    #[serde(default)]
+    native: bool,
+    #[serde(default)]
     source: Option<SourceBuild>,
     #[serde(default)]
     venv: Option<VenvBuild>,
@@ -320,16 +413,49 @@ pub struct Recipe {
     pub library_dirs: Vec<String>,
     /// Prebuilt archives per platform (may be empty when the variant is source-only).
     pub assets: Vec<Asset>,
-    /// Optional extra archives unpacked into the same directory (the CUDA runtime).
+    /// Optional extra archives unpacked into the same directory (the CUDA runtime). Read as
+    /// optional dependencies; see [`Recipe::dependencies_for`].
     pub companions: Vec<Companion>,
+    /// Downloads the variant needs besides its archive (ALK-SP-0011.R5).
+    pub dependencies: Vec<Dependency>,
+    /// Source-only variant compiled for the host CPU; never selected automatically and
+    /// installed only by `engines install <id> --native` (ALK-SP-0011.R6).
+    pub native: bool,
     /// Source build steps, when the variant can be built locally.
     pub source: Option<SourceBuild>,
     /// Python virtual environment steps, for engines distributed as Python packages (vLLM).
     pub venv: Option<VenvBuild>,
 }
 
-/// Parses a recipe file into one [`Recipe`] per variant, validating every rule of the format.
+/// The result of [`parse_recipes_with`]: the recipes plus non-fatal findings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedRecipes {
+    /// One recipe per variant.
+    pub recipes: Vec<Recipe>,
+    /// Findings that do not reject the file (a `source.rev` that looks like a branch).
+    pub warnings: Vec<String>,
+}
+
+/// Parses a recipe file into one [`Recipe`] per variant, validating every rule of the format
+/// for locally supplied recipes ([`RecipeOrigin::Local`]).
 pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
+    parse_recipes_with(text, RecipeOrigin::Local).map(|p| p.recipes)
+}
+
+/// Whether `rev` looks like a branch name rather than a commit id or a release tag. A pinned
+/// ref is a hex commit id (7 to 64 digits) or contains a digit (`b11669`, `v1.2.3`); anything
+/// else (`main`, `master`, `release/x`) moves under the recipe's feet. This is a heuristic: git
+/// cannot tell a tag from a branch offline.
+fn looks_like_branch(rev: &str) -> bool {
+    let hex_id = (7..=64).contains(&rev.len()) && rev.bytes().all(|b| b.is_ascii_hexdigit());
+    !(hex_id || rev.chars().any(|c| c.is_ascii_digit())) || rev.starts_with("refs/heads/")
+}
+
+/// Parses and validates a recipe file for the given `origin` (ALK-SP-0011.R4): a
+/// [`RecipeOrigin::GitCatalog`] file additionally refuses `tofu` and unpinned assets, and
+/// reports a branch-like `source.rev` as a warning.
+pub fn parse_recipes_with(text: &str, origin: RecipeOrigin) -> Result<ParsedRecipes> {
+    let mut warnings = Vec::new();
     let file: RecipeFile = toml::from_str(text)?;
     let id = file.id.clone();
     let bad = |reason: String| RecipeError::Invalid {
@@ -381,6 +507,14 @@ pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
             (_, Some(_)) => return Err(vbad("`cuda` is only valid for cuda variants".into())),
             (_, None) => None,
         };
+        if v.native {
+            if !v.assets.is_empty() || v.venv.is_some() {
+                return Err(vbad("a native variant is source-only".into()));
+            }
+            if v.source.is_none() {
+                return Err(vbad("a native variant needs a `source` table".into()));
+            }
+        }
         if v.assets.is_empty() && v.source.is_none() && v.venv.is_none() {
             return Err(vbad("needs `assets`, a `source` or a `venv` table".into()));
         }
@@ -389,6 +523,16 @@ pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
         }
         for a in &v.assets {
             let at = format!("asset for {}/{}", a.os, a.arch);
+            if a.format == ArchiveFormat::File {
+                return Err(vbad(format!(
+                    "{at}: format `file` is only valid for dependencies"
+                )));
+            }
+            if origin == RecipeOrigin::GitCatalog && (a.tofu || a.sha256.is_none()) {
+                return Err(vbad(format!(
+                    "{at}: sha256 required in git catalogs (tofu is local only)"
+                )));
+            }
             match (&a.sha256, a.tofu) {
                 (Some(d), false) => {
                     let hex_ok = d.len() == 64
@@ -433,6 +577,37 @@ pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
                     "{at}: name must use letters, digits, `-`, `_`, `.`"
                 )));
             }
+            if c.format == ArchiveFormat::File {
+                return Err(vbad(format!(
+                    "{at}: format `file` is only valid for dependencies"
+                )));
+            }
+        }
+        let mut seen_ids: Vec<&str> = Vec::new();
+        for d in &v.dependencies {
+            let at = format!("dependency `{}` for {}/{}", d.id, d.os, d.arch);
+            if !ident(&d.id) {
+                return Err(vbad(format!(
+                    "{at}: id must use letters, digits, `-`, `_`, `.`"
+                )));
+            }
+            if seen_ids.contains(&d.id.as_str()) {
+                return Err(vbad(format!("{at}: id is not unique within the variant")));
+            }
+            seen_ids.push(&d.id);
+            let hex_ok = d.sha256.len() == 64
+                && d.sha256
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            if !hex_ok {
+                return Err(vbad(format!(
+                    "{at}: sha256 is mandatory and must be 64 lower-case hex digits"
+                )));
+            }
+            if !d.url.starts_with("https://") {
+                return Err(vbad(format!("{at}: url must be https")));
+            }
+            check_relative(&d.dest).map_err(|r| vbad(format!("{at}: dest: {r}")))?;
         }
         if let Some(s) = &v.source {
             if !(s.git.starts_with("https://") || s.git.starts_with("ssh://")) {
@@ -451,6 +626,13 @@ pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
                 return Err(vbad("source.tools and source.targets must be names".into()));
             }
             check_relative(&s.bin_dir).map_err(|r| vbad(format!("source.bin_dir: {r}")))?;
+            if origin == RecipeOrigin::GitCatalog && looks_like_branch(&s.rev) {
+                warnings.push(format!(
+                    "recipe `{}` variant `{name}`: source.rev `{}` looks like a branch; pin a \
+                     commit id or a tag",
+                    file.id, s.rev
+                ));
+            }
         }
         out.push(Recipe {
             id: file.id.clone(),
@@ -466,11 +648,16 @@ pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
             library_dirs: file.library_dirs.clone(),
             assets: v.assets,
             companions: v.companions,
+            dependencies: v.dependencies,
+            native: v.native,
             source: v.source,
             venv: v.venv,
         });
     }
-    Ok(out)
+    Ok(ParsedRecipes {
+        recipes: out,
+        warnings,
+    })
 }
 
 /// Validates a `venv` table: pinned requirements, https indexes, nothing that `pip` would read
@@ -566,6 +753,39 @@ impl Recipe {
             .collect()
     }
 
+    /// Every dependency that applies to `host`: the variant's `dependencies` plus its
+    /// `companions` read as optional dependencies (an explicit dependency wins on a clash).
+    pub fn dependencies_for(&self, host: &Host) -> Vec<Dependency> {
+        let mut out: Vec<Dependency> = self
+            .dependencies
+            .iter()
+            .filter(|d| d.os == host.os && d.arch == host.arch)
+            .cloned()
+            .collect();
+        for c in self.companions_for(host) {
+            if !out.iter().any(|d| d.id == c.name) {
+                out.push(c.as_dependency());
+            }
+        }
+        out
+    }
+
+    /// The dependencies to install for `host`: every required one, plus the optional ones named
+    /// in `with`, plus (with `with_runtime`) the optional ones whose id starts with `cuda-`.
+    pub fn selected_dependencies(
+        &self,
+        host: &Host,
+        with: &[String],
+        with_runtime: bool,
+    ) -> Vec<Dependency> {
+        self.dependencies_for(host)
+            .into_iter()
+            .filter(|d| {
+                !d.optional || with.contains(&d.id) || (with_runtime && d.id.starts_with("cuda-"))
+            })
+            .collect()
+    }
+
     /// Whether installing on `host` has to build from source: no prebuilt archive exists but
     /// the recipe has build steps (whisper.cpp publishes no Linux binaries). Python
     /// environments are not source builds.
@@ -616,16 +836,39 @@ pub fn select_variant<'a>(
     select_for(variants, &system.accelerators(), host)
 }
 
-/// [`select_variant`] over an explicit accelerator list, best first.
+/// [`select_variant`] over an explicit accelerator list, best first. Native variants are never
+/// picked here.
 pub(crate) fn select_for<'a>(
     variants: &[&'a Recipe],
     accelerators: &[Accelerator],
     host: &Host,
 ) -> Option<&'a Recipe> {
+    select_kind(variants, accelerators, host, false)
+}
+
+/// The native variant (ALK-SP-0011.R6) that matches the best accelerator of this machine, for
+/// `alkahest engines install <id> --native`. `variants` are the recipes of one version.
+pub fn select_native<'a>(
+    variants: &[&'a Recipe],
+    system: &SystemInfo,
+    host: &Host,
+) -> Option<&'a Recipe> {
+    select_kind(variants, &system.accelerators(), host, true)
+}
+
+/// Shared picker: among variants whose `native` flag equals `native`, the first accelerator
+/// (best first) with an installable variant wins.
+fn select_kind<'a>(
+    variants: &[&'a Recipe],
+    accelerators: &[Accelerator],
+    host: &Host,
+    native: bool,
+) -> Option<&'a Recipe> {
     for accel in accelerators {
         let best = variants
             .iter()
             .copied()
+            .filter(|r| r.native == native)
             .filter(|r| r.accelerator.matches(accel) && r.installable_on(host))
             .filter(|r| match (accel, r.cuda) {
                 (Accelerator::Cuda { major, minor }, Some(need)) => need <= (*major, *minor),

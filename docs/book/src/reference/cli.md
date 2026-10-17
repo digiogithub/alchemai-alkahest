@@ -444,6 +444,8 @@ Options (besides the global ones):
       --from-source               Build from the recipe's source steps (needs git, cmake and ninja) instead of downloading the prebuilt archive
       --force                     Reinstall even when the engine is already installed
       --with-runtime              Also unpack the CUDA runtime libraries (cudart, cublas; 150 to 600 MB) next to the engine, for a CUDA build on a machine without a system-wide CUDA runtime
+      --with <ID>                 Also install the optional dependency with this id (see `engines info`); repeatable
+      --native                    Build the native variant of the engine from source for this machine's CPU (for example llama.cpp with `-DGGML_NATIVE=ON`). Never picked automatically; the build is not portable to other CPUs
 ```
 
 ### alkahest engines rm

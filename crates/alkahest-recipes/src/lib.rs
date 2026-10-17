@@ -39,8 +39,9 @@ pub use install::{
     engine_license_text, install, list_installed, locate, remove_installed,
 };
 pub use recipe::{
-    AcceleratorKind, ArchiveFormat, Asset, Companion, Host, Recipe, SourceBuild, VenvBuild,
-    parse_recipes, select_variant,
+    AcceleratorKind, ArchiveFormat, Asset, Companion, Dependency, Host, ParsedRecipes, Recipe,
+    RecipeOrigin, SourceBuild, VenvBuild, parse_recipes, parse_recipes_with, select_native,
+    select_variant,
 };
 pub use runtime::{
     check_cuda_runtime, cuda_major_of_variant, cuda_runtime_libraries, missing_libraries,
