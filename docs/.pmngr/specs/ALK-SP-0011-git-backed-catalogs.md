@@ -6,7 +6,7 @@ status: backlog
 author: mcp
 labels: [catalog, recipes, models, security]
 created: 2026-10-17T18:38:01Z
-updated: 2026-10-17T19:45:25Z
+updated: 2026-10-17T19:49:27Z
 links:
   - { kind: relates_to, target: ALK-US-0117 }
 requirements:
@@ -229,7 +229,7 @@ Let every Alkahest installation see a current catalog of engine recipes and mode
 
 ## Scope
 
-Covers the catalog layout and file formats (manifest, engine recipes with the dependency and native extensions, model entries, index), `schema_version` handling, catalog source configuration, the snapshot cache and refresh policy, the fetch transport, the layer order with the built-in and local recipes, the `catalog:` model reference and the security rules. The recipe format itself is [[ALK-SP-0003]] (R3); model acquisition is [[ALK-SP-0002]]; the store and reference grammar are [[ALK-SP-0001]].
+Covers the catalog layout and file formats (manifest, engine recipes with the dependency and native extensions, model entries, index), `schema_version` handling, catalog source configuration, the snapshot cache and refresh policy, the fetch transport, the layer order with the built-in and local recipes, the `alkahest/<namespace>/<model>` catalog model names and the security rules. The recipe format itself is [[ALK-SP-0003]] (R3); model acquisition is [[ALK-SP-0002]]; the store and reference grammar are [[ALK-SP-0001]].
 
 Fetch strategy: [[development/decisions/0006-catalog-fetch-strategy]]. Example catalog: [[research/catalog-format-example]]. Epic [[ALK-EP-0015]], format story [[ALK-US-0117]].
 

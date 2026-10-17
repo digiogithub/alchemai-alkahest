@@ -2,7 +2,7 @@
 id: ALK-US-0120
 type: story
 title: "Model catalog: entries, search and pull from git catalogs"
-status: in_progress
+status: in_review
 priority: high
 parent: ALK-EP-0015
 milestone: ALK-M-0006
@@ -10,7 +10,7 @@ author: mcp
 labels: [catalog, models, store]
 estimate: 8
 created: 2026-10-17T18:30:04Z
-updated: 2026-10-17T19:26:22Z
+updated: 2026-10-17T19:49:35Z
 started: 2026-10-17T19:26:22Z
 links:
   - { kind: implements, target: ALK-SP-0011.R7 }
