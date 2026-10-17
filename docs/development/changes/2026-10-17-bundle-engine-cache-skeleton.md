@@ -27,8 +27,11 @@ empty directories. `ensure_engine` only checked `dest.is_dir()`, printed
 ## Recovery of v0.1.1
 
 The release workflow builds the tag's tree, and the tag predates the fix; the tag was not moved.
-The stale cache `v0-rust-release-x86_64-apple-darwin-*` was deleted and `release` re-dispatched
-for `v0.1.1` (run 39051689441), so the job installs the engine from scratch.
+Deleting only the stale macOS x86_64 cache was not enough: run 39051689441 fixed that job, but
+the aarch64 macOS and Windows jobs then hit the caches the previous run had saved and failed the
+same way. All `v0-rust-release-*` caches were deleted and run 39053828405 passed every job and
+created the `Alkahest 0.1.1` draft release. Any tag cut before `05f4b6b` must be rebuilt with
+the release caches cleared.
 
 ## Verification
 
