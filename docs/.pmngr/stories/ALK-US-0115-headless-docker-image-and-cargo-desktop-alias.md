@@ -2,7 +2,7 @@
 id: ALK-US-0115
 type: story
 title: Headless Docker image and cargo desktop alias
-status: in_progress
+status: in_review
 priority: medium
 parent: ALK-EP-0014
 milestone: ALK-M-0006
@@ -10,7 +10,7 @@ author: mcp
 labels: [packaging, docker]
 estimate: 2
 created: 2026-10-17T13:21:55Z
-updated: 2026-10-17T13:21:55Z
+updated: 2026-10-17T13:26:56Z
 started: 2026-10-17T13:21:55Z
 ---
 

@@ -2,7 +2,7 @@
 id: ALK-US-0114
 type: story
 title: API key from the environment (ALKAHEST_API_KEY / ALKAHEST_API_KEY_FILE)
-status: in_progress
+status: in_review
 priority: high
 parent: ALK-EP-0008
 milestone: ALK-M-0003
@@ -10,7 +10,7 @@ author: mcp
 labels: [security, auth, docker]
 estimate: 2
 created: 2026-10-17T13:21:55Z
-updated: 2026-10-17T13:21:55Z
+updated: 2026-10-17T13:26:55Z
 started: 2026-10-17T13:21:55Z
 ---
 
