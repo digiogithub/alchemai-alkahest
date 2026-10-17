@@ -3,9 +3,11 @@
 //!
 //! * [`state`]: [`AppState`], the shared state with typed service slots for later subsystems.
 //! * [`router`]: [`ApiRouter`], base routes plus the middleware stack.
+//! * [`keys`]: API key generation, hashed storage and verification.
 //! * [`server`]: [`bind`] and [`serve`].
 
 pub mod error;
+pub mod keys;
 pub mod router;
 pub mod server;
 pub mod state;

@@ -6,6 +6,7 @@
 mod cli;
 mod engines_cmd;
 mod hf_cmd;
+mod keys_cmd;
 mod model_config_cmd;
 mod models_cmd;
 mod pull_cmd;
@@ -104,6 +105,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         } => pull_cmd::run(model, *insecure, *force, &loaded, cli.global.json),
         Command::Engines { action } => engines_cmd::run(action, &loaded, cli.global.json),
         Command::Serve => serve_cmd::run(&loaded),
+        Command::Keys { action } => keys_cmd::run(action, &loaded, cli.global.json),
         Command::Desktop => desktop(),
         other => Ok(not_implemented(other)),
     }

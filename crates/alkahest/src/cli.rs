@@ -236,14 +236,23 @@ pub enum KeysAction {
     /// List keys.
     #[command(visible_alias = "list")]
     Ls,
-    /// Create a key.
+    /// Create a key and print it once; only a salted hash is stored.
     Create {
-        /// Label of the new key.
+        /// Label of the new key (unique among active keys).
         name: String,
+        /// Scope to grant: `inference` (default) or `admin` (includes inference). Repeatable.
+        #[arg(long = "scope", value_name = "SCOPE")]
+        scopes: Vec<String>,
+        /// Restrict the key to this model. Repeatable; default: every model.
+        #[arg(long = "model", value_name = "MODEL")]
+        models: Vec<String>,
+        /// Expiry: a duration such as `12h`, `30d`, `8w`, or an RFC 3339 time.
+        #[arg(long, value_name = "WHEN")]
+        expires: Option<String>,
     },
-    /// Revoke a key.
+    /// Revoke a key; the next request with it is refused.
     Revoke {
-        /// Key id.
+        /// Key id (`abcd1234` or `alk_abcd1234`) or active key name.
         id: String,
     },
 }
@@ -326,13 +335,13 @@ impl Command {
             Self::Rm { .. } | Self::Cp { .. } | Self::Gc { .. } => "ALK-US-0013",
             Self::Run { .. } => "ALK-US-0039",
             Self::Desktop => "ALK-US-0064",
-            Self::Keys { .. } => "ALK-US-0041",
             Self::Service { .. } => "ALK-US-0045",
             Self::Pull { .. }
             | Self::Config { .. }
             | Self::Completions { .. }
             | Self::Sysinfo
             | Self::Serve
+            | Self::Keys { .. }
             | Self::Engines { .. }
             | Self::Hf { .. } => {
                 return None;
