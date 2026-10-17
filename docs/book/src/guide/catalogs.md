@@ -57,9 +57,54 @@ cargo xtask catalog-check catalog   # strict validation, offline
 cargo xtask catalog-check catalog --net   # also checks every URL answers with the declared size
 ```
 
-The check is strict: unknown keys, plain `http` URLs, missing digests, mismatching file names
-and a stale index all fail. Run `catalog-check` in your own CI.
+The check is strict: unknown keys, plain `http` URLs (other than to a loopback mirror such as
+`http://127.0.0.1:8080/...`), missing digests, mismatching file names and a stale index all
+fail. Run `catalog-check` in your own CI. It applies the same model-entry rules as a sync, so a
+catalog that passes the check is accepted by every Alkahest.
 
 In the Alkahest repository, `catalog/engines/` is the source of the built-in `recipes/`
 directory. After editing an engine run `cargo xtask catalog-index --sync-recipes`, which also
 copies the recipes; CI fails when the two differ.
+
+## Finding and pulling catalog models
+
+Catalog models are named with the pseudo-host `alkahest`: `alkahest/<namespace>/<model>[:<tag>]`,
+for example `alkahest/qwen/qwen2.5-0.5b-instruct:q4_k_m`. The name works like a
+`hf.co/<org>/<repo>` name: the first of the three segments is the host. `alkahest` is never
+contacted as a registry; the entry is looked up in the catalog snapshots.
+
+```sh
+alkahest search --source catalog qwen          # catalog entries only, one row per tag
+alkahest search qwen                           # catalogs first, then Hugging Face and Ollama
+alkahest search --catalog acme assistant       # entries of one catalog
+
+alkahest pull alkahest/qwen/qwen2.5-0.5b-instruct            # default tag (first variant)
+alkahest pull alkahest/qwen/qwen2.5-0.5b-instruct:q8_0
+alkahest pull alkahest/acme/assistant --catalog official     # take the entry from one catalog
+```
+
+- **Tag.** Without a tag (or with `latest`, unless the entry has a variant named `latest`) the
+  first variant of the entry is pulled, and the model is stored under that concrete tag:
+  `alkahest/qwen/qwen2.5-0.5b-instruct:q4_k_m`. Afterwards the name without a tag still finds
+  the model as long as only one tag of it is installed.
+- **Which catalog.** When several catalogs define the same entry and tag, the catalog listed
+  last in `[[catalogs]]` wins; `--catalog <name>` picks one explicitly.
+- **Downloads.** Every file of the variant is downloaded with the resumable, parallel
+  downloader and verified against its `sha256` and `size`. With `urls = [...]` the mirrors are
+  tried in order. A file whose digest does not match fails the pull: no model is registered and
+  nothing of it stays in the store. An interrupted download resumes on the next `pull`.
+- **Private files.** A file with `auth = "<host>"` sends a token only to URLs on that host. The
+  token comes from `ALKAHEST_HOST_TOKEN_<HOST>` (host upper-cased, other characters as `_`) or
+  the OS keyring (service `alkahest`, user `host:<host>`); it is never written anywhere else.
+- **Engine, template, parameters.** `engine`, `template` (or a Jinja `template_text`) and the
+  parameters Alkahest understands (`num_ctx`, `temperature`, `top_p`, `top_k`, `min_p`,
+  `repeat_penalty`, `presence_penalty`, `num_predict`, `stop`) become the model's recommended
+  defaults, so `alkahest run` and the server use them; your own
+  `alkahest config model <name> set ...` still wins. The manifest also records them, with the
+  catalog name and commit, in an `application/vnd.alkahest.config.v1+json` layer, and the
+  parameters as an Ollama `params` layer that `alkahest show` prints. A Go `template_text` is
+  stored as the Ollama `TEMPLATE` layer.
+- **Listing.** `alkahest ls` shows the model under its `alkahest/...` name, so its origin is
+  visible at a glance. `alkahest rm` and `cp` work as for any other model.
+
+Variants with `format = "safetensors"` are listed by `search` but cannot be pulled yet.

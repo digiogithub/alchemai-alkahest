@@ -1,5 +1,9 @@
-//! `alkahest pull <ref>`: Ollama registry and Hugging Face downloads with progress bars
-//! (ALK-US-0017, ALK-US-0019).
+//! `alkahest pull <ref>`: Ollama registry, Hugging Face and git catalog downloads with
+//! progress bars (ALK-US-0017, ALK-US-0019, ALK-US-0120).
+//!
+//! Catalog models (`alkahest/<namespace>/<model>[:<tag>]`) first refresh due catalogs with
+//! the policy of `catalog_cmd::prepare`, then resolve the entry through the layered
+//! snapshots (`--catalog <name>` picks one catalog).
 //!
 //! Human output draws one bar per downloaded blob and an aggregate bar on stderr (hidden when
 //! stderr is not a terminal). With `--json` every event is one JSON object per line on
@@ -13,7 +17,8 @@ use std::time::{Duration, Instant};
 use alkahest_api::pull::{PullOptions, PullService, PullSummary};
 use alkahest_core::config::Loaded;
 use alkahest_pull::{PullEvent, PullProgress};
-use anyhow::{Context, Result};
+use alkahest_store::{ModelRef, ScopedRef};
+use anyhow::{Context, Result, bail};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -21,15 +26,36 @@ use tokio_util::sync::CancellationToken;
 /// Minimum spacing of `progress` lines in `--json` mode.
 const JSON_PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 
+/// The flags of `alkahest pull`.
+#[derive(Debug, Clone, Default)]
+pub struct Flags {
+    /// `--insecure`.
+    pub insecure: bool,
+    /// `--force`.
+    pub force: bool,
+    /// `--safetensors`.
+    pub safetensors: bool,
+    /// `--catalog <name>`.
+    pub catalog: Option<String>,
+}
+
 /// Runs the command.
-pub fn run(
-    model: &str,
-    insecure: bool,
-    force: bool,
-    safetensors: bool,
-    loaded: &Loaded,
-    json: bool,
-) -> Result<ExitCode> {
+pub fn run(model: &str, flags: Flags, loaded: &Loaded, json: bool) -> Result<ExitCode> {
+    let is_catalog = model
+        .parse::<ScopedRef>()
+        .ok()
+        .and_then(|s| match s.reference {
+            ModelRef::Name { name, .. } => Some(name.is_catalog()),
+            _ => None,
+        })
+        .unwrap_or(false);
+    if flags.catalog.is_some() && !is_catalog {
+        bail!("--catalog applies to catalog models only (alkahest/<namespace>/<model>)");
+    }
+    if is_catalog {
+        // Fetches a never-synced catalog once and refreshes stale ones in the background.
+        crate::catalog_cmd::prepare(loaded);
+    }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -37,9 +63,10 @@ pub fn run(
     runtime.block_on(run_async(
         model,
         PullOptions {
-            insecure,
-            force,
-            safetensors,
+            insecure: flags.insecure,
+            force: flags.force,
+            safetensors: flags.safetensors,
+            catalog: flags.catalog,
         },
         loaded,
         json,
@@ -83,6 +110,24 @@ async fn run_async(
             json!({"event":"done","outcome":"installed","name":name,
                    "manifest":manifest_digest,"downloaded":downloaded}),
             &format!("pulled {short_name} ({})", short_digest(&manifest_digest)),
+        )?,
+        PullSummary::Installed {
+            name,
+            manifest_digest,
+            downloaded,
+            files,
+            origin: Some(origin),
+            ..
+        } => report(
+            &mut out,
+            json,
+            json!({"event":"done","outcome":"installed","name":name,
+                   "manifest":manifest_digest,"origin":origin,"files":files,
+                   "downloaded":downloaded}),
+            &format!(
+                "pulled {name} ({}, from catalog {origin})",
+                short_digest(&manifest_digest)
+            ),
         )?,
         PullSummary::Installed {
             name,

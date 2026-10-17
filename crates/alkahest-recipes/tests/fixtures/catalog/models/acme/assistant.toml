@@ -1,4 +1,4 @@
-# Fixture model entry (ALK-SP-0011.R7), pulled as `catalog:acme/assistant[:<tag>]` (R13).
+# Fixture model entry (ALK-SP-0011.R7), pulled as `alkahest/acme/assistant[:<tag>]` (R13).
 # The `q4_k_m` model file is ../../../catalog-blobs/assistant-q4_k_m.gguf (a 24-byte GGUF header
 # with no tensors); its sha256 and size are real so pull tests can serve it from a local server.
 name = "acme/assistant"

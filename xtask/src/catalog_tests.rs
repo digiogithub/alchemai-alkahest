@@ -143,7 +143,10 @@ fn missing_sha256_refused() {
     );
     let r = check(tmp.path(), None);
     assert!(
-        has_error(&r, "variant `q4_k_m`: file 1: sha256 is required"),
+        has_error(
+            &r,
+            "acme/assistant:q4_k_m: file assistant-q4_k_m.gguf: sha256 is required"
+        ),
         "{:?}",
         r.errors
     );

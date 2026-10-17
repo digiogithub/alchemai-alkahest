@@ -23,8 +23,20 @@ fn host() -> impl Strategy<Value = String> {
 }
 
 fn model_name() -> impl Strategy<Value = ModelName> {
-    (host(), part("-", 20), part(".-", 30), part(".-", 20))
-        .prop_filter_map("valid name", |(h, n, m, t)| ModelName::new(h, n, m, t).ok())
+    prop_oneof![
+        (host(), part("-", 20), part(".-", 30), part(".-", 20))
+            .prop_filter_map("valid name", |(h, n, m, t)| ModelName::new(h, n, m, t).ok()),
+        catalog_name(),
+    ]
+}
+
+/// Catalog models (ALK-SP-0011.R13): `alkahest/<namespace>/<model>:<tag>`, dots allowed in
+/// the namespace.
+fn catalog_name() -> impl Strategy<Value = ModelName> {
+    (part(".-", 20), part(".-", 30), part(".-", 20))
+        .prop_filter_map("valid catalog name", |(n, m, t)| {
+            ModelName::new("alkahest", n, m, t).ok()
+        })
 }
 
 fn digest() -> impl Strategy<Value = Digest> {
@@ -64,6 +76,15 @@ proptest! {
         prop_assert_eq!(parts.len(), 4);
         let back = ModelName::from_relative_parts(&parts[0], &parts[1], &parts[2], &parts[3]).unwrap();
         prop_assert_eq!(back, n);
+    }
+
+    #[test]
+    fn catalog_name_round_trips(n in catalog_name()) {
+        prop_assert!(n.is_catalog());
+        prop_assert_eq!(n.to_string().parse::<ModelName>().unwrap(), n.clone());
+        let scoped = format!("alkahest:{n}").parse::<ScopedRef>().unwrap();
+        prop_assert_eq!(scoped.origin, Some(Origin::Alkahest));
+        prop_assert_eq!(scoped.reference, ModelRef::Name { name: n, digest: None });
     }
 
     #[test]

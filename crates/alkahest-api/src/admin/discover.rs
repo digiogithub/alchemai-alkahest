@@ -9,6 +9,9 @@
 //! * `GET|PUT|DELETE /alkahest/v1/hf/token`: token presence and account; store or remove the
 //!   token in the server's keyring. The token is accepted, never returned.
 //! * `GET /alkahest/v1/ollama/search?q=&limit=`: the Ollama library.
+//! * `GET /alkahest/v1/catalog/search?q=&catalog=&limit=`: model entries of the git catalog
+//!   snapshots (ALK-SP-0011.R7, R12), one row per tag, with the `alkahest/...` reference to
+//!   pull. Reads local snapshots only; it never waits for the network.
 
 use alkahest_hf::{
     HfClient, HfError, RepoFile, SearchQuery, SortKey, Token, gguf_variants, mmproj_files,
@@ -537,4 +540,75 @@ mod tests {
             assert!(check_repo(bad).is_err(), "{bad}");
         }
     }
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct CatalogSearchParams {
+    #[serde(default)]
+    q: String,
+    catalog: Option<String>,
+    limit: Option<usize>,
+}
+
+/// `GET /alkahest/v1/catalog/search`.
+pub(super) async fn catalog_search(
+    State(state): State<AppState>,
+    Query(p): Query<CatalogSearchParams>,
+) -> Response {
+    let r = async {
+        let ctx = admin(&state)?;
+        let catalog = p.catalog.filter(|c| !c.trim().is_empty());
+        if let Some(c) = &catalog
+            && !ctx.config.catalogs.iter().any(|s| &s.name == c)
+        {
+            return Err(HttpError::new(
+                ErrorKind::NotFound,
+                format!("no catalog named {c} is configured"),
+            ));
+        }
+        let data_dir = ctx.paths.data_dir.clone();
+        let sources = ctx.config.catalogs.clone();
+        let limit = p.limit.unwrap_or(50).clamp(1, MAX_LIMIT as usize);
+        let query = p.q;
+        let models = blocking(move || {
+            let states = alkahest_catalog::load_states(&data_dir, &sources);
+            Ok(catalog_rows(&states, &query, catalog.as_deref(), limit))
+        })
+        .await?;
+        Ok(Json(json!({ "models": models })).into_response())
+    }
+    .await;
+    reply(&state, r)
+}
+
+/// One JSON row per matching catalog model tag.
+pub(crate) fn catalog_rows(
+    states: &[alkahest_catalog::CatalogState],
+    query: &str,
+    catalog: Option<&str>,
+    limit: usize,
+) -> Vec<Value> {
+    alkahest_catalog::search_models(states, query, catalog)
+        .into_iter()
+        .take(limit)
+        .map(|m| {
+            let default = m.entry.default_tag() == Some(m.variant.tag.as_str());
+            json!({
+                "name": m.entry.name,
+                "tag": m.variant.tag,
+                "reference": format!("{}/{}:{}", alkahest_store::CATALOG_HOST, m.entry.name, m.variant.tag),
+                "default": default,
+                "description": m.entry.description,
+                "license": m.entry.license,
+                "homepage": m.entry.homepage,
+                "tags": m.entry.tags,
+                "format": m.variant.format,
+                "quant": m.variant.quant,
+                "engine": m.variant.engine,
+                "size": m.variant.total_size(),
+                "catalog": m.catalog,
+                "commit": m.commit,
+            })
+        })
+        .collect()
 }

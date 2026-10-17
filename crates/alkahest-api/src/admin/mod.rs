@@ -95,7 +95,7 @@ routes! {
     delete "/alkahest/v1/models/{name}/settings" "models" "Remove the per-model overlay" => models::delete_settings;
     get "/alkahest/v1/models/{name}/recommended" "models" "Recommended defaults stored at pull time" => models::recommended;
     get "/alkahest/v1/models/{name}/estimate" "models" "Memory estimate for the effective settings with overrides" => models::estimate_memory;
-    post "/alkahest/v1/pulls" "pulls" "Start a pull job (Ollama or Hugging Face reference, optional quant)" => pulls::start_pull;
+    post "/alkahest/v1/pulls" "pulls" "Start a pull job (Ollama, Hugging Face or catalog reference, optional quant, optional catalog)" => pulls::start_pull;
     get "/alkahest/v1/pulls" "pulls" "Pull jobs with progress" => pulls::list_pulls;
     delete "/alkahest/v1/pulls/{id}" "pulls" "Cancel a pull job (the partial download stays resumable)" => pulls::cancel_job;
     get "/alkahest/v1/jobs" "jobs" "Every background job" => pulls::list_jobs;
@@ -111,6 +111,7 @@ routes! {
     put "/alkahest/v1/hf/token" "discover" "Store the Hugging Face token in the server keyring" => discover::hf_token_set;
     delete "/alkahest/v1/hf/token" "discover" "Remove the stored Hugging Face token" => discover::hf_token_delete;
     get "/alkahest/v1/ollama/search" "discover" "Search the Ollama library (q, limit)" => discover::ollama_search;
+    get "/alkahest/v1/catalog/search" "discover" "Search the git catalog model entries, one row per tag with size, quant, licence and origin (q, catalog, limit)" => discover::catalog_search;
     get "/alkahest/v1/ollama/tags" "discover" "Tags of one Ollama library model with digest, size, context and quantisation (name)" => discover::ollama_tags;
     get "/alkahest/v1/engines" "engines" "Installed engine builds and installable recipe variants" => engines::list;
     post "/alkahest/v1/engines/install" "engines" "Start an engine install job" => engines::start_install;

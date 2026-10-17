@@ -319,8 +319,9 @@ pub fn is_commit_id(s: &str) -> bool {
 }
 
 /// Plain `http://` is accepted only for loopback hosts (local mirrors and tests); everything
-/// that crosses a network must be https.
-fn is_loopback_http(url: &str) -> bool {
+/// that crosses a network must be https. Also the rule for catalog model file URLs
+/// (ALK-SP-0011.R7).
+pub fn is_loopback_http(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("http://") else {
         return false;
     };

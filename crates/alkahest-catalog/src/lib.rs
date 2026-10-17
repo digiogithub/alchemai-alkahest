@@ -10,12 +10,15 @@
 //! - [`sync()`] runs one sync in the foreground; failures keep the last good snapshot.
 //! - [`load_states`] reads the configured catalogs' snapshots; [`recipe_catalog`] layers the
 //!   engine recipes (built-in < git catalogs < local recipe directories); [`layered_models`]
-//!   and [`find_model`] expose model entries for `pull`/`search` (ALK-US-0120).
+//!   and [`find_model`] expose model entries; [`search_models`] backs `alkahest search` and
+//!   [`pull_catalog`] installs a model named `alkahest/<namespace>/<model>[:<tag>]` into the
+//!   Alkahest store (ALK-US-0120, ALK-SP-0011.R13).
 //! - [`edit`] adds and removes `[[catalogs]]` sources in the configuration file, keeping
 //!   comments.
 //!
 //! Catalog content is untrusted data: a sync downloads and parses TOML only, never runs a
-//! program and never downloads an asset or model file (ALK-SP-0011.R14).
+//! program and never downloads an asset or model file (ALK-SP-0011.R14); model files are
+//! downloaded only by an explicit pull.
 
 mod archive;
 pub mod content;
@@ -27,6 +30,7 @@ mod layers;
 pub mod layout;
 pub mod manifest;
 pub mod model;
+pub mod pull;
 mod refs;
 mod schema;
 pub mod snapshot;
@@ -36,13 +40,14 @@ pub use content::{CatalogContent, EngineFile, ValidateOptions, validate};
 pub use error::{CatalogError, FileIssue, Result};
 pub use http::{
     CredentialSource, HttpClient, KEYRING_SERVICE, KeyringCredentials, NoCredentials, Token,
-    token_env_var,
+    host_token_env_var, token_env_var,
 };
 pub use layers::{
     CatalogModel, CatalogState, RETRY_AFTER_ERROR, find_model, layered_models, load_states,
-    recipe_catalog,
+    recipe_catalog, search_models,
 };
 pub use model::{ModelEntry, ModelFile, ModelFileKind, ModelFormat, ModelVariant, TemplateFormat};
+pub use pull::{CatalogPullError, CatalogPullOutcome, pull_catalog, resolve_model};
 pub use snapshot::SnapshotMeta;
 pub use sync::{Limits, SyncContext, SyncOutcome, SyncReport, mark_error_reported, sync};
 

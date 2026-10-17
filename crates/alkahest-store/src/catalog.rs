@@ -471,6 +471,27 @@ impl Catalog {
                             name.display_short()
                         )));
                     }
+                    // A catalog model without a tag: the pull stored it under its concrete
+                    // default variant, so the only local tag of that model is meant
+                    // (ALK-SP-0011.R13).
+                    if name.is_catalog() && name.has_default_tag() && digest.is_none() {
+                        let mut tags: Vec<CatalogEntry> = self
+                            .list_filtered(*origin)?
+                            .into_iter()
+                            .filter(|e| {
+                                let n = &e.entry.name;
+                                n.is_catalog()
+                                    && n.namespace().eq_ignore_ascii_case(name.namespace())
+                                    && n.model().eq_ignore_ascii_case(name.model())
+                            })
+                            .collect();
+                        if tags.len() > 1 {
+                            return Err(ambiguous(input, &tags));
+                        }
+                        if let Some(only) = tags.pop() {
+                            return Ok(only);
+                        }
+                    }
                 }
                 ModelRef::HuggingFace(hf) => {
                     if let Ok(name) = hf.to_model_name()

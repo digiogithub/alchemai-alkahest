@@ -9,6 +9,7 @@ A model reference is one of:
 | Ollama name | `llama3.2:3b`, `library/qwen3:8b`, `all-minilm` | the Ollama registry (default tag `latest`) |
 | Hugging Face | `hf.co/ggml-org/tiny-llamas:Q4_0` | a Hugging Face repository; the part after `:` is a quantisation or a file name |
 | Hugging Face (other spellings) | `huggingface.co/org/repo`, `hf://org/repo/file.gguf` | same as above |
+| Catalog | `alkahest/qwen/qwen2.5-0.5b-instruct:q4_k_m` | a model entry of a git catalog (pseudo-host `alkahest`); without a tag, the entry's first variant. See [Writing a catalog](catalogs.md) |
 | Scoped | `ollama:llama3.2`, `alkahest:llama3.2` | force the Ollama store or Alkahest's own store when a name exists in both |
 | Digest | the first characters of the `ID` column of `alkahest ls` | any installed model |
 

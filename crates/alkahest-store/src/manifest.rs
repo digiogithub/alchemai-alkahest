@@ -581,6 +581,10 @@ pub enum SourceKind {
     HuggingFace,
     /// Imported from a local file or another store.
     Import,
+    /// Downloaded from the files a git catalog entry lists (ALK-SP-0011.R13); `reference` is
+    /// `alkahest/<namespace>/<model>:<tag>`, `revision` the catalog commit; the catalog name
+    /// is in the `application/vnd.alkahest.config.v1+json` layer.
+    Catalog,
 }
 
 #[cfg(test)]

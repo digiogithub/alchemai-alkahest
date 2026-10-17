@@ -1,5 +1,5 @@
-# Generated file index (ALK-SP-0011.R8). Regenerate with `alkahest catalog index` or
-# `cargo xtask catalog-check --fix`; never edit by hand.
+# Generated file index (ALK-SP-0011.R8). Regenerate with `cargo xtask catalog-index`;
+# never edit by hand.
 schema_version = "1.0"
 
 [[files]]
@@ -14,5 +14,5 @@ size = 3011
 
 [[files]]
 path = "models/acme/assistant.toml"
-sha256 = "09a374331106fe3f7aed3f8b76f493083699a98a0febeaaec16176a5ec69756b"
-size = 1638
+sha256 = "b5c6a0db38e72aa1db556756468798506e7720ac5dd8c362ffe4285911149336"
+size = 1639

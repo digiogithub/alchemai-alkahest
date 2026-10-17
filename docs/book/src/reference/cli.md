@@ -27,8 +27,8 @@ Every command accepts these (`serve` binds `--host`, the client commands target 
 | Command | Purpose |
 |---|---|
 | [`completions`](#alkahest-completions) | Print a shell completion script to stdout |
-| [`pull`](#alkahest-pull) | Download a model from the Ollama registry or Hugging Face |
-| [`search`](#alkahest-search) | Search the Ollama library and Hugging Face for models |
+| [`pull`](#alkahest-pull) | Download a model from the Ollama registry, Hugging Face or a git catalog |
+| [`search`](#alkahest-search) | Search the git catalogs, the Ollama library and Hugging Face for models |
 | [`ls`](#alkahest-ls) | List local models [alias: list] |
 | [`ps`](#alkahest-ps) | Show the models currently loaded by the server |
 | [`rm`](#alkahest-rm) | Delete local models |
@@ -65,7 +65,7 @@ Arguments:
 
 ## alkahest pull
 
-Download a model from the Ollama registry or Hugging Face
+Download a model from the Ollama registry, Hugging Face or a git catalog
 
 ```text
 alkahest pull [OPTIONS] <MODEL>
@@ -74,7 +74,7 @@ alkahest pull [OPTIONS] <MODEL>
 Arguments:
 
 ```text
-  <MODEL>  Model reference, for example `llama3.2:3b` or `hf.co/org/repo:Q4_K_M`
+  <MODEL>  Model reference, for example `llama3.2:3b`, `hf.co/org/repo:Q4_K_M` or the catalog model `alkahest/qwen/qwen2.5-0.5b-instruct:q4_k_m`
 ```
 
 Options (besides the global ones):
@@ -83,11 +83,12 @@ Options (besides the global ones):
       --insecure            Talk to the registry over plain HTTP (private registries without TLS)
       --force               Download into the Alkahest store even when the Ollama store already has the model [alias: --copy]
       --safetensors         Download the safetensors snapshot of a Hugging Face repository for vLLM instead of GGUF (chosen automatically when the repository has no GGUF files)
+      --catalog <NAME>      Catalog models: take the entry from this configured catalog instead of the highest layer that has it
 ```
 
 ## alkahest search
 
-Search the Ollama library and Hugging Face for models
+Search the git catalogs, the Ollama library and Hugging Face for models
 
 ```text
 alkahest search [OPTIONS] [QUERY]...
@@ -107,9 +108,10 @@ Options (besides the global ones):
           Where to search
 
           Possible values:
-          - all:    Hugging Face and the Ollama library
-          - hf:     Hugging Face only
-          - ollama: The Ollama library only
+          - all:     The git catalogs, Hugging Face and the Ollama library
+          - hf:      Hugging Face only
+          - ollama:  The Ollama library only
+          - catalog: The git catalogs only (local snapshots, `alkahest/<namespace>/<model>` names)
           
           [default: all]
       --gguf
@@ -133,6 +135,8 @@ Options (besides the global ones):
           Maximum results per source
           
           [default: 20]
+      --catalog <NAME>
+          Catalog results: only entries of this configured catalog
   -h, --help
           Print help (see a summary with '-h')
 ```

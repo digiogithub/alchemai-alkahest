@@ -13,6 +13,13 @@
 //! name     = [ [ host "/" ] namespace "/" ] model [ ":" tag ] [ "@" digest ]
 //! ```
 //!
+//! Catalog models (ALK-SP-0011.R13) are names under the pseudo-host `alkahest`
+//! ([`CATALOG_HOST`]): `alkahest/<namespace>/<model>[:<tag>]`, parsed like `hf.co/<org>/<repo>`
+//! (three segments, the first is the host). Their namespace may contain `.` like a catalog
+//! name. The host is never contacted as a registry; `alkahest pull` resolves such names
+//! through the configured git catalogs. A missing tag stays `latest` here; the pull replaces
+//! it with the entry's first variant, so stored catalog models always carry a concrete tag.
+//!
 //! Defaults follow Ollama: host `registry.ollama.ai`, namespace `library`, tag `latest`, so
 //! `qwen3` is `registry.ollama.ai/library/qwen3:latest`. The host `ollama.com` is an alias of
 //! `registry.ollama.ai` and is normalised to it, the Hugging Face hosts are normalised to
@@ -38,6 +45,10 @@ pub const DEFAULT_NAMESPACE: &str = "library";
 pub const DEFAULT_TAG: &str = "latest";
 /// Canonical Hugging Face host, as Ollama stores `hf.co/...` pulls.
 pub const HF_HOST: &str = "hf.co";
+
+/// Pseudo-host of models described by git catalogs (ALK-SP-0011.R13): `alkahest/acme/x:q4`.
+/// Never contacted as an OCI registry.
+pub const CATALOG_HOST: &str = "alkahest";
 
 /// Hosts accepted as Hugging Face and normalised to [`HF_HOST`].
 const HF_HOST_ALIASES: [&str; 3] = [HF_HOST, "huggingface.co", "www.huggingface.co"];
@@ -155,10 +166,16 @@ impl ModelName {
         let host = normalise_host(host.as_ref());
         let hf = host == HF_HOST;
         check_part(RefPart::Host, &host)?;
-        check_part(
-            if hf { RefPart::Org } else { RefPart::Namespace },
-            namespace.as_ref(),
-        )?;
+        if host == CATALOG_HOST {
+            // Catalog namespaces follow the catalog name rules, which allow `.`.
+            check_part(RefPart::Model, namespace.as_ref())
+                .map_err(|_| invalid(RefPart::Namespace, namespace.as_ref()))?;
+        } else {
+            check_part(
+                if hf { RefPart::Org } else { RefPart::Namespace },
+                namespace.as_ref(),
+            )?;
+        }
         check_part(
             if hf { RefPart::Repo } else { RefPart::Model },
             model.as_ref(),
@@ -190,6 +207,23 @@ impl ModelName {
     /// Tag (the quantisation or file for `hf.co`).
     pub fn tag(&self) -> &str {
         &self.tag
+    }
+
+    /// Whether the name is a catalog model (`alkahest/<namespace>/<model>:<tag>`).
+    pub fn is_catalog(&self) -> bool {
+        self.host == CATALOG_HOST
+    }
+
+    /// The catalog entry name `<namespace>/<model>` of a catalog model.
+    pub fn catalog_entry(&self) -> Option<String> {
+        self.is_catalog()
+            .then(|| format!("{}/{}", self.namespace, self.model))
+    }
+
+    /// Whether the tag is the default `latest` (also what a name written without a tag gets);
+    /// for a catalog model it stands for the entry's first variant.
+    pub fn has_default_tag(&self) -> bool {
+        self.tag.eq_ignore_ascii_case(DEFAULT_TAG)
     }
 
     /// Whether the host is the public Ollama registry.
@@ -869,5 +903,46 @@ mod tests {
         ] {
             assert!(bad.parse::<ModelRef>().is_err(), "{bad:?} accepted");
         }
+    }
+
+    /// ALK-SP-0011.R13 "reference parses and formats back".
+    #[test]
+    fn reference_parses_and_formats_back() {
+        let n: ModelName = "alkahest/acme/assistant:q8_0".parse().unwrap();
+        assert_eq!(n.host(), CATALOG_HOST);
+        assert!(n.is_catalog());
+        assert_eq!(n.catalog_entry().as_deref(), Some("acme/assistant"));
+        assert_eq!(n.tag(), "q8_0");
+        assert_eq!(n.to_string(), "alkahest/acme/assistant:q8_0");
+        assert_eq!(n.display_short(), "alkahest/acme/assistant:q8_0");
+
+        let scoped: ScopedRef = "alkahest:alkahest/acme/assistant:q8_0".parse().unwrap();
+        assert_eq!(scoped.origin, Some(Origin::Alkahest));
+        assert_eq!(
+            scoped.reference,
+            ModelRef::Name {
+                name: n.clone(),
+                digest: None
+            }
+        );
+        assert_eq!(scoped.to_string(), "alkahest:alkahest/acme/assistant:q8_0");
+
+        // No tag: `latest`, which a pull replaces with the entry's first variant.
+        let bare: ModelName = "Alkahest/acme/assistant".parse().unwrap();
+        assert!(bare.is_catalog() && bare.has_default_tag());
+        // Catalog namespaces may contain `.` (catalog names do); others may not.
+        assert!("alkahest/acme.labs/x:q4".parse::<ModelName>().is_ok());
+        assert!(
+            "registry.ollama.ai/acme.labs/x:q4"
+                .parse::<ModelName>()
+                .is_err()
+        );
+        // Two segments are an Ollama namespace, not the catalog host.
+        assert!(
+            !"alkahest/assistant"
+                .parse::<ModelName>()
+                .unwrap()
+                .is_catalog()
+        );
     }
 }
