@@ -9,7 +9,7 @@
 //! * [`keys`]: API key generation, hashed storage and verification.
 //! * [`server`]: [`bind`], [`serve`] and [`serve_with`] (drain timeout, shutdown hooks).
 //! * [`shutdown`]: [`ShutdownHooks`] and the OS [`stop_signal`].
-//! * [`ollama`], [`admin`]: the API families, proxied to the engines the
+//! * [`ollama`], [`openai`], [`admin`]: the API families, proxied to the engines the
 //!   scheduler leases; [`inference_routes`] merges all of them.
 //! * [`service`]: services handlers fetch from the state ([`alkahest_sched::Scheduler`],
 //!   `Arc<Catalog>`, [`pull::PullService`], [`service::UpstreamClient`]) and [`HttpError`].
@@ -23,6 +23,7 @@ pub mod error;
 pub mod generation;
 pub mod keys;
 pub mod ollama;
+pub mod openai;
 pub mod pull;
 pub mod router;
 pub mod sampling;
@@ -34,10 +35,12 @@ pub mod upstream;
 
 pub use service::{HttpError, UpstreamClient};
 
-/// Every inference and runtime route: Ollama native and the admin runtime routes
+/// Every inference and runtime route: Ollama native, OpenAI and the admin runtime routes
 /// plus `/metrics`. Handlers find the scheduler, catalog and pull service in the state.
 pub fn inference_routes() -> axum::Router<AppState> {
-    ollama::routes().merge(admin::routes())
+    ollama::routes()
+        .merge(openai::routes())
+        .merge(admin::routes())
 }
 
 pub use auth::{AuthPolicy, Caller, Exposure, ExposureError, RequestContext, check_exposure};
