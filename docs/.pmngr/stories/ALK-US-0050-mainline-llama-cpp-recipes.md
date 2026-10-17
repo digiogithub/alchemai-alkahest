@@ -2,15 +2,16 @@
 id: ALK-US-0050
 type: story
 title: Mainline llama.cpp recipes
-status: in_progress
+status: done
 priority: critical
 parent: ALK-EP-0010
 milestone: ALK-M-0004
 labels: [recipes, llamacpp]
 estimate: 5
 created: 2026-10-16T22:41:48Z
-updated: 2026-10-17T00:55:10Z
+updated: 2026-10-17T01:21:44Z
 started: 2026-10-17T00:55:10Z
+closed: 2026-10-17T01:21:44Z
 links:
   - { kind: implements, target: ALK-SP-0003.R4 }
 ---

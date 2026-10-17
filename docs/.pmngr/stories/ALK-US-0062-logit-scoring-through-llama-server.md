@@ -2,14 +2,15 @@
 id: ALK-US-0062
 type: story
 title: Logit scoring through llama-server
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0012
 milestone: ALK-M-0004
 labels: [decision, engine]
 estimate: 5
 created: 2026-10-16T22:42:34Z
-updated: 2026-10-16T22:42:38Z
+updated: 2026-10-17T01:21:44Z
+started: 2026-10-17T01:21:44Z
 links:
   - { kind: implements, target: ALK-SP-0007.R3 }
 ---
