@@ -5,6 +5,9 @@
 
 use std::process::ExitCode;
 
+use std::collections::BTreeMap;
+
+use alkahest_api::audit::{KeyUsage, load_usage, usage_path};
 use alkahest_api::keys::{KeyRecord, KeyStore, NewKey, Scope};
 use alkahest_core::config::Loaded;
 use anyhow::{Context, Result, bail};
@@ -85,10 +88,26 @@ fn create(
 
 fn ls(store: &KeyStore, now: OffsetDateTime, json: bool) -> Result<ExitCode> {
     let keys = store.load()?;
+    // Usage is informational: a missing or unreadable usage file must not hide the keys.
+    let usage: BTreeMap<String, KeyUsage> =
+        load_usage(&usage_path(store.path())).unwrap_or_else(|err| {
+            tracing::warn!(%err, "ignoring unreadable key usage file");
+            BTreeMap::new()
+        });
     let mut listing = Listing::new([
-        "id", "name", "scopes", "models", "created", "expires", "status",
+        "id",
+        "name",
+        "scopes",
+        "models",
+        "created",
+        "expires",
+        "status",
+        "last_used",
+        "requests",
+        "tokens",
     ]);
     for k in &keys {
+        let u = usage.get(&k.id).cloned().unwrap_or_default();
         listing.push_row([
             k.id.clone(),
             k.name.clone(),
@@ -99,6 +118,9 @@ fn ls(store: &KeyStore, now: OffsetDateTime, json: bool) -> Result<ExitCode> {
             fmt_time(Some(k.created)),
             fmt_time(k.expires),
             k.status(now).to_string(),
+            fmt_time(u.last_used),
+            u.requests.to_string(),
+            format!("{}/{}", u.prompt_tokens, u.completion_tokens),
         ]);
     }
     let mut out = std::io::stdout().lock();

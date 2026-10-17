@@ -23,10 +23,12 @@ use std::sync::Arc;
 use alkahest_core::Config;
 use alkahest_core::config::EndpointsConfig;
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{HeaderMap, header};
+use axum::http::{HeaderMap, Method, header};
 use axum::middleware::Next;
 use axum::response::Response;
+use time::OffsetDateTime;
 
+use crate::audit::{AuditEntry, AuditSink, UsageRecorder};
 use crate::dialect::{ErrorKind, ErrorRenderer, Family, requires_admin};
 use crate::keys::{KeyError, KeyRejection, KeyVerifier, Principal, Scope, parse_key};
 
@@ -162,6 +164,10 @@ pub struct AuthState {
     pub verifier: Option<Arc<dyn KeyVerifier>>,
     /// Error renderer.
     pub errors: Arc<dyn ErrorRenderer>,
+    /// Per-key usage counters (ALK-SP-0006.R5).
+    pub usage: Option<Arc<dyn UsageRecorder>>,
+    /// Audit log of key-authenticated and refused requests.
+    pub audit: Option<Arc<dyn AuditSink>>,
 }
 
 impl std::fmt::Debug for AuthState {
@@ -169,6 +175,8 @@ impl std::fmt::Debug for AuthState {
         f.debug_struct("AuthState")
             .field("policy", &self.policy)
             .field("verifier", &self.verifier.is_some())
+            .field("usage", &self.usage.is_some())
+            .field("audit", &self.audit.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -259,25 +267,92 @@ pub async fn authenticate(State(auth): State<AuthState>, mut req: Request, next:
                 let key_id = presented_key(req.headers())
                     .and_then(parse_key)
                     .map(|k| k.id().to_string());
+                let reason = why
+                    .as_ref()
+                    .map_or_else(|| "scope".to_string(), ToString::to_string);
                 tracing::warn!(
                     %client,
                     %family,
                     status = kind.status().as_u16(),
-                    reason = why.as_ref().map(ToString::to_string).as_deref().unwrap_or("scope"),
+                    reason = %reason,
                     key_id = key_id.as_deref().unwrap_or("-"),
                     "request refused"
                 );
-                return auth.errors.render(family, kind, message);
+                let resp = auth.errors.render(family, kind, message);
+                auth.audit(AuditFacts {
+                    request_id: request_id(req.headers()),
+                    key_id,
+                    client,
+                    method: req.method(),
+                    path: &path,
+                    status: resp.status().as_u16(),
+                    outcome: reason,
+                });
+                return resp;
             }
         }
     };
+    let key_id = caller.principal().map(|p| p.key_id.clone());
+    let method = req.method().clone();
+    let rid = request_id(req.headers());
     req.extensions_mut().insert(RequestContext {
         client,
         local,
         family,
         caller,
     });
-    next.run(req).await
+    let resp = next.run(req).await;
+    if let Some(key_id) = key_id {
+        if let Some(usage) = &auth.usage {
+            usage.record_request(&key_id, OffsetDateTime::now_utc());
+        }
+        auth.audit(AuditFacts {
+            request_id: rid,
+            key_id: Some(key_id),
+            client,
+            method: &method,
+            path: &path,
+            status: resp.status().as_u16(),
+            outcome: "allowed".into(),
+        });
+    }
+    resp
+}
+
+/// What the audit line of one request is built from.
+struct AuditFacts<'a> {
+    request_id: Option<String>,
+    key_id: Option<String>,
+    client: IpAddr,
+    method: &'a Method,
+    path: &'a str,
+    status: u16,
+    outcome: String,
+}
+
+impl AuthState {
+    fn audit(&self, facts: AuditFacts<'_>) {
+        if let Some(sink) = &self.audit {
+            sink.record(AuditEntry {
+                time: OffsetDateTime::now_utc(),
+                request_id: facts.request_id,
+                key_id: facts.key_id,
+                client: facts.client.to_string(),
+                method: facts.method.to_string(),
+                path: facts.path.to_string(),
+                status: facts.status,
+                outcome: facts.outcome,
+            });
+        }
+    }
+}
+
+/// The request id set by the request-id layer (outside this middleware).
+fn request_id(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(crate::router::REQUEST_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
 }
 
 /// How the server is exposed, as decided at startup.

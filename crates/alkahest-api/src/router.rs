@@ -117,6 +117,8 @@ impl ApiRouter {
             policy: Arc::new(self.settings.auth.clone()),
             verifier: self.state.keys(),
             errors: self.state.errors(),
+            usage: self.state.usage(),
+            audit: self.state.audit(),
         };
         router = router
             .layer(middleware::from_fn_with_state(auth, authenticate))

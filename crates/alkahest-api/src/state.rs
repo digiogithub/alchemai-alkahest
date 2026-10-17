@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use axum::http::Extensions;
 
+use crate::audit::{AuditSink, UsageRecorder};
 use crate::dialect::{DefaultErrorRenderer, ErrorRenderer};
 use crate::keys::KeyVerifier;
 
@@ -40,6 +41,8 @@ struct Inner {
     services: Extensions,
     keys: Option<Arc<dyn KeyVerifier>>,
     errors: Arc<dyn ErrorRenderer>,
+    usage: Option<Arc<dyn UsageRecorder>>,
+    audit: Option<Arc<dyn AuditSink>>,
 }
 
 impl fmt::Debug for AppState {
@@ -60,7 +63,19 @@ impl AppState {
             services: Extensions::new(),
             keys: None,
             errors: Arc::new(DefaultErrorRenderer),
+            usage: None,
+            audit: None,
         }
+    }
+
+    /// Per-key usage recorder; handlers report token counts here.
+    pub fn usage(&self) -> Option<Arc<dyn UsageRecorder>> {
+        self.inner.usage.clone()
+    }
+
+    /// Audit sink used by the authentication middleware.
+    pub fn audit(&self) -> Option<Arc<dyn AuditSink>> {
+        self.inner.audit.clone()
     }
 
     /// The API key verifier. `None` means no key can ever be valid (remote access is
@@ -91,6 +106,8 @@ pub struct AppStateBuilder {
     services: Extensions,
     keys: Option<Arc<dyn KeyVerifier>>,
     errors: Arc<dyn ErrorRenderer>,
+    usage: Option<Arc<dyn UsageRecorder>>,
+    audit: Option<Arc<dyn AuditSink>>,
 }
 
 impl fmt::Debug for AppStateBuilder {
@@ -123,6 +140,18 @@ impl AppStateBuilder {
         self
     }
 
+    /// Sets the per-key usage recorder (ALK-SP-0006.R5).
+    pub fn usage_recorder(mut self, usage: Arc<dyn UsageRecorder>) -> Self {
+        self.usage = Some(usage);
+        self
+    }
+
+    /// Sets the audit sink.
+    pub fn audit_sink(mut self, audit: Arc<dyn AuditSink>) -> Self {
+        self.audit = Some(audit);
+        self
+    }
+
     /// Finishes the state.
     pub fn build(self) -> AppState {
         AppState {
@@ -131,6 +160,8 @@ impl AppStateBuilder {
                 services: self.services,
                 keys: self.keys,
                 errors: self.errors,
+                usage: self.usage,
+                audit: self.audit,
             }),
         }
     }

@@ -62,6 +62,58 @@ async fn serve_binds_the_host_flag_and_answers_version() {
     assert!(!logs.is_empty(), "no log file written");
 }
 
+/// Runs a short `alkahest` command against `home` and returns its stdout.
+fn alkahest_out(home: &Path, args: &[&str]) -> String {
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("alkahest"));
+    for (key, _) in std::env::vars() {
+        if key.starts_with("ALKAHEST_") || key == "OLLAMA_MODELS" {
+            cmd.env_remove(key);
+        }
+    }
+    let out = cmd.env("ALKAHEST_HOME", home).args(args).output().unwrap();
+    assert!(out.status.success(), "{args:?}: {out:?}");
+    String::from_utf8(out.stdout).unwrap()
+}
+
+#[tokio::test]
+async fn last_used_shows_in_keys_ls_and_the_audit_log() {
+    // Scenario ALK-SP-0006.R5 "last used", end to end.
+    let home = tempfile::tempdir().unwrap();
+    let key = alkahest_out(home.path(), &["keys", "create", "ci"])
+        .trim()
+        .to_string();
+    let port = free_port();
+    let host = format!("127.0.0.1:{port}");
+    let mut child = spawn_serve(home.path(), &["--host", &host]);
+    wait_ready(&format!("http://{host}/healthz")).await;
+    let resp = reqwest::Client::new()
+        .get(format!("http://{host}/api/version"))
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let mut last_used = String::new();
+    for _ in 0..50 {
+        let rows: serde_json::Value =
+            serde_json::from_str(&alkahest_out(home.path(), &["--json", "keys", "ls"])).unwrap();
+        last_used = rows[0]["last_used"].as_str().unwrap().to_string();
+        if last_used != "-" {
+            assert_eq!(rows[0]["requests"], "1");
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert_ne!(last_used, "-", "usage never persisted");
+
+    let audit = std::fs::read_to_string(home.path().join("logs").join("audit.jsonl")).unwrap();
+    assert!(audit.contains("\"/api/version\""), "{audit}");
+    assert!(!audit.contains(&key), "the key must never be logged");
+}
+
 /// Waits for a server that is expected to refuse to start; returns its stderr.
 fn refused(mut child: Child) -> String {
     let status = child.wait().unwrap();

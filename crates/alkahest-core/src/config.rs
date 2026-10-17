@@ -275,6 +275,9 @@ pub struct AuthConfig {
     /// Key store file. Default: `<data_dir>/keys.db`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_store: Option<PathBuf>,
+    /// Append one JSON line per key-authenticated or refused request to
+    /// `<log_dir>/audit.jsonl` (ALK-SP-0006.R5). Never contains keys or bodies.
+    pub audit_log: bool,
 }
 
 impl Default for AuthConfig {
@@ -284,6 +287,7 @@ impl Default for AuthConfig {
             require_on_loopback: false,
             trusted_proxies: Vec::new(),
             key_store: None,
+            audit_log: true,
         }
     }
 }

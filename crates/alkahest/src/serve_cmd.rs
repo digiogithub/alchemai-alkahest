@@ -5,11 +5,20 @@
 
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
+use alkahest_api::audit::{AuditLog, UsageTracker, usage_path};
 use alkahest_api::keys::{FileKeyVerifier, KeyStore, KeyVerifier};
 use alkahest_api::{ApiRouter, ApiSettings, AppState, Exposure, ServerInfo, check_exposure};
 use alkahest_core::config::Loaded;
 use anyhow::{Context, Result};
+use tokio::sync::watch;
+
+/// How often changed key usage counters are written to disk.
+const USAGE_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
+/// Audit log rotation: size of one file and number of rotated files kept.
+const AUDIT_MAX_BYTES: u64 = 10 * 1024 * 1024;
+const AUDIT_KEEP: usize = 5;
 
 /// Runs `alkahest serve`.
 pub fn run(loaded: &Loaded, allow_unauthenticated: bool) -> Result<ExitCode> {
@@ -38,9 +47,24 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         allow_unauthenticated,
     )?;
 
-    let state = AppState::builder(ServerInfo::default())
+    let usage = Arc::new(UsageTracker::open(usage_path(&paths.key_store)));
+    let mut builder = AppState::builder(ServerInfo::default())
         .key_verifier(verifier)
-        .build();
+        .usage_recorder(usage.clone());
+    if config.auth.audit_log {
+        let audit = AuditLog::start(
+            paths.log_dir.join("audit.jsonl"),
+            AUDIT_MAX_BYTES,
+            AUDIT_KEEP,
+        )
+        .context("starting the audit log")?;
+        builder = builder.audit_sink(Arc::new(audit));
+    }
+    let state = builder.build();
+    let (stopped_tx, mut stopped_rx) = watch::channel(false);
+    let flusher = tokio::spawn(usage.run_flusher(USAGE_FLUSH_INTERVAL, async move {
+        let _ = stopped_rx.wait_for(|stopped| *stopped).await;
+    }));
     let app = ApiRouter::new(state, settings).into_router();
     let listener = alkahest_api::bind(&bind).await?;
     let addr = listener
@@ -60,6 +84,9 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         }
     })
     .await?;
+    // Persist the last usage counters before exiting.
+    let _ = stopped_tx.send(true);
+    let _ = flusher.await;
     tracing::info!("server stopped");
     Ok(())
 }

@@ -3,11 +3,13 @@
 //!
 //! * [`state`]: [`AppState`], the shared state with typed service slots for later subsystems.
 //! * [`router`]: [`ApiRouter`], base routes plus the middleware stack.
+//! * [`audit`]: per-key usage counters and the JSON-lines audit log.
 //! * [`auth`]: authentication middleware, [`RequestContext`], startup exposure check.
 //! * [`dialect`]: API families, admin routes, dialect-shaped middleware errors.
 //! * [`keys`]: API key generation, hashed storage and verification.
 //! * [`server`]: [`bind`] and [`serve`].
 
+pub mod audit;
 pub mod auth;
 pub mod dialect;
 pub mod error;
