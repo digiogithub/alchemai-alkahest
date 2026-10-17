@@ -2,7 +2,7 @@
 id: ALK-US-0119
 type: story
 title: "Engine recipes: dependency downloads and native per-machine builds"
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0015
 milestone: ALK-M-0006
@@ -10,7 +10,8 @@ author: mcp
 labels: [catalog, recipes, engine]
 estimate: 5
 created: 2026-10-17T18:30:04Z
-updated: 2026-10-17T18:41:56Z
+updated: 2026-10-17T18:43:22Z
+started: 2026-10-17T18:43:22Z
 links:
   - { kind: implements, target: ALK-SP-0011.R4 }
   - { kind: implements, target: ALK-SP-0011.R5 }

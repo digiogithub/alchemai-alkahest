@@ -6,7 +6,7 @@ status: backlog
 author: mcp
 labels: [catalog, recipes, models, security]
 created: 2026-10-17T18:38:01Z
-updated: 2026-10-17T18:42:05Z
+updated: 2026-10-17T18:50:04Z
 links:
   - { kind: relates_to, target: ALK-US-0117 }
 requirements:
@@ -18,10 +18,42 @@ requirements:
     status: backlog
   R4:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-recipes/src/recipe.rs#parse_recipes_with
+        - crates/alkahest-recipes/src/recipe.rs#RecipeOrigin
+      tests:
+        - crates/alkahest-recipes/tests/dependencies.rs#catalog_recipe_equals_a_builtin_recipe
+        - crates/alkahest-recipes/tests/dependencies.rs#tofu_refused_in_a_git_catalog
+        - crates/alkahest-recipes/tests/dependencies.rs#plain_http_refused
+        - crates/alkahest-recipes/tests/dependencies.rs#a_branch_source_rev_warns_in_a_git_catalog_only
   R5:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-recipes/src/recipe.rs#Dependency
+        - crates/alkahest-recipes/src/install.rs#install
+        - crates/alkahest/src/engines_cmd.rs#info
+      tests:
+        - crates/alkahest-recipes/tests/dependencies.rs#required_dependency_installed_with_the_engine
+        - crates/alkahest-recipes/tests/dependencies.rs#optional_dependency_only_on_request
+        - crates/alkahest-recipes/tests/dependencies.rs#dest_escaping_the_install_directory_refused
+        - crates/alkahest-recipes/tests/dependencies.rs#companions_are_read_as_optional_dependencies
+        - crates/alkahest-recipes/tests/companions.rs
   R6:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-recipes/src/recipe.rs#select_native
+        - crates/alkahest-recipes/src/install.rs#InstalledEngine
+        - crates/alkahest/src/engines_cmd.rs#install_cmd
+        - recipes/llama-cpp.toml
+      tests:
+        - crates/alkahest-recipes/tests/dependencies.rs#native_variant_never_auto_selected
+        - crates/alkahest-recipes/tests/dependencies.rs#native_variant_with_assets_refused
+        - crates/alkahest-recipes/tests/dependencies.rs#native_install_marked_stale_on_another_cpu
+        - crates/alkahest-recipes/tests/dependencies.rs#a_native_build_records_the_cpu_features_it_was_built_for
+        - crates/alkahest-recipes/tests/dependencies.rs#real_native_llama_cpp_build
   R7:
     status: backlog
   R8:
