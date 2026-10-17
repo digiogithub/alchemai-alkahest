@@ -17,13 +17,14 @@ use crate::models_cmd::human_size;
 use crate::output::{Format, Listing};
 
 /// The client for the configured server.
-fn client(loaded: &Loaded) -> Result<Client> {
+pub(crate) fn client(loaded: &Loaded) -> Result<Client> {
     let server = &loaded.config.server;
     let key = std::env::var(API_KEY_ENV).ok();
     Ok(Client::for_bind(&server.host, server.port)?.with_api_key(key))
 }
 
-fn runtime() -> Result<tokio::runtime::Runtime> {
+/// A current-thread runtime for one client command.
+pub(crate) fn runtime() -> Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

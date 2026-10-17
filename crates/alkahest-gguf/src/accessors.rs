@@ -91,6 +91,45 @@ impl Gguf {
         self.get_str("tokenizer.chat_template")
     }
 
+    /// String elements of an array value (`general.tags`); empty when the key is missing,
+    /// not an array, or too large to have been kept. Non-string elements are skipped.
+    pub fn string_array(&self, key: &str) -> Vec<&str> {
+        match self.get(key) {
+            Some(Value::Array { items, .. }) => items.iter().filter_map(Value::as_str).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// `general.tags` (`decision-model`, `text-generation`, ...).
+    pub fn tags(&self) -> Vec<&str> {
+        self.string_array("general.tags")
+    }
+
+    /// `general.basename` (`Tev1`), falling back to `general.name`.
+    pub fn basename(&self) -> Option<&str> {
+        self.get_str("general.basename").or_else(|| self.name())
+    }
+
+    /// Non-empty `decision.type` (`tev1`, `kev`, `clef`, ...).
+    pub fn decision_type(&self) -> Option<&str> {
+        self.get_str("decision.type").filter(|d| !d.is_empty())
+    }
+
+    /// The header carries a `tokenizer.chat_template.systemone` template, which makes
+    /// llama-server serve `/v1/systemone` natively.
+    pub fn has_systemone_template(&self) -> bool {
+        self.get_str("tokenizer.chat_template.systemone")
+            .is_some_and(|t| !t.is_empty())
+    }
+
+    /// Any GGUF evidence of a decision model: `decision.type`, a `systemone` template or the
+    /// `decision-model` tag.
+    pub fn is_decision_model(&self) -> bool {
+        self.decision_type().is_some()
+            || self.has_systemone_template()
+            || self.tags().contains(&"decision-model")
+    }
+
     /// `general.file_type` id.
     pub fn file_type(&self) -> Option<u32> {
         self.get_u64("general.file_type")

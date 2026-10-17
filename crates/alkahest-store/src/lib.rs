@@ -38,7 +38,7 @@ pub use manifest::{
     Descriptor, LayerKind, ListEntry, ListTarget, Manifest, ManifestDocument, ModelConfig,
     SourceInfo, SourceKind, media_type,
 };
-pub use meta::{GgufFacts, ModelInfo, format_parameters};
+pub use meta::{DecisionInfo, GgufFacts, ModelInfo, format_parameters};
 pub use ollama::OllamaStore;
 pub use ops::{CopyReport, DeleteReport, GcReport, STALE_STAGING_AGE};
 pub use overlay::{

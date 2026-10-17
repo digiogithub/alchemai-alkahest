@@ -39,19 +39,6 @@ fn list_is_an_alias_of_ls() {
         .stdout(contains("NAME"));
 }
 
-#[test]
-fn unbuilt_commands_name_their_story_and_exit_2() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cases: &[(&[&str], &str)] = &[(&["run", "m"], "ALK-US-0039")];
-    for (args, story) in cases {
-        alkahest(tmp.path())
-            .args(*args)
-            .assert()
-            .code(2)
-            .stderr(contains(format!("not implemented yet ({story})")));
-    }
-}
-
 #[cfg(not(feature = "desktop"))]
 #[test]
 fn desktop_without_the_feature_explains_and_fails() {

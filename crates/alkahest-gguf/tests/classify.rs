@@ -351,3 +351,100 @@ fn kind_metadata_is_complete_and_round_trips() {
     assert_eq!(ModelKind::Chat.glyph(), "\u{25C6}");
     assert_eq!(ModelFormat::Safetensors.label(), "safetensors");
 }
+
+fn str_array(items: &[&str]) -> Value {
+    Value::Array {
+        elem: alkahest_gguf::ValueType::String,
+        len: items.len() as u64,
+        items: items
+            .iter()
+            .map(|s| Value::String((*s).to_owned()))
+            .collect(),
+    }
+}
+
+#[test]
+fn ollama_decision_capability_is_decision() {
+    // tev1:0.8b as first published: a qwen35 chat GGUF whose Ollama config says
+    // `capabilities: ["decision"]`.
+    let tev1 = gguf("qwen35", &[tmpl()]);
+    let caps = caps(&["decision"]);
+    let c = classify(&ClassifyInput {
+        gguf: Some(&tev1),
+        ollama_capabilities: &caps,
+        ..Default::default()
+    });
+    assert_eq!(c.kind, ModelKind::Decision);
+    // Without the GGUF (config only) the capability still decides.
+    let c = classify(&ClassifyInput {
+        ollama_capabilities: &caps,
+        ..Default::default()
+    });
+    assert_eq!(c.kind, ModelKind::Decision);
+}
+
+#[test]
+fn systemone_template_is_decision() {
+    let g = gguf(
+        "qwen35",
+        &[
+            tmpl(),
+            (
+                "tokenizer.chat_template.systemone",
+                Value::String("{{ state }}".to_owned()),
+            ),
+        ],
+    );
+    assert!(g.has_systemone_template());
+    let c = classify(&ClassifyInput {
+        gguf: Some(&g),
+        ..Default::default()
+    });
+    assert_eq!(c.kind, ModelKind::Decision);
+}
+
+#[test]
+fn decision_model_tag_is_decision() {
+    let g = gguf(
+        "qwen35",
+        &[
+            tmpl(),
+            (
+                "general.tags",
+                str_array(&["text-generation", "decision-model"]),
+            ),
+            ("general.basename", Value::String("Tev1".to_owned())),
+        ],
+    );
+    assert_eq!(g.tags(), vec!["text-generation", "decision-model"]);
+    assert_eq!(g.basename(), Some("Tev1"));
+    let c = classify(&ClassifyInput {
+        gguf: Some(&g),
+        ..Default::default()
+    });
+    assert_eq!(c.kind, ModelKind::Decision);
+}
+
+#[test]
+fn other_tags_and_empty_decision_type_stay_chat() {
+    let g = gguf(
+        "qwen3",
+        &[
+            tmpl(),
+            ("general.tags", str_array(&["text-generation"])),
+            ("decision.type", Value::String(String::new())),
+            (
+                "tokenizer.chat_template.systemone",
+                Value::String(String::new()),
+            ),
+        ],
+    );
+    assert!(!g.is_decision_model());
+    let caps = caps(&["completion", "tools"]);
+    let c = classify(&ClassifyInput {
+        gguf: Some(&g),
+        ollama_capabilities: &caps,
+        ..Default::default()
+    });
+    assert_eq!(c.kind, ModelKind::Chat);
+}
