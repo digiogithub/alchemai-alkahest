@@ -13,8 +13,7 @@ publish = false
 workspace = true
 
 [dependencies]
-alkahest-core.workspace = true
-alkahest-fetch.workspace = true
+alkahest-pull.workspace = true
 alkahest-store.workspace = true
 regex.workspace = true
 reqwest.workspace = true
@@ -26,5 +25,6 @@ tokio-util.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+alkahest-fetch.workspace = true
 tempfile.workspace = true
 wiremock.workspace = true

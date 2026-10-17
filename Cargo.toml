@@ -46,6 +46,7 @@ alkahest-fetch = { path = "crates/alkahest-fetch" }
 alkahest-gguf = { path = "crates/alkahest-gguf" }
 alkahest-hf = { path = "crates/alkahest-hf" }
 alkahest-ollama = { path = "crates/alkahest-ollama" }
+alkahest-pull = { path = "crates/alkahest-pull" }
 alkahest-recipes = { path = "crates/alkahest-recipes" }
 alkahest-sched = { path = "crates/alkahest-sched" }
 alkahest-store = { path = "crates/alkahest-store" }

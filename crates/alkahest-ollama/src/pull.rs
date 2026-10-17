@@ -12,7 +12,7 @@
 use alkahest_store::{Digest, ModelName, ModelSource, OllamaStore, StoreError};
 
 use crate::registry::{RegistryClient, RegistryError, ResolvedManifest};
-use crate::transfer::{BlobSpec, PullEvent, Transfer, TransferError};
+use alkahest_pull::{BlobSpec, PullEvent, Transfer, TransferError};
 
 /// Options of an Ollama pull.
 #[derive(Debug, Clone, Copy, Default)]

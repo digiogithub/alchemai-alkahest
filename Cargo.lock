@@ -31,6 +31,7 @@ dependencies = [
  "alkahest-fetch",
  "alkahest-hf",
  "alkahest-ollama",
+ "alkahest-pull",
  "alkahest-store",
  "alkahest-sysinfo",
  "anyhow",
@@ -117,7 +118,7 @@ version = "0.1.0"
 dependencies = [
  "alkahest-core",
  "alkahest-fetch",
- "alkahest-ollama",
+ "alkahest-pull",
  "alkahest-store",
  "keyring",
  "regex",
@@ -139,8 +140,8 @@ dependencies = [
 name = "alkahest-ollama"
 version = "0.1.0"
 dependencies = [
- "alkahest-core",
  "alkahest-fetch",
+ "alkahest-pull",
  "alkahest-store",
  "regex",
  "reqwest",
@@ -152,6 +153,17 @@ dependencies = [
  "tokio-util",
  "url",
  "wiremock",
+]
+
+[[package]]
+name = "alkahest-pull"
+version = "0.1.0"
+dependencies = [
+ "alkahest-fetch",
+ "alkahest-store",
+ "reqwest",
+ "thiserror",
+ "tokio-util",
 ]
 
 [[package]]
