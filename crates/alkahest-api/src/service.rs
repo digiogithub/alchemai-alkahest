@@ -265,6 +265,9 @@ pub fn require(lease: &Lease, model: &str, cap: Capability) -> Result<(), HttpEr
 pub struct UsageSink {
     recorder: Option<Arc<dyn UsageRecorder>>,
     key_id: Option<String>,
+    /// The request's entry in the runtime monitor feed, captured at creation (the stream
+    /// that records usage runs after the handler returned).
+    feed: Option<Arc<crate::feed::FeedEntry>>,
 }
 
 impl std::fmt::Debug for UsageSink {
@@ -283,6 +286,7 @@ impl UsageSink {
             key_id: ctx
                 .and_then(|c| c.caller.principal())
                 .map(|p| p.key_id.clone()),
+            feed: crate::feed::current(),
         }
     }
 
@@ -290,6 +294,10 @@ impl UsageSink {
     pub fn record(&self, lease: &Lease, usage: Usage) {
         if let (Some(r), Some(k)) = (&self.recorder, &self.key_id) {
             r.record_tokens(k, usage.prompt_tokens, usage.completion_tokens);
+        }
+        if let Some(f) = &self.feed {
+            f.set_model(lease.model());
+            f.add_tokens(usage.prompt_tokens, usage.completion_tokens);
         }
         lease.record_usage(usage);
     }

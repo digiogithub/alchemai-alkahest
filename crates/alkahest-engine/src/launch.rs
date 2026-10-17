@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use alkahest_gguf::{ModelFormat, ModelKind};
-use alkahest_store::{CatalogEntry, Effective, ModelSettings};
+use alkahest_store::{CatalogEntry, DiffusionComponent, Effective, ModelSettings};
 use alkahest_sysinfo::Accelerator;
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +27,9 @@ pub struct LaunchRequest {
     pub model_path: PathBuf,
     /// Multimodal projector next to the weights.
     pub projector_path: Option<PathBuf>,
+    /// Component files of a multi-file diffusion model (VAE, text encoders), in
+    /// [`DiffusionComponent::ALL`] order; empty for single-file models.
+    pub components: Vec<(DiffusionComponent, PathBuf)>,
     /// Weight format.
     pub format: ModelFormat,
     /// What the model does; decides the engine mode (`--embeddings`, `--reranking`).
@@ -72,6 +75,7 @@ impl LaunchRequest {
             model: model.into(),
             model_path: model_path.into(),
             projector_path: None,
+            components: Vec::new(),
             format,
             kind,
             quantization: None,
@@ -116,6 +120,7 @@ impl LaunchRequest {
             model,
             model_path,
             projector_path: entry.entry.projector_path().map(Path::to_path_buf),
+            components: entry.entry.components(),
             format: entry.info.format,
             kind: entry.info.kind,
             quantization: entry.info.quantization.clone(),

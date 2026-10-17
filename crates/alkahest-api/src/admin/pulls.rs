@@ -249,6 +249,30 @@ pub(super) async fn get_job(State(state): State<AppState>, Path(id): Path<String
     reply(&state, r)
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct LogQuery {
+    lines: Option<usize>,
+}
+
+/// `GET /alkahest/v1/jobs/{id}/log?lines=` (default 200, at most 2000): the tail of a job's
+/// output (its build log file when it has one).
+pub(super) async fn job_log(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<LogQuery>,
+) -> Response {
+    let r = async {
+        let ctx = admin(&state)?;
+        let lines = q.lines.unwrap_or(200).clamp(1, super::jobs::LOG_LINES);
+        let log =
+            service::blocking(move || ctx.jobs.log(&id, lines).ok_or_else(|| job_not_found(&id)))
+                .await?;
+        Ok(Json(log).into_response())
+    }
+    .await;
+    reply(&state, r)
+}
+
 /// `POST /alkahest/v1/jobs/{id}/cancel` and `DELETE /alkahest/v1/pulls/{id}`.
 pub(super) async fn cancel_job(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let r = admin(&state).and_then(|ctx| {

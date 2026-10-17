@@ -47,6 +47,9 @@ pub struct AdminContext {
     pub(crate) system: RwLock<Option<SystemInfo>>,
     pub(crate) saved_network: Mutex<NetworkSettings>,
     pub(crate) saved_server: Mutex<ServerSettings>,
+    /// Engine overrides as saved in the configuration file (applied on restart).
+    pub(crate) saved_overrides:
+        Mutex<std::collections::BTreeMap<String, alkahest_core::config::EngineOverride>>,
     pub(crate) sources: Vec<String>,
 }
 
@@ -192,6 +195,7 @@ impl AdminContextBuilder {
             .unwrap_or_else(|| DEFAULT_LIBRARY_URL.to_string());
         let saved = NetworkSettings::from_config(&self.config);
         let saved_server = ServerSettings::from_config(&self.config);
+        let saved_overrides = self.config.engines.overrides.clone();
         Arc::new(AdminContext {
             config: self.config,
             paths: self.paths,
@@ -207,6 +211,7 @@ impl AdminContextBuilder {
             system: RwLock::new(self.system),
             saved_network: Mutex::new(saved),
             saved_server: Mutex::new(saved_server),
+            saved_overrides: Mutex::new(saved_overrides),
             sources: self.sources,
         })
     }

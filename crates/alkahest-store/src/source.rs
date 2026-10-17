@@ -8,7 +8,9 @@ use std::time::SystemTime;
 use crate::digest::Digest;
 use crate::error::Result;
 use crate::fsutil::{self, MAX_DOCUMENT};
-use crate::manifest::{Descriptor, LayerKind, Manifest, ModelConfig, media_type};
+use crate::manifest::{
+    Descriptor, DiffusionComponent, LayerKind, Manifest, ModelConfig, media_type,
+};
 use crate::reference::{ModelName, Origin};
 
 /// One layer of a listed model, with where its blob is.
@@ -150,6 +152,22 @@ impl ModelEntry {
         self.layers_of(&LayerKind::Projector)
             .next()
             .map(|l| l.path.as_path())
+    }
+
+    /// The component files of a multi-file diffusion model (VAE, text encoders), in
+    /// [`DiffusionComponent::ALL`] order; empty for single-file models.
+    pub fn components(&self) -> Vec<(DiffusionComponent, PathBuf)> {
+        let mut out: Vec<(DiffusionComponent, PathBuf)> = self
+            .layers
+            .iter()
+            .filter_map(|l| {
+                DiffusionComponent::from_media_type(&l.descriptor.media_type)
+                    .map(|c| (c, l.path.clone()))
+            })
+            .collect();
+        out.sort_by_key(|(c, _)| *c);
+        out.dedup_by_key(|(c, _)| *c);
+        out
     }
 
     /// Whether this is an Ollama cloud model (`remote_host` in its config): listed by Ollama

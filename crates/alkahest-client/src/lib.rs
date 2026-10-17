@@ -24,9 +24,18 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+mod engine_admin;
+mod hf_estimate;
 mod library;
+mod library_tags;
+mod monitor;
+mod rest;
 
+pub use engine_admin::{EngineOverride, EngineOverrideDoc, JobLog};
+pub use hf_estimate::HfQuant;
 pub use library::{LibraryModel, OpenAiModel, OpenAiModels};
+pub use library_tags::LibraryTag;
+pub use monitor::{CpuLoad, GpuLoad, ModelCpu, RequestRecord, Utilization};
 
 /// Default server port (`alkahest serve`).
 pub const DEFAULT_PORT: u16 = 11435;
@@ -278,6 +287,12 @@ pub struct RuntimeModel {
     pub loaded_at: Option<String>,
     /// How long the load took.
     pub load_duration_ms: Option<u64>,
+    /// Estimated load progress in `[0, 1]` while `state` is `loading` (time-based).
+    pub load_progress: Option<f32>,
+    /// Executable of the engine build running the model.
+    pub executable: Option<String>,
+    /// CPU use of the engine process tree (percent of one core), `GET /alkahest/v1/ps` only.
+    pub cpu_percent: Option<f32>,
 }
 
 /// CPU/GPU split of a loaded model's memory, in percent.
@@ -329,6 +344,8 @@ pub struct SchedulerStatus {
     pub crashes_total: u64,
     /// Machine memory, when the server measured it.
     pub memory: Option<MemoryStatus>,
+    /// CPU and GPU load, `GET /alkahest/v1/ps` only (not in `status` events).
+    pub utilization: Option<Utilization>,
 }
 
 /// One server-sent event: its `event:` name (`message` when absent) and its `data:` lines

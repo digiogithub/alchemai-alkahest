@@ -101,6 +101,34 @@ impl MemoryMonitor {
         }
     }
 
+    /// Load of every GPU NVML or amdgpu reports: busy and memory-controller percentages and
+    /// temperature. Empty on machines without them (and on Apple unified memory, where no
+    /// public counter exists).
+    pub fn gpu_loads(&self) -> Vec<crate::utilization::GpuLoad> {
+        let mut out = Vec::new();
+        if let Some(n) = &self.nvml {
+            for (i, (gpu, mem, temp)) in n.loads().into_iter().enumerate() {
+                out.push(crate::utilization::GpuLoad {
+                    index: u32::try_from(i).unwrap_or(u32::MAX),
+                    vendor: "nvidia".into(),
+                    gpu_percent: gpu,
+                    memory_percent: mem,
+                    temperature_c: temp,
+                });
+            }
+        }
+        for (index, busy, temp) in self.amd.loads() {
+            out.push(crate::utilization::GpuLoad {
+                index,
+                vendor: "amd".into(),
+                gpu_percent: busy,
+                memory_percent: None,
+                temperature_c: temp,
+            });
+        }
+        out
+    }
+
     /// VRAM held by process `pid`, summed over devices, when the driver reports it.
     ///
     /// `None` for a process that uses no GPU, and wherever the driver hides per-process memory

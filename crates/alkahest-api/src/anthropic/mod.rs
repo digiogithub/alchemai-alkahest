@@ -134,6 +134,7 @@ async fn messages_inner(
         model,
         translated,
     } = prepare(state, ctx, &raw, false).await?;
+    crate::tool_prefill::apply(state, &model, &lease, &mut body).await;
     apply_sampling(&mut body, lease.settings(), LimitField::MaxTokens);
     body.insert("stream".into(), json!(true));
     body.insert("stream_options".into(), json!({"include_usage": true}));

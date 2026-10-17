@@ -11,12 +11,15 @@
 //! * [`catalog`]: [`Catalog`], the merged, metadata-enriched view of both stores and the
 //!   resolver for user references (ALK-SP-0001.R5).
 //! * [`meta`]: [`ModelInfo`] and the cached GGUF facts behind it.
+//! * [`create`]: `ollama create` on [`AlkahestStore`]: a model from an uploaded GGUF blob or
+//!   an existing model plus Modelfile text layers.
 //! * [`ops`]: delete, copy and garbage collection on [`AlkahestStore`] (ALK-SP-0001.R4).
 //! * [`overlay`]: per-model settings overlay and the effective-settings resolver
 //!   (ALK-SP-0010.R4).
 //! * [`source`]: the [`ModelSource`] trait the catalog merges stores through.
 
 pub mod catalog;
+pub mod create;
 pub mod digest;
 pub mod error;
 mod fsutil;
@@ -31,12 +34,13 @@ pub mod snapshot;
 pub mod source;
 
 pub use catalog::{Catalog, CatalogEntry, ModelDetail, ModelSummary};
+pub use create::{CreateBase, CreateLayers, CreateReport};
 pub use digest::{Digest, DigestParseError};
 pub use error::{Result, StoreError};
 pub use local::{AlkahestStore, BlobWriter, StoreLock, StoredManifest};
 pub use manifest::{
-    Descriptor, LayerKind, ListEntry, ListTarget, Manifest, ManifestDocument, ModelConfig,
-    SourceInfo, SourceKind, media_type,
+    Descriptor, DiffusionComponent, LayerKind, ListEntry, ListTarget, Manifest, ManifestDocument,
+    ModelConfig, SourceInfo, SourceKind, media_type,
 };
 pub use meta::{DecisionInfo, GgufFacts, ModelInfo, format_parameters};
 pub use ollama::OllamaStore;

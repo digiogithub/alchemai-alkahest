@@ -55,7 +55,7 @@ Environment of `scripts/e2e.sh`:
 | `ALKAHEST_E2E_GPU_VARIANT` | best for the machine | variant of the gpu leg |
 | `ALKAHEST_E2E_OUT` | `target/e2e` | report directory |
 | `ALKAHEST_E2E_KEEP` | unset | `1` keeps the temporary home |
-| `ALKAHEST_CONFORMANCE_TOOLS` | `0` in the leg | `1` asserts tool calls (needs a tool-capable model) |
+| `ALKAHEST_CONFORMANCE_TOOLS` | `0` in the leg | `1` asserts tool calls (needs a tool-capable model; `qwen2.5-coder:0.5b` passes since forced choices are prefilled, ALK-US-0096) |
 | `ALKAHEST_CONFORMANCE_PACKAGES` | `ollama openai anthropic` | pip packages (pin versions here) |
 
 CI: `.github/workflows/e2e-nightly.yml` runs the `cpu` and `conformance` legs every night on a

@@ -133,6 +133,13 @@ async fn chat(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
         if !hang {
             events.push(chunk(json!({"content":"o"}), Value::Null));
         }
+        if body["logprobs"] == json!(true) {
+            let n = events.len();
+            for (e, tok) in events[n - 2..].iter_mut().zip(["Hell", "o"]) {
+                e["choices"][0]["logprobs"] = json!({"content": [{"token": tok, "logprob": -0.5,
+                    "bytes": tok.as_bytes(), "top_logprobs": [{"token": tok, "logprob": -0.5, "bytes": tok.as_bytes()}]}]});
+            }
+        }
         if length { "length" } else { "stop" }
     };
     if !hang {
@@ -172,7 +179,7 @@ async fn completion(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
     log.requests
         .lock()
         .push(("/completion".into(), body.clone()));
-    if body.get("n_probs").is_some() {
+    if body.get("n_probs").is_some() && body.get("logit_bias").is_some() {
         return score_completion(&body);
     }
     let timings: Value = serde_json::from_str(TIMINGS).unwrap();
@@ -181,11 +188,19 @@ async fn completion(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
     } else {
         "eos"
     };
-    let events = vec![
+    let mut events = vec![
         json!({"content":"Hell","stop":false}),
         json!({"content":"o","stop":false}),
         json!({"content":"","stop":true,"stop_type":stop_type,"timings":timings}),
     ];
+    if body.get("n_probs").is_some() {
+        // llama-server's current shape (post_sampling_probs false).
+        for (e, tok) in events.iter_mut().zip(["Hell", "o"]) {
+            e["completion_probabilities"] = json!([{"id": 1, "token": tok, "logprob": -0.25,
+                "bytes": [], "top_logprobs": [{"id": 1, "token": tok, "logprob": -0.25, "bytes": []},
+                                              {"id": 2, "token": "x", "logprob": -2.0, "bytes": []}]}]);
+        }
+    }
     sse(events, false, log.clone(), false)
 }
 
@@ -512,6 +527,9 @@ impl EngineInstance for FakeEngine {
                 }
             }
         })
+    }
+    fn executable(&self) -> Option<std::path::PathBuf> {
+        Some(std::path::PathBuf::from("/e/llama-server"))
     }
     fn stop(&self) -> BoxFuture<'static, ExitInfo> {
         self.exit.send_if_modified(|e| {

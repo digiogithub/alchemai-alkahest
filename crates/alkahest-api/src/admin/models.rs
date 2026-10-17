@@ -391,10 +391,6 @@ fn validate(s: &ModelSettings) -> Result<(), HttpError> {
     ] {
         if let Some(t) = v
             && KvCacheType::parse(t).is_none()
-            && !matches!(
-                t.to_ascii_lowercase().as_str(),
-                "f32" | "bf16" | "q4_1" | "q5_0" | "q5_1" | "iq4_nl"
-            )
         {
             return Err(HttpError::bad_request(format!(
                 "{name}: unknown cache type `{t}`"
@@ -435,13 +431,90 @@ pub(super) async fn recommended(
 
 #[derive(Debug, Default, Deserialize)]
 pub(super) struct EstimateParams {
-    context_length: Option<u64>,
-    num_parallel: Option<u32>,
-    kv_cache_type_k: Option<String>,
-    kv_cache_type_v: Option<String>,
-    flash_attention: Option<bool>,
+    pub(super) context_length: Option<u64>,
+    pub(super) num_parallel: Option<u32>,
+    pub(super) kv_cache_type_k: Option<String>,
+    pub(super) kv_cache_type_v: Option<String>,
+    pub(super) flash_attention: Option<bool>,
     /// `-1` all, `0` none, `n` layers; absent = automatic.
-    gpu_layers: Option<i32>,
+    pub(super) gpu_layers: Option<i32>,
+}
+
+/// The estimate document of `GET .../estimate` for a parsed GGUF header: request parameters
+/// first, then the model's effective `settings` (local models; defaults for remote files),
+/// against this machine's free VRAM and available RAM.
+pub(super) fn estimate_document(
+    model: &str,
+    gguf: &Gguf,
+    p: &EstimateParams,
+    settings: &ModelSettings,
+    system: Option<&alkahest_sysinfo::SystemInfo>,
+    projector_bytes: Option<u64>,
+) -> Result<Value, HttpError> {
+    let accel = system.map_or(alkahest_sysinfo::Accelerator::Cpu, |s| s.best_accelerator());
+    let profile = ModelProfile::from_gguf(gguf)
+        .map_err(|e| HttpError::bad_request(format!("cannot estimate this model: {e}")))?;
+    let kv = |q: &Option<String>, s: &Option<String>| -> Result<KvCacheType, HttpError> {
+        match q.as_ref().or(s.as_ref()) {
+            None => Ok(KvCacheType::default()),
+            Some(t) => KvCacheType::parse(t).ok_or_else(|| {
+                HttpError::bad_request(format!("unsupported cache type `{t}` for estimates"))
+            }),
+        }
+    };
+    let gpu_layers_setting = p.gpu_layers.or(settings.gpu_layers);
+    let free_vram: u64 = system
+        .map(|s| {
+            s.gpus
+                .iter()
+                .map(|g| g.vram_free_bytes.unwrap_or(g.vram_total_bytes))
+                .sum()
+        })
+        .unwrap_or(0);
+    let policy = if !accel.is_gpu() {
+        GpuLayers::None
+    } else {
+        match gpu_layers_setting {
+            None => GpuLayers::Auto,
+            Some(n) if n < 0 => GpuLayers::All,
+            Some(0) => GpuLayers::None,
+            Some(n) => GpuLayers::Count(n.unsigned_abs()),
+        }
+    };
+    let context_length = p
+        .context_length
+        .or(settings.context_length)
+        .unwrap_or(DEFAULT_CONTEXT_LENGTH);
+    let cfg = EstimateConfig {
+        context_length,
+        num_parallel: p.num_parallel.or(settings.num_parallel).unwrap_or(1).max(1),
+        cache_type_k: kv(&p.kv_cache_type_k, &settings.kv_cache_type_k)?,
+        cache_type_v: kv(&p.kv_cache_type_v, &settings.kv_cache_type_v)?,
+        flash_attention: p
+            .flash_attention
+            .or(settings.flash_attention)
+            .unwrap_or(false),
+        mmproj_bytes: projector_bytes,
+        gpu_layers: policy,
+        free_vram_bytes: if policy == GpuLayers::None {
+            0
+        } else {
+            free_vram
+        },
+        ..EstimateConfig::default()
+    };
+    let est = estimate(&profile, &cfg);
+    let ram = system.map(|s| s.memory.available_bytes);
+    Ok(json!({
+        "model": model,
+        "accelerator": accel.label(),
+        "context_length": context_length,
+        "num_parallel": cfg.num_parallel,
+        "estimate": est,
+        "free_vram_bytes": free_vram,
+        "available_ram_bytes": ram,
+        "fits": est.fits(ram.unwrap_or(u64::MAX), free_vram, cfg.vram_fraction),
+    }))
 }
 
 /// `GET /alkahest/v1/models/{name}/estimate`.
@@ -472,81 +545,19 @@ pub(super) async fn estimate_memory(
                 .map_err(|e| HttpError::bad_request(e.to_string()))?;
             let gguf = Gguf::read_file(&req.model_path)
                 .map_err(|e| HttpError::internal(format!("reading the GGUF header: {e}")))?;
-            let profile = ModelProfile::from_gguf(&gguf)
-                .map_err(|e| HttpError::bad_request(format!("cannot estimate this model: {e}")))?;
-            let kv = |q: &Option<String>, s: &Option<String>| -> Result<KvCacheType, HttpError> {
-                match q.as_ref().or(s.as_ref()) {
-                    None => Ok(KvCacheType::default()),
-                    Some(t) => KvCacheType::parse(t).ok_or_else(|| {
-                        HttpError::bad_request(format!(
-                            "unsupported cache type `{t}` for estimates"
-                        ))
-                    }),
-                }
-            };
-            let gpu_layers_setting = p.gpu_layers.or(eff.settings.gpu_layers);
-            let free_vram: u64 = system
-                .as_ref()
-                .map(|s| {
-                    s.gpus
-                        .iter()
-                        .map(|g| g.vram_free_bytes.unwrap_or(g.vram_total_bytes))
-                        .sum()
-                })
-                .unwrap_or(0);
-            let policy = if !accel.is_gpu() {
-                GpuLayers::None
-            } else {
-                match gpu_layers_setting {
-                    None => GpuLayers::Auto,
-                    Some(n) if n < 0 => GpuLayers::All,
-                    Some(0) => GpuLayers::None,
-                    Some(n) => GpuLayers::Count(n.unsigned_abs()),
-                }
-            };
             let projector = req
                 .projector_path
                 .as_ref()
                 .and_then(|p| std::fs::metadata(p).ok())
                 .map(|m| m.len());
-            let context_length = p
-                .context_length
-                .or(eff.settings.context_length)
-                .unwrap_or(DEFAULT_CONTEXT_LENGTH);
-            let cfg = EstimateConfig {
-                context_length,
-                num_parallel: p
-                    .num_parallel
-                    .or(eff.settings.num_parallel)
-                    .unwrap_or(1)
-                    .max(1),
-                cache_type_k: kv(&p.kv_cache_type_k, &eff.settings.kv_cache_type_k)?,
-                cache_type_v: kv(&p.kv_cache_type_v, &eff.settings.kv_cache_type_v)?,
-                flash_attention: p
-                    .flash_attention
-                    .or(eff.settings.flash_attention)
-                    .unwrap_or(false),
-                mmproj_bytes: projector,
-                gpu_layers: policy,
-                free_vram_bytes: if policy == GpuLayers::None {
-                    0
-                } else {
-                    free_vram
-                },
-                ..EstimateConfig::default()
-            };
-            let est = estimate(&profile, &cfg);
-            let ram = system.as_ref().map(|s| s.memory.available_bytes);
-            Ok(json!({
-                "model": entry.entry.name.display_short(),
-                "accelerator": accel.label(),
-                "context_length": context_length,
-                "num_parallel": cfg.num_parallel,
-                "estimate": est,
-                "free_vram_bytes": free_vram,
-                "available_ram_bytes": ram,
-                "fits": est.fits(ram.unwrap_or(u64::MAX), free_vram, cfg.vram_fraction),
-            }))
+            estimate_document(
+                &entry.entry.name.display_short(),
+                &gguf,
+                &p,
+                &eff.settings,
+                system.as_ref(),
+                projector,
+            )
         })
         .await?;
         Ok(Json(doc).into_response())

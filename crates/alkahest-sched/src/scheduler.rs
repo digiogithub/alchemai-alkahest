@@ -186,6 +186,8 @@ pub enum StopReason {
     Reloaded,
     /// Server shutdown.
     Shutdown,
+    /// Killed on request (SIGKILL, no graceful stop): a hung engine.
+    Killed,
 }
 
 impl std::fmt::Display for StopReason {
@@ -196,6 +198,7 @@ impl std::fmt::Display for StopReason {
             StopReason::Evicted => "evicted to free memory",
             StopReason::Reloaded => "reloading with other settings",
             StopReason::Shutdown => "server shutting down",
+            StopReason::Killed => "killed on request",
         })
     }
 }
@@ -239,6 +242,8 @@ struct RunnerStats {
     tokens_per_second: Option<f64>,
     load_duration: Option<Duration>,
     loaded_at: Option<std::time::SystemTime>,
+    /// When admission was done and the engine start began (load progress estimate).
+    launch_started: Option<Instant>,
 }
 
 impl Runner {
@@ -257,7 +262,13 @@ impl Runner {
         }
         self.slots.close();
         tracing::info!(model = %self.model.name, ?reason, "unloading model");
-        self.engine.get().map(|e| e.stop())
+        self.engine.get().map(|e| {
+            if reason == StopReason::Killed {
+                e.kill()
+            } else {
+                e.stop()
+            }
+        })
     }
 
     /// The error a request sees when this runner is gone.
@@ -542,6 +553,7 @@ async fn load(inner: &Arc<Inner>, runner: &Arc<Runner>) -> Result<Arc<dyn Engine
         );
     }
     let _ = runner.launched.set(req.clone());
+    runner.stats.lock().launch_started = Some(Instant::now());
     tracing::info!(
         model = %runner.model.name,
         engine = %runner.model.engine,
@@ -1281,6 +1293,24 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Kills the engine of `model` at once (SIGKILL to its process group, no grace period)
+    /// and forgets the model; requests in flight fail with "killed on request". For engines
+    /// that hang and ignore a normal unload. A model still loading is cancelled.
+    pub async fn kill(&self, model: &str) -> Result<()> {
+        let stop = {
+            let mut st = self.inner.state.lock();
+            let key = st.find_key(model).ok_or_else(|| SchedError::NotLoaded {
+                model: model.to_string(),
+            })?;
+            st.remove(&key, StopReason::Killed)
+        };
+        self.inner.wake();
+        if let Some(stop) = stop {
+            stop.await;
+        }
+        Ok(())
+    }
+
     /// Unloads every model and waits for all engines to exit.
     pub async fn unload_all(&self) {
         self.unload_all_with(StopReason::Requested).await;
@@ -1512,7 +1542,38 @@ fn model_status(
         load_duration_ms: stats
             .load_duration
             .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+        load_progress: (e.phase == Phase::Loading).then(|| {
+            let bytes = r
+                .model
+                .weights_bytes
+                .saturating_add(r.model.projector_bytes.unwrap_or(0));
+            load_progress(
+                stats
+                    .launch_started
+                    .map(|t| now.saturating_duration_since(t)),
+                bytes,
+            )
+        }),
+        executable: engine
+            .and_then(|en| en.executable())
+            .map(|p| p.display().to_string()),
     }
+}
+
+/// Throughput assumed for reading weights and starting an engine, for the load progress
+/// estimate (a local NVMe read plus llama.cpp's tensor setup).
+pub const LOAD_BYTES_PER_SECOND: u64 = 1 << 30;
+
+/// Estimated load progress: 0 before the engine start (admission, eviction), then
+/// `0.05 + 0.9 * elapsed / expected`, capped at 0.95 (only a ready engine is done), where
+/// `expected` is the weights size at [`LOAD_BYTES_PER_SECOND`], at least one second.
+pub fn load_progress(launch_elapsed: Option<Duration>, weights_bytes: u64) -> f32 {
+    let Some(elapsed) = launch_elapsed else {
+        return 0.0;
+    };
+    let expected = (weights_bytes as f64 / LOAD_BYTES_PER_SECOND as f64).max(1.0);
+    let p = 0.05 + 0.9 * elapsed.as_secs_f64() / expected;
+    p.min(0.95) as f32
 }
 
 impl Drop for Lease {

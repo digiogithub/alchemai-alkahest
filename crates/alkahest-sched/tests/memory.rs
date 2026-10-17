@@ -677,3 +677,24 @@ fn tied_embeddings_put_a_copy_of_the_input_embedding_on_the_gpu() {
         .ram_bytes
     );
 }
+
+/// ALK-US-0104: every cache type llama-server accepts parses and sizes the KV cache by its
+/// bits per element.
+#[test]
+fn every_llama_server_cache_type_is_estimable() {
+    for name in [
+        "f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1",
+    ] {
+        let t = KvCacheType::parse(name).unwrap_or_else(|| panic!("{name}"));
+        assert_eq!(t.as_str(), name);
+        assert_eq!(KvCacheType::parse(&name.to_uppercase()), Some(t));
+    }
+    assert_eq!(KvCacheType::parse("q3_0"), None);
+    let bits = |s: &str| KvCacheType::parse(s).unwrap().bits_per_element();
+    assert_eq!(bits("f32"), 32.0);
+    assert_eq!(bits("bf16"), 16.0);
+    assert_eq!(bits("q5_1"), 6.0);
+    assert_eq!(bits("q5_0"), 5.5);
+    assert_eq!(bits("q4_1"), 5.0);
+    assert_eq!(bits("iq4_nl"), 4.5);
+}

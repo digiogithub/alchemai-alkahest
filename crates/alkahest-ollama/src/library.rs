@@ -20,7 +20,7 @@ pub const DEFAULT_LIBRARY_URL: &str = "https://ollama.com";
 
 /// Compiles a pattern that is a compile-time constant of this module.
 #[allow(clippy::expect_used)]
-fn re(pattern: &str) -> Regex {
+pub(crate) fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("static regex pattern is valid")
 }
 
@@ -125,6 +125,47 @@ impl OllamaLibrary {
         models.truncate(limit);
         Ok(models)
     }
+
+    /// The tags of library model `name` (`qwen3`, `user/model`) from its tags page
+    /// (`/library/<name>/tags`): quantisations and sizes with digest, download size, context
+    /// window and inputs. A page that mentions tags none of which parse is
+    /// [`LibraryError::Layout`]; an unknown model is a 404 [`LibraryError::Status`].
+    pub async fn tags(&self, name: &str) -> Result<Vec<crate::tags::LibraryTag>, LibraryError> {
+        let name = name.trim().trim_start_matches("library/");
+        let name = name.split(':').next().unwrap_or(name);
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+            || name.split('/').count() > 2
+            || name.contains("..")
+        {
+            return Err(LibraryError::InvalidUrl(format!(
+                "invalid model name {name:?}"
+            )));
+        }
+        let mut url = self.base.clone();
+        let page = if name.contains('/') {
+            format!("/{name}/tags")
+        } else {
+            format!("/library/{name}/tags")
+        };
+        url.set_path(&page);
+        let resp = self.http.get(url.clone()).send().await?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(LibraryError::Status {
+                status: status.as_u16(),
+                url: url.to_string(),
+            });
+        }
+        let html = resp.text().await?;
+        let tags = crate::tags::parse_tags_html(name, &html);
+        if tags.is_empty() && html.contains(&format!("{name}:")) {
+            return Err(LibraryError::Layout);
+        }
+        Ok(tags)
+    }
 }
 
 /// Parses a search result page into models. Unknown markup yields fewer fields, never a panic.
@@ -220,12 +261,12 @@ fn parse_count(s: &str) -> Option<u64> {
 }
 
 /// Removes tags from an HTML fragment.
-fn strip_tags(s: &str) -> String {
+pub(crate) fn strip_tags(s: &str) -> String {
     TAG.replace_all(s, "").into_owned()
 }
 
 /// Decodes the handful of entities the site emits (named and numeric).
-fn decode_entities(s: &str) -> String {
+pub(crate) fn decode_entities(s: &str) -> String {
     let s = NUM_ENTITY.replace_all(s, |c: &regex::Captures<'_>| {
         let radix = if c[1].is_empty() { 10 } else { 16 };
         u32::from_str_radix(&c[2], radix)

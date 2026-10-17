@@ -458,8 +458,190 @@ async fn delete_copy_and_create() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 404);
+    // A create request needs a base.
     let resp = h.post("/api/create", json!({"model": "x"})).await;
-    assert_eq!(resp.status(), 501);
+    assert_eq!(resp.status(), 400);
+}
+
+/// ALK-US-0087: `logprobs`/`top_logprobs` reach the engine as OpenAI fields on the chat route
+/// and come back in Ollama's `logprobs` array, per chunk and aggregated.
+#[tokio::test]
+async fn chat_logprobs_are_translated() {
+    let h = Harness::start(&models()).await;
+    let resp = h
+        .post(
+            "/api/chat",
+            json!({"model": "llama3.2", "messages": [{"role": "user", "content": "hi"}],
+                   "logprobs": true, "top_logprobs": 1}),
+        )
+        .await;
+    let lines = ndjson(resp).await;
+    let sent = h.llama.last("/v1/chat/completions");
+    assert_eq!(sent["logprobs"], json!(true));
+    assert_eq!(sent["top_logprobs"], json!(1));
+    let with: Vec<&Value> = lines
+        .iter()
+        .filter(|l| l.get("logprobs").is_some())
+        .collect();
+    assert_eq!(with.len(), 2, "{lines:?}");
+    assert_eq!(with[0]["logprobs"][0]["token"], "Hell");
+    assert_eq!(with[0]["logprobs"][0]["logprob"], -0.5);
+    assert_eq!(with[0]["logprobs"][0]["top_logprobs"][0]["token"], "Hell");
+
+    let v: Value = h
+        .post(
+            "/api/chat",
+            json!({"model": "llama3.2", "messages": [{"role": "user", "content": "hi"}],
+                   "logprobs": true, "stream": false}),
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["logprobs"].as_array().unwrap().len(), 2);
+    // top_logprobs 0: the chosen token only.
+    assert!(v["logprobs"][0].get("top_logprobs").is_none(), "{v}");
+
+    let resp = h
+        .post(
+            "/api/chat",
+            json!({"model": "llama3.2", "messages": [{"role": "user", "content": "hi"}],
+                   "logprobs": true, "top_logprobs": 21}),
+        )
+        .await;
+    assert_eq!(resp.status(), 400);
+}
+
+/// ALK-US-0087: raw generate asks llama-server's `/completion` for `n_probs` and translates
+/// `completion_probabilities`.
+#[tokio::test]
+async fn raw_generate_logprobs_use_n_probs() {
+    let h = Harness::start(&models()).await;
+    let v: Value = h
+        .post(
+            "/api/generate",
+            json!({"model": "llama3.2", "prompt": "hi", "raw": true, "stream": false,
+                   "logprobs": true, "top_logprobs": 2}),
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+    let sent = h.llama.last("/completion");
+    assert_eq!(sent["n_probs"], json!(2));
+    assert_eq!(sent["post_sampling_probs"], json!(false));
+    assert_eq!(v["response"], "Hello");
+    let lp = v["logprobs"].as_array().unwrap();
+    assert_eq!(lp.len(), 2);
+    assert_eq!(lp[1]["token"], "o");
+    assert_eq!(lp[1]["top_logprobs"][1]["logprob"], -2.0);
+}
+
+/// Bytes of a tiny GGUF the store can read (architecture and context length).
+fn tiny_gguf() -> Vec<u8> {
+    common::gguf_with(&[("general.architecture", "llama"), ("general.name", "tiny")])
+}
+
+/// ALK-US-0087: `HEAD`/`POST /api/blobs/:digest` then `/api/create` from the uploaded GGUF
+/// with Modelfile layers; the model is listed and `show` returns the layers.
+#[tokio::test]
+async fn blobs_upload_and_create_from_a_gguf() {
+    let h = Harness::start(&models()).await;
+    let bytes = tiny_gguf();
+    let digest = Digest::of(&bytes).to_string();
+    let client = reqwest::Client::new();
+    let head = client
+        .head(h.url(&format!("/api/blobs/{digest}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(head.status(), 404);
+    // Wrong digest: refused and nothing stored.
+    let wrong = Digest::of(b"other").to_string();
+    let resp = client
+        .post(h.url(&format!("/api/blobs/{wrong}")))
+        .body(bytes.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+    let resp = client
+        .post(h.url(&format!("/api/blobs/{digest}")))
+        .body(bytes.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+    let head = client
+        .head(h.url(&format!("/api/blobs/{digest}")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(head.status(), 200);
+    let resp = client
+        .post(h.url(&format!("/api/blobs/{digest}")))
+        .body(bytes.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let resp = h
+        .post(
+            "/api/create",
+            json!({"model": "tiny-custom", "files": {"tiny.gguf": digest},
+                   "modelfile": "PARAMETER temperature 0.3\nPARAMETER stop <|end|>\nSYSTEM You are terse.\nLICENSE MIT"}),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+    let lines = ndjson(resp).await;
+    assert_eq!(lines.last().unwrap()["status"], "success");
+    let v: Value = h
+        .post("/api/show", json!({"model": "tiny-custom"}))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["system"], "You are terse.", "{v}");
+    assert_eq!(v["license"], "MIT");
+    assert!(
+        v["parameters"].as_str().unwrap().contains("temperature"),
+        "{v}"
+    );
+    assert_eq!(v["details"]["family"], "llama");
+}
+
+/// ALK-US-0087: `/api/create` FROM a model of the read-only Ollama store copies its blobs
+/// into the Alkahest store and replaces only the given layers.
+#[tokio::test]
+async fn create_from_an_ollama_model_overrides_layers() {
+    let h = Harness::start(&models()).await;
+    let resp = h
+        .post(
+            "/api/create",
+            json!({"model": "terse-llama", "from": "llama3.2", "system": "Be brief.",
+                   "parameters": {"top_k": 5}, "stream": false}),
+        )
+        .await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.json::<Value>().await.unwrap()["status"], "success");
+    let v: Value = h
+        .post("/api/show", json!({"model": "terse-llama"}))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["system"], "Be brief.");
+    // The template of the base is kept.
+    assert_eq!(v["template"], "{{ .Prompt }}");
+    // Local paths cannot be created from on the server.
+    let resp = h
+        .post(
+            "/api/create",
+            json!({"model": "x", "modelfile": "FROM ./model.gguf"}),
+        )
+        .await;
+    assert_eq!(resp.status(), 400);
 }
 
 #[tokio::test]
@@ -571,4 +753,96 @@ async fn ollama_client_pull_streams_progress() {
     let v: Value = resp.json().await.unwrap();
     assert!(v["error"].as_str().unwrap().contains("not found"), "{v}");
     drop(tmp);
+}
+
+/// ALK-US-0087: blob uploads are exempt from the request body limit (GGUF files are
+/// gigabytes); every other route keeps it.
+#[tokio::test]
+async fn blob_uploads_bypass_the_body_limit() {
+    let settings = alkahest_api::ApiSettings {
+        max_body_bytes: 64,
+        ..alkahest_api::ApiSettings::default()
+    };
+    let h = Harness::start_with(&models(), settings, |b| b).await;
+    let bytes = tiny_gguf();
+    assert!(bytes.len() > 64);
+    let digest = Digest::of(&bytes).to_string();
+    let resp = reqwest::Client::new()
+        .post(h.url(&format!("/api/blobs/{digest}")))
+        .body(bytes.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+    let resp = reqwest::Client::new()
+        .post(h.url("/api/show"))
+        .body(vec![b' '; 100])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 413);
+}
+
+/// ALK-US-0100: a multi-file diffusion model (weights + VAE + text encoders) created from
+/// uploaded blobs keeps every component as its own layer, and the catalog sees an image model
+/// whose launch request carries the component paths.
+#[tokio::test]
+async fn create_a_multi_file_diffusion_model() {
+    let h = Harness::start(&models()).await;
+    let client = reqwest::Client::new();
+    let weights = common::gguf_with(&[("general.architecture", "flux")]);
+    let parts: Vec<(&str, Vec<u8>)> = vec![
+        ("flux1-schnell-Q4_0.gguf", weights),
+        ("ae.safetensors", b"vae weights".to_vec()),
+        ("clip_l.safetensors", b"clip weights".to_vec()),
+        ("t5xxl_fp16.safetensors", b"t5 weights".to_vec()),
+    ];
+    let mut files = serde_json::Map::new();
+    for (name, bytes) in &parts {
+        let digest = Digest::of(bytes).to_string();
+        let resp = client
+            .post(h.url(&format!("/api/blobs/{digest}")))
+            .body(bytes.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 201);
+        files.insert((*name).to_string(), json!(digest));
+    }
+    let resp = h
+        .post(
+            "/api/create",
+            json!({"model": "flux-schnell", "files": files, "stream": false}),
+        )
+        .await;
+    assert_eq!(resp.status(), 200, "{}", resp.text().await.unwrap());
+
+    let store = alkahest_store::AlkahestStore::open(h.tmp.path().join("alk")).unwrap();
+    let catalog = alkahest_store::Catalog::new(store, None, None).with_overlays(
+        alkahest_store::ModelOverlays::in_data_dir(&h.tmp.path().join("data")),
+    );
+    let e = catalog.resolve("flux-schnell").unwrap();
+    assert_eq!(e.info.kind, alkahest_gguf::ModelKind::Image);
+    let comps: Vec<&str> = e.entry.components().iter().map(|(c, _)| c.id()).collect();
+    assert_eq!(comps, ["vae", "clip_l", "t5xxl"]);
+    let eff = catalog
+        .effective_settings(
+            &e,
+            &alkahest_store::ModelSettings::default(),
+            &alkahest_store::ModelSettings::default(),
+            None,
+        )
+        .unwrap();
+    let req = alkahest_engine::LaunchRequest::from_catalog(
+        &e,
+        &eff,
+        alkahest_sysinfo::Accelerator::Cpu,
+        0,
+    )
+    .unwrap();
+    let args = alkahest_engine::StableDiffusionCppEngine::model_args(&req);
+    assert_eq!(args[0], "--diffusion-model");
+    for flag in ["--vae", "--clip_l", "--t5xxl"] {
+        assert!(args.iter().any(|a| a == flag), "{flag}: {args:?}");
+    }
 }

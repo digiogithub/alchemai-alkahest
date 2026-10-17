@@ -123,3 +123,39 @@ fn image_models_select_sd_even_as_safetensors() {
         }
     }
 }
+
+/// ALK-US-0100: component layers become sd-server flags; a text encoder makes the weights a
+/// bare diffusion model, a VAE alone keeps the checkpoint flag.
+#[test]
+fn multi_file_models_pass_their_components() {
+    use alkahest_store::DiffusionComponent as D;
+    let mut r = image(ModelFormat::Gguf);
+    r.components = vec![
+        (D::Vae, PathBuf::from("/s/blobs/vae")),
+        (D::ClipL, PathBuf::from("/s/blobs/clip")),
+        (D::T5xxl, PathBuf::from("/s/blobs/t5")),
+    ];
+    let a = StableDiffusionCppEngine::model_args(&r);
+    assert_eq!(
+        a[..8],
+        [
+            "--diffusion-model",
+            "/m/sd_turbo.gguf",
+            "--vae",
+            "/s/blobs/vae",
+            "--clip_l",
+            "/s/blobs/clip",
+            "--t5xxl",
+            "/s/blobs/t5"
+        ]
+    );
+    r.components = vec![(D::Vae, PathBuf::from("/s/blobs/vae"))];
+    let a = StableDiffusionCppEngine::model_args(&r);
+    assert_eq!(a[..4], ["-m", "/m/sd_turbo.gguf", "--vae", "/s/blobs/vae"]);
+    // Video models are served by the same engine under their own capability.
+    assert!(
+        StableDiffusionCppEngine
+            .capabilities()
+            .contains(alkahest_engine::Capability::Video)
+    );
+}

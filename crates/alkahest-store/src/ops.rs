@@ -279,7 +279,7 @@ impl AlkahestStore {
     }
 
     /// Streams the file at `from` into a new blob, verifying it against `expected`.
-    fn copy_blob_from(&self, from: &Path, expected: &Descriptor) -> Result<u64> {
+    pub(crate) fn copy_blob_from(&self, from: &Path, expected: &Descriptor) -> Result<u64> {
         let mut input = match fs::File::open(from) {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {

@@ -138,6 +138,13 @@ pub struct ModelStatus {
     pub loaded_at: Option<String>,
     /// Admission plus engine start time.
     pub load_duration_ms: Option<u64>,
+    /// Estimated progress of a load in `[0, 1]` while `state` is `loading`, `None` otherwise.
+    /// llama-server reports no load progress, so this is time-based: 0 while admission waits,
+    /// then the elapsed engine start time against the weights size at
+    /// [`crate::LOAD_BYTES_PER_SECOND`], capped at 0.95 until the engine is ready.
+    pub load_progress: Option<f32>,
+    /// Executable of the engine build running the model, once started.
+    pub executable: Option<String>,
 }
 
 /// Everything the status views need, taken at one moment.

@@ -29,6 +29,20 @@ type HandleFn = unsafe extern "C" fn(c_uint, *mut *mut c_void) -> c_int;
 type NameFn = unsafe extern "C" fn(*mut c_void, *mut c_char, c_uint) -> c_int;
 type MemoryFn = unsafe extern "C" fn(*mut c_void, *mut NvmlMemory) -> c_int;
 type CapabilityFn = unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int) -> c_int;
+type UtilizationFn = unsafe extern "C" fn(*mut c_void, *mut NvmlUtilization) -> c_int;
+type TemperatureFn = unsafe extern "C" fn(*mut c_void, c_uint, *mut c_uint) -> c_int;
+
+/// `nvmlUtilization_t`: percent of time over the last sample period the GPU (kernels) and
+/// its memory controller were busy.
+#[repr(C)]
+#[derive(Default)]
+struct NvmlUtilization {
+    gpu: c_uint,
+    memory: c_uint,
+}
+
+/// `NVML_TEMPERATURE_GPU`.
+const NVML_TEMPERATURE_GPU: c_uint = 0;
 
 /// Splits NVML's packed CUDA driver version (`12040`) into `(12, 4)`.
 pub(crate) fn split_cuda_version(packed: i32) -> (u32, u32) {
@@ -155,6 +169,8 @@ pub(crate) struct Session {
     shutdown: ShutdownFn,
     memory_fn: MemoryFn,
     processes_fn: Option<ProcessesFn>,
+    utilization_fn: Option<UtilizationFn>,
+    temperature_fn: Option<TemperatureFn>,
     /// Device handles (`nvmlDevice_t`), kept as integers so the session is `Send + Sync`.
     devices: Vec<usize>,
     /// Keeps the symbols above valid; dropped after `Drop::drop` has called `nvmlShutdown`.
@@ -183,6 +199,14 @@ impl Session {
                 .get::<ProcessesFn>(b"nvmlDeviceGetComputeRunningProcesses_v3\0")
                 .ok()
                 .map(|s| *s);
+            let utilization_fn: Option<UtilizationFn> = lib
+                .get::<UtilizationFn>(b"nvmlDeviceGetUtilizationRates\0")
+                .ok()
+                .map(|s| *s);
+            let temperature_fn: Option<TemperatureFn> = lib
+                .get::<TemperatureFn>(b"nvmlDeviceGetTemperature\0")
+                .ok()
+                .map(|s| *s);
             if init() != 0 {
                 return None;
             }
@@ -204,6 +228,8 @@ impl Session {
                 shutdown,
                 memory_fn,
                 processes_fn,
+                utilization_fn,
+                temperature_fn,
                 devices,
                 _lib: lib,
             })
@@ -222,6 +248,28 @@ impl Session {
                 // `mem` matches `nvmlMemory_t`.
                 (unsafe { (self.memory_fn)(h as *mut c_void, &mut mem) } == 0)
                     .then_some((mem.total, mem.free))
+            })
+            .collect()
+    }
+
+    /// `(gpu busy %, memory busy %, temperature °C)` of every device, in index order; each
+    /// value is `None` when the device or driver does not report it.
+    #[allow(unsafe_code)]
+    pub(crate) fn loads(&self) -> Vec<(Option<u32>, Option<u32>, Option<u32>)> {
+        self.devices
+            .iter()
+            .map(|&h| {
+                let util = self.utilization_fn.and_then(|f| {
+                    let mut u = NvmlUtilization::default();
+                    // SAFETY: `h` is a live NVML handle; `u` matches `nvmlUtilization_t`.
+                    (unsafe { f(h as *mut c_void, &mut u) } == 0).then_some((u.gpu, u.memory))
+                });
+                let temp = self.temperature_fn.and_then(|f| {
+                    let mut t: c_uint = 0;
+                    // SAFETY: `h` is a live NVML handle; `t` receives one unsigned int.
+                    (unsafe { f(h as *mut c_void, NVML_TEMPERATURE_GPU, &mut t) } == 0).then_some(t)
+                });
+                (util.map(|u| u.0), util.map(|u| u.1), temp)
             })
             .collect()
     }

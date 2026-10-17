@@ -185,3 +185,152 @@ async fn runtime_status_and_unauthorized_events() {
     let err = c.events().await.err().unwrap();
     assert!(matches!(err, ClientError::Api { status: 401, .. }), "{err}");
 }
+
+/// ALK-US-0099: library tags and the load progress field of the snapshot.
+#[tokio::test]
+async fn ollama_tags_and_load_progress() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/ollama/tags"))
+        .and(wiremock::matchers::query_param("name", "smollm2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"name": "smollm2", "tags": [
+            {"name": "smollm2:135m", "tag": "135m", "digest": "9077fe9d2ae1", "size": "271MB",
+             "size_bytes": 271000000u64, "context": "8K", "inputs": ["text"], "quantization": null}
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/ps"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"models": [
+            {"name": "m", "state": "loading", "load_progress": 0.4, "executable": "/e/llama-server"}
+        ]})))
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    let tags = c.ollama_tags("smollm2").await.unwrap();
+    assert_eq!(tags[0].size_bytes, Some(271_000_000));
+    assert_eq!(tags[0].context.as_deref(), Some("8K"));
+    let ps = c.runtime_status().await.unwrap();
+    assert_eq!(ps.models[0].load_progress, Some(0.4));
+    assert_eq!(ps.models[0].executable.as_deref(), Some("/e/llama-server"));
+}
+
+/// ALK-US-0107: job log tail, recipe reload and engine overrides.
+#[tokio::test]
+async fn job_log_reload_and_engine_override() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/jobs/job_1/log"))
+        .and(wiremock::matchers::query_param("lines", "5"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"id": "job_1", "lines": ["building", "ninja: [2/2]"], "log_path": "/e/.logs/x.log"}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/alkahest/v1/engines/reload"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"variants": 9, "issues": []})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/alkahest/v1/engines/llama-cpp/override"))
+        .and(body_partial_json(json!({"extra_args": ["--mlock"]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "engine": "llama-cpp", "running": {"path": null, "extra_args": []},
+            "saved": {"path": null, "extra_args": ["--mlock"]}, "restart_required": true})))
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    let log = c.job_log("job_1", Some(5)).await.unwrap();
+    assert_eq!(log.lines.last().map(String::as_str), Some("ninja: [2/2]"));
+    assert_eq!(c.reload_recipes().await.unwrap()["variants"], 9);
+    let doc = c
+        .set_engine_override(
+            "llama-cpp",
+            &alkahest_client::EngineOverride {
+                path: None,
+                extra_args: vec!["--mlock".into()],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(doc.restart_required);
+    assert_eq!(doc.saved.extra_args, ["--mlock"]);
+}
+
+/// ALK-US-0098: request feed, utilisation, kill and `request` events.
+#[tokio::test]
+async fn monitor_feed_utilization_and_kill() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/requests"))
+        .and(wiremock::matchers::query_param("last", "60s"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"requests": [
+                {"id": 1, "at": "2026-10-17T07:00:00Z", "method": "POST", "route": "/api/chat",
+                 "family": "ollama", "model": "llama3.2", "caller": "key", "key_id": "k1",
+                 "key_name": "laptop", "prompt_tokens": 6, "completion_tokens": 2, "status": 200,
+                 "duration_ms": 30, "aborted": false}
+            ]})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/utilization"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "cpu": {"usage_percent": 12.5, "logical_cores": 24, "physical_cores": 12},
+            "gpus": [{"index": 0, "vendor": "nvidia", "gpu_percent": 40, "memory_percent": 10, "temperature_c": 61}],
+            "models": [{"name": "llama3.2", "pid": 7, "cpu_percent": 95.0}]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/alkahest/v1/models/hf.co%2Fa%2Fb%3AQ4/kill"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "killed"})))
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    let rows = c.recent_requests(Some("60s"), None).await.unwrap();
+    assert_eq!(rows[0].key_name.as_deref(), Some("laptop"));
+    assert_eq!(rows[0].completion_tokens, 2);
+    let u = c.utilization().await.unwrap();
+    assert_eq!(u.gpus[0].temperature_c, Some(61));
+    assert_eq!(u.models[0].cpu_percent, Some(95.0));
+    c.kill_model("hf.co/a/b:Q4").await.unwrap();
+    let ev = alkahest_client::ServerEvent {
+        event: "request".into(),
+        data: r#"{"id": 3, "route": "/v1/messages", "status": 200}"#.into(),
+    };
+    assert_eq!(ev.request().unwrap().unwrap().route, "/v1/messages");
+    assert!(ev.status().is_none());
+}
+
+/// ALK-US-0104: remote quant estimate.
+#[tokio::test]
+async fn hf_estimate_sends_the_quant_and_overrides() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/hf/estimate"))
+        .and(wiremock::matchers::query_param("repo", "org/tiny"))
+        .and(wiremock::matchers::query_param("quant", "Q4_K_M"))
+        .and(wiremock::matchers::query_param("context_length", "8192"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "model": "hf.co/org/tiny:Q4_K_M", "fits": true, "download_bytes": 9600,
+            "estimate": {"ram_bytes": 1000, "vram_bytes": 0}})))
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    let v = c
+        .hf_estimate(
+            alkahest_client::HfQuant {
+                repo: "org/tiny",
+                quant: Some("Q4_K_M"),
+                ..Default::default()
+            },
+            &[("context_length", "8192".into())],
+        )
+        .await
+        .unwrap();
+    assert_eq!(v["fits"], true);
+}

@@ -30,6 +30,9 @@ pub enum Piece {
         content: String,
         /// Reasoning ("thinking") text.
         thinking: String,
+        /// Ollama-shaped log probabilities of the tokens of this piece (`{token, logprob,
+        /// bytes, top_logprobs}`), empty unless the request asked for them.
+        logprobs: Vec<Value>,
     },
     /// Complete tool calls in OpenAI shape (`{id, type, function: {name, arguments}}`, the
     /// arguments a JSON string), emitted once when the engine finished them.
@@ -97,6 +100,9 @@ pub async fn acquire(
         return Err(HttpError::bad_request("model is required"));
     }
     service::check_model_access(state, ctx, model).await?;
+    if let Some(entry) = crate::feed::current() {
+        entry.set_model(model);
+    }
     let scheduler: Scheduler = service::scheduler(state)?;
     let started = Instant::now();
     let lease = scheduler
@@ -201,10 +207,17 @@ pub fn chat_pieces(
                     .get("reasoning_content")
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                if !content.is_empty() || !thinking.is_empty() {
+                let logprobs = choice
+                    .get("logprobs")
+                    .and_then(|l| l.get("content"))
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().map(ollama_logprob).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                if !content.is_empty() || !thinking.is_empty() || !logprobs.is_empty() {
                     yield Ok(Piece::Text {
                         content: content.to_string(),
                         thinking: thinking.to_string(),
+                        logprobs,
                     });
                 }
                 if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
@@ -260,8 +273,17 @@ pub fn completion_pieces(
                 Some(Ok(SseItem::Data(v))) => v,
             };
             let content = ev.get("content").and_then(Value::as_str).unwrap_or("");
-            if !content.is_empty() {
-                yield Ok(Piece::Text { content: content.to_string(), thinking: String::new() });
+            let logprobs = ev
+                .get("completion_probabilities")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().map(ollama_logprob).collect::<Vec<_>>())
+                .unwrap_or_default();
+            if !content.is_empty() || !logprobs.is_empty() {
+                yield Ok(Piece::Text {
+                    content: content.to_string(),
+                    thinking: String::new(),
+                    logprobs,
+                });
             }
             if let Some(t) = Timings::from_payload(&ev) {
                 finish.timings = Some(t);
@@ -311,6 +333,60 @@ pub fn ollama_tool_call(index: usize, call: &Value) -> Value {
     out
 }
 
+/// One engine token probability entry in Ollama's `Logprob` shape (`{token, logprob, bytes,
+/// top_logprobs: [{token, logprob, bytes}]}`).
+///
+/// Accepts the OpenAI `logprobs.content[]` entries of llama-server's chat stream and the
+/// `completion_probabilities[]` entries of its native `/completion` / `/infill` streams, in
+/// both the current shape (`token`, `logprob`, `top_logprobs`) and the pre-2025 one
+/// (`content`, `probs: [{tok_str, prob}]`), whose probabilities are turned into natural logs.
+pub fn ollama_logprob(entry: &Value) -> Value {
+    fn token(e: &Value) -> Value {
+        let text = e
+            .get("token")
+            .or_else(|| e.get("tok_str"))
+            .or_else(|| e.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let logprob = e.get("logprob").and_then(Value::as_f64).or_else(|| {
+            e.get("prob")
+                .and_then(Value::as_f64)
+                .map(|p| if p > 0.0 { p.ln() } else { f64::NEG_INFINITY })
+        });
+        // JSON has no -inf: clamp to the most negative finite value, as OpenAI does with -9999.
+        let logprob = logprob.filter(|l| l.is_finite()).unwrap_or(-9999.0);
+        let mut out = json!({"token": text, "logprob": logprob});
+        if let Some(b) = e
+            .get("bytes")
+            .filter(|b| b.as_array().is_some_and(|a| !a.is_empty()))
+        {
+            out["bytes"] = b.clone();
+        }
+        out
+    }
+    let mut out = token(entry);
+    let top = entry
+        .get("top_logprobs")
+        .or_else(|| entry.get("top_probs"))
+        .or_else(|| entry.get("probs"))
+        .and_then(Value::as_array);
+    if let Some(top) = top.filter(|t| !t.is_empty()) {
+        let top: Vec<Value> = top.iter().map(token).collect();
+        // The legacy shape carries the chosen token's probability only inside `probs`.
+        if entry.get("logprob").is_none()
+            && entry.get("prob").is_none()
+            && let Some(chosen) = top
+                .iter()
+                .find(|t| t["token"] == out["token"])
+                .or_else(|| top.first())
+        {
+            out["logprob"] = chosen["logprob"].clone();
+        }
+        out["top_logprobs"] = Value::Array(top);
+    }
+    out
+}
+
 /// Ollama's final statistics (`total_duration` ... `eval_duration`, nanoseconds).
 pub fn ollama_stats(started: Instant, load: std::time::Duration, f: &Finish) -> Value {
     let ns = |d: std::time::Duration| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
@@ -348,5 +424,26 @@ mod tests {
         let o = ollama_tool_call(0, &calls[0]);
         assert_eq!(o["function"]["arguments"]["city"], "Paris");
         assert_eq!(o["id"], "c1");
+    }
+
+    #[test]
+    fn logprobs_translate_from_both_engine_shapes() {
+        let chat = json!({"token": "Hi", "logprob": -0.5, "bytes": [72, 105],
+            "top_logprobs": [{"token": "Hi", "logprob": -0.5, "bytes": [72, 105]},
+                             {"token": "Yo", "logprob": -1.5, "bytes": []}]});
+        let o = ollama_logprob(&chat);
+        assert_eq!(o["token"], "Hi");
+        assert_eq!(o["logprob"], -0.5);
+        assert_eq!(o["bytes"], json!([72, 105]));
+        assert_eq!(o["top_logprobs"][1]["token"], "Yo");
+        assert!(o["top_logprobs"][1].get("bytes").is_none());
+
+        let legacy = json!({"content": "a", "probs": [{"tok_str": "a", "prob": 1.0},
+                                                      {"tok_str": "b", "prob": 0.0}]});
+        let o = ollama_logprob(&legacy);
+        assert_eq!(o["token"], "a");
+        assert_eq!(o["logprob"], 0.0);
+        assert_eq!(o["top_logprobs"][0]["logprob"], 0.0);
+        assert_eq!(o["top_logprobs"][1]["logprob"], -9999.0);
     }
 }

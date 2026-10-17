@@ -2,9 +2,10 @@
 
 **Is it a drop-in replacement for Ollama?**
 For clients, mostly yes: the Ollama native API, the `ollama` CLI verbs and the Ollama store are
-supported, and the default port is 11435 so both can run at once. Not supported: `/api/create`
-from a Modelfile (501) and `/api/blobs`. Models can be built by copying and configuring them
-(`alkahest cp`, `alkahest config model`).
+supported, and the default port is 11435 so both can run at once. `ollama create` works for a
+Modelfile subset (`FROM` a model or a GGUF file, `PARAMETER`, `TEMPLATE`, `SYSTEM`, `LICENSE`);
+adapters, seed messages and quantisation are not supported. Models can also be built by copying
+and configuring them (`alkahest cp`, `alkahest config model`).
 
 **Does it send data anywhere?**
 No telemetry. It connects to the Ollama registry, Hugging Face and GitHub (engine archives) only

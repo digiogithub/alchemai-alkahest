@@ -28,6 +28,7 @@ pub mod auth;
 pub mod decisions;
 pub mod dialect;
 pub mod error;
+pub mod feed;
 pub mod generation;
 pub mod imagegen;
 pub mod images;
@@ -46,6 +47,7 @@ pub mod service;
 pub mod shutdown;
 pub mod state;
 pub mod tls;
+pub mod tool_prefill;
 pub mod upstream;
 
 pub use service::{HttpError, UpstreamClient};

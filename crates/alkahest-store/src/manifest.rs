@@ -55,6 +55,111 @@ pub mod media_type {
     /// Alkahest extension: per-model configuration (engine, context, overrides). Its schema
     /// belongs to the per-model configuration story; the store treats it as opaque JSON.
     pub const ALKAHEST_CONFIG: &str = "application/vnd.alkahest.config.v1+json";
+    /// Alkahest extension: the VAE of a multi-file diffusion model (Flux, SD3, Wan).
+    pub const DIFFUSION_VAE: &str = "application/vnd.alkahest.diffusion.vae.v1";
+    /// Alkahest extension: the CLIP-L text encoder of a diffusion model.
+    pub const DIFFUSION_CLIP_L: &str = "application/vnd.alkahest.diffusion.clip_l.v1";
+    /// Alkahest extension: the CLIP-G text encoder of a diffusion model (SD3).
+    pub const DIFFUSION_CLIP_G: &str = "application/vnd.alkahest.diffusion.clip_g.v1";
+    /// Alkahest extension: the T5-XXL (or UMT5) text encoder of a diffusion model.
+    pub const DIFFUSION_T5XXL: &str = "application/vnd.alkahest.diffusion.t5xxl.v1";
+    /// Alkahest extension: the language-model text encoder of a diffusion model (Qwen-Image,
+    /// Z-Image).
+    pub const DIFFUSION_LLM: &str = "application/vnd.alkahest.diffusion.llm.v1";
+}
+
+/// A component file of a multi-file diffusion model, stored as its own layer next to the
+/// diffusion weights (the [`LayerKind::Model`] layer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DiffusionComponent {
+    /// Autoencoder (`--vae`).
+    Vae,
+    /// CLIP-L text encoder (`--clip_l`).
+    ClipL,
+    /// CLIP-G text encoder (`--clip_g`).
+    ClipG,
+    /// T5-XXL text encoder (`--t5xxl`).
+    T5xxl,
+    /// Language-model text encoder (`--llm`).
+    Llm,
+}
+
+impl DiffusionComponent {
+    /// Every component, in the order engines take them.
+    pub const ALL: [DiffusionComponent; 5] = [
+        DiffusionComponent::Vae,
+        DiffusionComponent::ClipL,
+        DiffusionComponent::ClipG,
+        DiffusionComponent::T5xxl,
+        DiffusionComponent::Llm,
+    ];
+
+    /// Layer media type.
+    pub fn media_type(self) -> &'static str {
+        match self {
+            DiffusionComponent::Vae => media_type::DIFFUSION_VAE,
+            DiffusionComponent::ClipL => media_type::DIFFUSION_CLIP_L,
+            DiffusionComponent::ClipG => media_type::DIFFUSION_CLIP_G,
+            DiffusionComponent::T5xxl => media_type::DIFFUSION_T5XXL,
+            DiffusionComponent::Llm => media_type::DIFFUSION_LLM,
+        }
+    }
+
+    /// Stable id (`vae`, `clip_l`, `clip_g`, `t5xxl`, `llm`), also the stable-diffusion.cpp
+    /// flag name without dashes.
+    pub fn id(self) -> &'static str {
+        match self {
+            DiffusionComponent::Vae => "vae",
+            DiffusionComponent::ClipL => "clip_l",
+            DiffusionComponent::ClipG => "clip_g",
+            DiffusionComponent::T5xxl => "t5xxl",
+            DiffusionComponent::Llm => "llm",
+        }
+    }
+
+    /// The component a layer media type stores, if any.
+    pub fn from_media_type(mt: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.media_type() == mt)
+    }
+
+    /// Parses an id (`vae`, `clip_l`, `clip-l`, `t5xxl`, `t5`, `llm`).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+            "vae" | "ae" => Some(Self::Vae),
+            "clip_l" => Some(Self::ClipL),
+            "clip_g" => Some(Self::ClipG),
+            "t5xxl" | "t5" | "umt5" | "umt5xxl" => Some(Self::T5xxl),
+            "llm" => Some(Self::Llm),
+            _ => None,
+        }
+    }
+
+    /// Guesses the component from a file name (`ae.safetensors`, `clip_l.safetensors`,
+    /// `t5xxl_fp16.safetensors`, `umt5-xxl-encoder-Q8_0.gguf`, `qwen_3_4b.safetensors` is not
+    /// guessed: name it explicitly). `None` for the diffusion model itself.
+    pub fn guess_from_file_name(name: &str) -> Option<Self> {
+        let base = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+        let stem = base.split('.').next().unwrap_or(&base);
+        if stem == "ae" || stem.contains("vae") {
+            Some(Self::Vae)
+        } else if stem.contains("clip_l") || stem.contains("clip-l") || stem == "clip_l" {
+            Some(Self::ClipL)
+        } else if stem.contains("clip_g") || stem.contains("clip-g") {
+            Some(Self::ClipG)
+        } else if stem.contains("t5") {
+            Some(Self::T5xxl)
+        } else if stem.starts_with("llm") || stem.contains("text_encoder") {
+            Some(Self::Llm)
+        } else {
+            None
+        }
+    }
+
+    /// Whether the component is a text encoder (models with one ship a bare diffusion model,
+    /// loaded with `--diffusion-model` rather than as a full checkpoint).
+    pub fn is_text_encoder(self) -> bool {
+        !matches!(self, DiffusionComponent::Vae)
+    }
 }
 
 /// What a layer holds, decoded from its media type.

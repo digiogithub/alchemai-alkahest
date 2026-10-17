@@ -49,6 +49,36 @@ impl AmdSysfs {
     }
 }
 
+impl AmdSysfs {
+    /// `(card index, busy %, temperature °C)` of every AMD GPU: `gpu_busy_percent` and the
+    /// first hwmon `temp1_input` (millidegrees) of the device, each `None` when absent.
+    pub fn loads(&self) -> Vec<(u32, Option<u32>, Option<u32>)> {
+        self.gpus()
+            .iter()
+            .map(|g| {
+                let dev = self
+                    .drm_root
+                    .join(format!("card{}", g.index))
+                    .join("device");
+                let read = |p: &Path| {
+                    std::fs::read_to_string(p)
+                        .ok()
+                        .and_then(|s| parse_sysfs_u64(&s))
+                };
+                let busy = read(&dev.join("gpu_busy_percent")).and_then(|v| u32::try_from(v).ok());
+                let temp = std::fs::read_dir(dev.join("hwmon"))
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .find_map(|h| read(&h.path().join("temp1_input")))
+                    .and_then(|m| u32::try_from(m / 1000).ok());
+                (g.index, busy, temp)
+            })
+            .collect()
+    }
+}
+
 fn read_card(index: u32, dev: &Path) -> Option<GpuInfo> {
     let vendor = parse_sysfs_u64(&std::fs::read_to_string(dev.join("vendor")).ok()?)?;
     if vendor != AMD_VENDOR_ID {

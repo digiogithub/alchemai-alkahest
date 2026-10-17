@@ -162,6 +162,7 @@ async fn proxy(
     body.insert("model".into(), json!(lease.model()));
     if endpoint == Endpoint::Chat {
         inject_model_system(state, &model, &mut body).await;
+        crate::tool_prefill::apply(state, &model, &lease, &mut body).await;
     }
     apply_sampling(&mut body, lease.settings(), LimitField::MaxTokens);
     let include_usage = body

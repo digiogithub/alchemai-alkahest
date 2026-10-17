@@ -177,6 +177,7 @@ async fn create_inner(
     let mut body = translated.params.clone();
     body.insert("model".into(), json!(lease.model()));
     body.insert("messages".into(), Value::Array(messages));
+    crate::tool_prefill::apply(state, &model, &lease, &mut body).await;
     apply_sampling(&mut body, lease.settings(), LimitField::MaxTokens);
     body.insert("stream".into(), json!(true));
     body.insert("stream_options".into(), json!({"include_usage": true}));

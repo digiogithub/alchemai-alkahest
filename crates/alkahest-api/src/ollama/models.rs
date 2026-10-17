@@ -1,5 +1,5 @@
 //! Model management: `/api/tags`, `/api/show`, `/api/ps`, `/api/pull`, `/api/delete`,
-//! `/api/copy`, `/api/create`.
+//! `/api/copy`.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -439,16 +439,4 @@ pub(super) async fn copy(State(state): State<AppState>, body: Bytes) -> Response
     }
     .await;
     respond(&state, Family::Ollama, r)
-}
-
-/// `POST /api/create`: not implemented in v1 (models come from `pull` and `cp`).
-pub(super) async fn create(State(state): State<AppState>) -> Response {
-    respond(
-        &state,
-        Family::Ollama,
-        Err(HttpError::new(
-            ErrorKind::NotImplemented,
-            "creating models is not supported; use `alkahest pull` or `alkahest cp`",
-        )),
-    )
 }

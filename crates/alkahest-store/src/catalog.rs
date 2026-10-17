@@ -16,6 +16,8 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+use crate::create::{CreateBase, CreateLayers, CreateReport};
+use crate::digest::Digest;
 use crate::error::{Result, StoreError};
 use crate::local::AlkahestStore;
 use crate::manifest::{LayerKind, SourceInfo};
@@ -617,22 +619,7 @@ impl Catalog {
     /// is Ollama's). `destination` is a plain name (`my-llama`, `team/llama:v2`); store
     /// prefixes and digests are not valid destinations.
     pub fn copy(&self, source: &str, destination: &str) -> Result<(ModelName, CopyReport)> {
-        let dst = match ScopedRef::from_str(destination)? {
-            ScopedRef {
-                origin: None,
-                reference: ModelRef::Name { name, digest: None },
-            } => name,
-            ScopedRef {
-                origin: None,
-                reference: ModelRef::HuggingFace(hf),
-            } => hf.to_model_name()?,
-            _ => {
-                return Err(StoreError::InvalidManifest {
-                    what: destination.to_owned(),
-                    reason: "the destination must be a plain model name".into(),
-                });
-            }
-        };
+        let dst = plain_destination(destination)?;
         let e = self.resolve(source)?;
         let src = self
             .source(e.entry.origin)
@@ -641,6 +628,43 @@ impl Catalog {
                 hint: String::new(),
             })?;
         let report = self.alkahest.copy_model(src, &e.entry, &dst)?;
+        Ok((dst, report))
+    }
+
+    /// `ollama create`: creates `destination` in the Alkahest store from `from` (a model
+    /// reference resolved in any store) or from `blob` (a GGUF blob already in the Alkahest
+    /// store), with the Modelfile `layers` on top. Exactly one of `from` and `blob` is used;
+    /// `blob` wins when both are given.
+    pub fn create(
+        &self,
+        destination: &str,
+        from: Option<&str>,
+        blob: Option<Digest>,
+        layers: &CreateLayers,
+    ) -> Result<(ModelName, CreateReport)> {
+        let dst = plain_destination(destination)?;
+        let report = match (blob, from) {
+            (Some(d), _) => self
+                .alkahest
+                .create_model(&dst, CreateBase::Blob(d), layers)?,
+            (None, Some(source)) => {
+                let e = self.resolve(source)?;
+                let src = self
+                    .source(e.entry.origin)
+                    .ok_or_else(|| StoreError::ModelNotFound {
+                        reference: source.to_owned(),
+                        hint: String::new(),
+                    })?;
+                self.alkahest
+                    .create_model(&dst, CreateBase::Model(src, &e.entry), layers)?
+            }
+            (None, None) => {
+                return Err(StoreError::InvalidManifest {
+                    what: destination.to_owned(),
+                    reason: "a model needs a base: FROM a model or a GGUF blob".into(),
+                });
+            }
+        };
         Ok((dst, report))
     }
 
@@ -751,4 +775,23 @@ fn rfc3339(t: SystemTime) -> String {
     OffsetDateTime::from(t)
         .format(&Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned())
+}
+
+/// A destination that must be a plain model name (`my-llama`, `team/llama:v2`); store
+/// prefixes and digests are refused.
+fn plain_destination(destination: &str) -> Result<ModelName> {
+    match ScopedRef::from_str(destination)? {
+        ScopedRef {
+            origin: None,
+            reference: ModelRef::Name { name, digest: None },
+        } => Ok(name),
+        ScopedRef {
+            origin: None,
+            reference: ModelRef::HuggingFace(hf),
+        } => Ok(hf.to_model_name()?),
+        _ => Err(StoreError::InvalidManifest {
+            what: destination.to_owned(),
+            reason: "the destination must be a plain model name".into(),
+        }),
+    }
 }

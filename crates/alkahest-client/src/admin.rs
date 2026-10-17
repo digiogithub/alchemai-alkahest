@@ -433,6 +433,10 @@ pub struct EngineVariant {
     pub notes: String,
     /// Executable of an installed copy.
     pub path: Option<String>,
+    /// Shipped with the binary; cannot be removed.
+    pub bundled: bool,
+    /// Size of the prebuilt archive for the server's platform, when known.
+    pub download_bytes: Option<u64>,
 }
 
 /// `GET /alkahest/v1/engines`.

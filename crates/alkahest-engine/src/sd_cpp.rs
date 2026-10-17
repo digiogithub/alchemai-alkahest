@@ -6,15 +6,20 @@
 //! | Alkahest | sd-server |
 //! |---|---|
 //! | model file | `-m` / `--model` (a full checkpoint: GGUF, safetensors or ckpt) |
+//! | model file of a multi-file model with a text encoder | `--diffusion-model` |
+//! | VAE / CLIP-L / CLIP-G / T5-XXL / LLM component layers | `--vae`, `--clip_l`, `--clip_g`, `--t5xxl`, `--llm` |
 //! | loopback host and port | `-l` / `--listen-ip`, `--listen-port` |
 //! | `req.threads` | `-t` / `--threads` (default: physical cores) |
 //! | `gpu_layers = 0` | `--backend cpu` |
 //! | `seed` | `-s` / `--seed` (default seed of requests that name none) |
 //!
 //! Models made of several files (Flux and SD3 need `--clip_l`, `--t5xxl` and `--vae` next to
-//! the diffusion model) get the extra components through the model's `extra_args`; Alkahest
-//! pulls and tracks only the main weights file. SD 1.x, 2.x and SDXL checkpoints are complete
-//! in one file.
+//! the diffusion model, Wan `--t5xxl` and `--vae`, Z-Image `--llm`) keep each component as a
+//! layer of their manifest (`application/vnd.alkahest.diffusion.*`, ALK-US-0100), created with
+//! `/api/create` from uploaded files; the flags come from those layers. With a text encoder
+//! among them the weights are a bare diffusion model (`--diffusion-model`); a VAE alone keeps
+//! `-m` (an SDXL checkpoint with a better VAE). SD 1.x, 2.x and SDXL checkpoints are complete
+//! in one file. Flags can still be added through the model's `extra_args`.
 //!
 //! The server answers `POST /v1/images/generations` (JSON `prompt`, `n`, `size`,
 //! `output_format`) with `{created, data: [{b64_json}]}`, and takes every other control
@@ -49,7 +54,16 @@ pub struct StableDiffusionCppEngine;
 impl StableDiffusionCppEngine {
     /// The `sd-server` arguments for `req`, before the configured extra arguments. Pure.
     pub fn model_args(req: &LaunchRequest) -> Vec<String> {
-        let mut a: Vec<String> = vec!["-m".into(), req.model_path.to_string_lossy().into_owned()];
+        let bare = req.components.iter().any(|(c, _)| c.is_text_encoder());
+        let model_flag = if bare { "--diffusion-model" } else { "-m" };
+        let mut a: Vec<String> = vec![
+            model_flag.into(),
+            req.model_path.to_string_lossy().into_owned(),
+        ];
+        for (component, path) in &req.components {
+            a.push(format!("--{}", component.id()));
+            a.push(path.to_string_lossy().into_owned());
+        }
         a.extend(["-l".into(), req.host.to_string()]);
         a.extend(["--listen-port".into(), req.port.to_string()]);
         if let Some(t) = req.threads.filter(|t| *t > 0) {
@@ -71,7 +85,7 @@ impl Engine for StableDiffusionCppEngine {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities::of(&[C::Image])
+        Capabilities::of(&[C::Image, C::Video])
     }
 
     fn formats(&self) -> &'static [ModelFormat] {

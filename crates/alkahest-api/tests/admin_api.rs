@@ -163,6 +163,8 @@ fn variant(id: &str, variant: &str, installed: bool) -> EngineVariant {
         cuda: None,
         notes: String::new(),
         path: installed.then(|| PathBuf::from("/e/llama-server")),
+        bundled: false,
+        download_bytes: Some(12_000_000),
     }
 }
 
@@ -213,6 +215,19 @@ impl EngineManager for FakeEngines {
         Ok((0..before - list.len())
             .map(|_| json!({"engine": engine}))
             .collect())
+    }
+    fn install_dirs(
+        &self,
+        engine: &str,
+        _version: Option<&str>,
+        variant: Option<&str>,
+    ) -> Vec<PathBuf> {
+        self.installed
+            .lock()
+            .iter()
+            .filter(|e| e.id == engine && variant.is_none_or(|v| v == e.variant))
+            .map(|_| PathBuf::from("/e"))
+            .collect()
     }
 }
 
@@ -952,6 +967,7 @@ async fn engine_log_tails_and_names_cannot_escape() {
 const MODEL_INFO: &str = include_str!("../../alkahest-hf/tests/fixtures/model_info.json");
 const SEARCH: &str = include_str!("../../alkahest-hf/tests/fixtures/search.json");
 const LIBRARY: &str = include_str!("../../alkahest-ollama/tests/fixtures/search_qwen.html");
+const TAGS: &str = include_str!("../../alkahest-ollama/tests/fixtures/tags_smollm2.html");
 
 #[tokio::test]
 async fn hf_and_ollama_discovery_go_through_the_server() {
@@ -976,6 +992,11 @@ async fn hf_and_ollama_discovery_go_through_the_server() {
     Mock::given(method("GET"))
         .and(path("/search"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(LIBRARY, "text/html"))
+        .mount(&hub)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/library/smollm2/tags"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(TAGS, "text/html"))
         .mount(&hub)
         .await;
     let mut config = Config::default();
@@ -1050,6 +1071,21 @@ async fn hf_and_ollama_discovery_go_through_the_server() {
     let models = doc["models"].as_array().unwrap();
     assert!(!models.is_empty() && models.len() <= 3);
     assert!(models[0]["name"].is_string());
+
+    // ALK-US-0099: tags of one library model.
+    let (status, doc) = send(&h, "GET", "/alkahest/v1/ollama/tags?name=smollm2", None).await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    let tags = doc["tags"].as_array().unwrap();
+    assert_eq!(tags.len(), 4);
+    assert_eq!(tags[2]["name"], "smollm2:135m-instruct-q4_K_M");
+    assert_eq!(tags[2]["quantization"], "Q4_K_M");
+    assert_eq!(tags[2]["size_bytes"], 105_000_000);
+    let (status, _) = send(&h, "GET", "/alkahest/v1/ollama/tags?name=nothing", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = send(&h, "GET", "/alkahest/v1/ollama/tags?name=..%2Fx", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = send(&h, "GET", "/alkahest/v1/ollama/tags", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -1135,4 +1171,254 @@ async fn tls_is_toggled_in_the_network_settings() {
     assert!(warnings.contains("certs generate"), "{warnings}");
     let file = std::fs::read_to_string(a.tmp.path().join("config.toml")).unwrap();
     assert!(Config::from_toml_str(&file).unwrap().server.tls.enabled);
+}
+
+/// ALK-US-0099: removing an engine build a loaded model runs on is refused (409) until the
+/// model is unloaded.
+#[tokio::test]
+async fn engine_removal_is_refused_while_a_loaded_model_uses_it() {
+    let a = admin_ctx(Config::default(), false);
+    let h = harness(&a).await;
+    let (status, doc) = send(
+        &h,
+        "POST",
+        "/alkahest/v1/engines/install",
+        Some(json!({"engine": "llama-cpp", "variant": "cpu"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{doc}");
+    wait_job(&h, doc["job"]["id"].as_str().unwrap()).await;
+    // Load the model (its fake engine runs `/e/llama-server`).
+    let (status, _) = send(
+        &h,
+        "POST",
+        "/api/generate",
+        Some(json!({"model": "llama3.2"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, ps) = send(&h, "GET", "/alkahest/v1/ps", None).await;
+    assert_eq!(ps["models"][0]["executable"], "/e/llama-server");
+    let (status, doc) = send(
+        &h,
+        "DELETE",
+        "/alkahest/v1/engines/llama-cpp?variant=cpu",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{doc}");
+    assert!(doc["error"].as_str().unwrap().contains("llama3.2"), "{doc}");
+    let (status, _) = send(
+        &h,
+        "POST",
+        "/alkahest/v1/unload",
+        Some(json!({"all": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, doc) = send(
+        &h,
+        "DELETE",
+        "/alkahest/v1/engines/llama-cpp?variant=cpu",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+}
+
+/// ALK-US-0107: install job log tail, recipe reload, per-engine override saved to the config
+/// file (applied on restart), listing flags.
+#[tokio::test]
+async fn engine_admin_log_reload_and_override() {
+    let a = admin_ctx(Config::default(), false);
+    let h = harness(&a).await;
+    let (status, doc) = send(
+        &h,
+        "POST",
+        "/alkahest/v1/engines/install",
+        Some(json!({"engine": "llama-cpp", "variant": "cpu"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{doc}");
+    let id = doc["job"]["id"].as_str().unwrap().to_string();
+    wait_job(&h, &id).await;
+    let (status, log) = send(
+        &h,
+        "GET",
+        &format!("/alkahest/v1/jobs/{id}/log?lines=10"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{log}");
+    let lines: Vec<&str> = log["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_str().unwrap())
+        .collect();
+    assert_eq!(lines.first(), Some(&"downloading"), "{log}");
+    assert_eq!(lines.last(), Some(&"done"), "{log}");
+    assert!(lines.iter().any(|l| l.starts_with("installed ")), "{log}");
+    let (status, _) = send(&h, "GET", "/alkahest/v1/jobs/job_nope/log", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (_, listing) = send(&h, "GET", "/alkahest/v1/engines", None).await;
+    let row = &listing["engines"][0];
+    assert_eq!(row["bundled"], false);
+    assert_eq!(row["download_bytes"], 12_000_000);
+
+    let (status, doc) = send(&h, "POST", "/alkahest/v1/engines/reload", None).await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert!(doc["issues"].as_array().unwrap().is_empty());
+
+    let (status, doc) = send(&h, "GET", "/alkahest/v1/engines/llama.cpp/override", None).await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["engine"], "llama-cpp");
+    assert_eq!(doc["restart_required"], false);
+    let (status, doc) = send(
+        &h,
+        "PUT",
+        "/alkahest/v1/engines/llama-cpp/override",
+        Some(json!({"path": "/opt/llama/llama-server", "extra_args": ["--mlock"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["saved"]["path"], "/opt/llama/llama-server");
+    assert_eq!(doc["saved"]["extra_args"], json!(["--mlock"]));
+    assert_eq!(doc["running"]["path"], Value::Null);
+    assert_eq!(doc["restart_required"], true);
+    let text = std::fs::read_to_string(a.tmp.path().join("config.toml")).unwrap();
+    let c = Config::from_toml_str(&text).unwrap();
+    assert_eq!(c.engines.overrides["llama-cpp"].extra_args, ["--mlock"]);
+    for bad in [
+        json!({"path": "relative/llama-server"}),
+        json!({"unknown": 1}),
+    ] {
+        let (status, _) = send(
+            &h,
+            "PUT",
+            "/alkahest/v1/engines/llama-cpp/override",
+            Some(bad),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    let (status, _) = send(&h, "GET", "/alkahest/v1/engines/nope/override", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Both empty removes it.
+    let (_, doc) = send(
+        &h,
+        "PUT",
+        "/alkahest/v1/engines/llama-cpp/override",
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(doc["restart_required"], false, "{doc}");
+}
+
+/// A tiny GGUF v3 header with the metadata the memory profile needs and one block tensor.
+fn profile_gguf() -> Vec<u8> {
+    fn put_str(o: &mut Vec<u8>, s: &str) {
+        o.extend((s.len() as u64).to_le_bytes());
+        o.extend(s.as_bytes());
+    }
+    let u32s = [
+        ("llama.block_count", 1u32),
+        ("llama.context_length", 2048),
+        ("llama.embedding_length", 64),
+        ("llama.attention.head_count", 4),
+        ("llama.attention.head_count_kv", 4),
+    ];
+    let mut o = b"GGUF".to_vec();
+    o.extend(3u32.to_le_bytes());
+    o.extend(1u64.to_le_bytes());
+    o.extend(((u32s.len() + 1) as u64).to_le_bytes());
+    put_str(&mut o, "general.architecture");
+    o.extend(8u32.to_le_bytes());
+    put_str(&mut o, "llama");
+    for (k, v) in u32s {
+        put_str(&mut o, k);
+        o.extend(4u32.to_le_bytes());
+        o.extend(v.to_le_bytes());
+    }
+    put_str(&mut o, "blk.0.attn_q.weight");
+    o.extend(2u32.to_le_bytes());
+    o.extend(256u64.to_le_bytes());
+    o.extend(64u64.to_le_bytes());
+    o.extend(12u32.to_le_bytes());
+    o.extend(0u64.to_le_bytes());
+    while !o.len().is_multiple_of(32) {
+        o.push(0);
+    }
+    o.extend(vec![0u8; 144 * 64]);
+    o
+}
+
+/// ALK-US-0104: memory estimate of a Hub quant before download (header read remotely).
+#[tokio::test]
+async fn hf_estimate_reads_the_remote_header() {
+    let hub = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/models/org/tiny"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "org/tiny", "sha": "abc",
+            "siblings": [
+                {"rfilename": "tiny-Q4_K_M.gguf", "size": 9600},
+                {"rfilename": "tiny-Q8_0.gguf", "size": 12000},
+                {"rfilename": "README.md", "size": 10}
+            ]
+        })))
+        .mount(&hub)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/org/tiny/resolve/main/tiny-Q4_K_M.gguf"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(profile_gguf()))
+        .mount(&hub)
+        .await;
+    let mut config = Config::default();
+    config.hf.endpoint = hub.uri();
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = AdminContext::builder(config, paths(tmp.path()), tmp.path().join("c.toml"))
+        .hf_token_store(Arc::new(MemTokens::default()))
+        .env(Arc::new(|_: &str| None))
+        .ollama_library("http://127.0.0.1:9")
+        .system(system())
+        .build();
+    let h = Harness::start_with(&[], ApiSettings::default(), move |b| b.service(ctx)).await;
+
+    let (status, doc) = send(
+        &h,
+        "GET",
+        "/alkahest/v1/hf/estimate?repo=org/tiny&quant=Q4_K_M&context_length=1024&kv_cache_type_k=q5_1&kv_cache_type_v=iq4_nl",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["model"], "hf.co/org/tiny:Q4_K_M");
+    assert_eq!(doc["context_length"], 1024);
+    assert_eq!(doc["files"], json!(["tiny-Q4_K_M.gguf"]));
+    assert_eq!(doc["download_bytes"], 9600);
+    assert!(doc["estimate"]["ram_bytes"].as_u64().unwrap() > 0, "{doc}");
+    assert_eq!(doc["fits"], true, "{doc}");
+    // By file name too.
+    let (status, doc) = send(
+        &h,
+        "GET",
+        "/alkahest/v1/hf/estimate?repo=org/tiny&file=tiny-Q4_K_M.gguf",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    for (q, want) in [
+        ("repo=org/tiny&quant=Q2_K", StatusCode::NOT_FOUND),
+        ("repo=org/tiny&file=nope.gguf", StatusCode::NOT_FOUND),
+        ("repo=../x", StatusCode::BAD_REQUEST),
+        (
+            "repo=org/tiny&quant=Q4_K_M&kv_cache_type_k=q3_0",
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        let (status, doc) = send(&h, "GET", &format!("/alkahest/v1/hf/estimate?{q}"), None).await;
+        assert_eq!(status, want, "{q}: {doc}");
+    }
 }

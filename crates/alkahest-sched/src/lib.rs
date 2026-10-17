@@ -30,6 +30,6 @@ pub use metrics::{
     ModelState, ModelStatus, Processor, SchedulerSnapshot, Usage, render_prometheus,
 };
 pub use scheduler::{
-    DEFAULT_CONTEXT_LENGTH, DEFAULT_LOAD_TIMEOUT, Lease, QueueStatus, Scheduler, SchedulerOptions,
-    StopReason, context_length, launch_request,
+    DEFAULT_CONTEXT_LENGTH, DEFAULT_LOAD_TIMEOUT, LOAD_BYTES_PER_SECOND, Lease, QueueStatus,
+    Scheduler, SchedulerOptions, StopReason, context_length, launch_request, load_progress,
 };

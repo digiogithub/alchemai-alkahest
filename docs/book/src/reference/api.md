@@ -20,18 +20,19 @@ server (`scripts/conformance.sh`).
 
 | Route | Notes |
 |---|---|
-| `POST /api/generate` | streaming (NDJSON) or `stream: false`; `system`, `template`, `raw`, `options`, `keep_alive`, `format` (`json` or a schema), `images`, `suffix` (fill-in-the-middle through the engine's infill) |
-| `POST /api/chat` | messages, `tools`, `think`, `format`, `options`, `keep_alive`; the model's own system prompt is prepended unless the conversation starts with one |
+| `POST /api/generate` | streaming (NDJSON) or `stream: false`; `system`, `template`, `raw`, `options`, `keep_alive`, `format` (`json` or a schema), `images`, `suffix` (fill-in-the-middle through the engine's infill), `logprobs` / `top_logprobs` |
+| `POST /api/chat` | messages, `tools`, `think`, `format`, `options`, `keep_alive`, `logprobs` / `top_logprobs`; the model's own system prompt is prepended unless the conversation starts with one |
 | `POST /api/embed`, `POST /api/embeddings` | batch (`input` array) and legacy single prompt |
 | `GET /api/tags` | local models |
 | `POST /api/show` | details, template, parameters, licence, capabilities |
 | `GET /api/ps` | loaded models with `expires_at` and `size_vram` |
 | `POST /api/pull` | streaming progress |
 | `POST /api/copy`, `DELETE /api/delete` | models of the Ollama store are read-only (403) |
-| `POST /api/create` | answers 501: build a model by copying and configuring (`alkahest config model`) |
+| `HEAD`, `POST /api/blobs/:digest` | upload a GGUF into the Alkahest store, verified against the digest (no body size limit) |
+| `POST /api/create` | from a model (`from`) or one uploaded GGUF (`files`; a diffusion model may list its components too: `ae`/`vae`, `clip_l`, `clip_g`, `t5xxl` files by name, or `llm:<file>`), with `template`, `system`, `parameters`, `license`, or a Modelfile with `FROM`, `PARAMETER`, `TEMPLATE`, `SYSTEM`, `LICENSE`; `ADAPTER`, `MESSAGE`, quantisation and safetensors imports answer 400 |
 | `GET /api/version`, `GET /` | version; `/` answers "Alkahest is running" |
 
-`pull`, `copy`, `create` and `delete` need the admin scope for remote callers.
+`pull`, `copy`, `create`, blob uploads and `delete` need the admin scope for remote callers.
 
 ## OpenAI-compatible API
 
@@ -115,11 +116,11 @@ Under `/alkahest/v1/`, described by an OpenAPI 3.1 document served at
 
 | Area | Routes |
 |---|---|
-| System | `GET info`, `GET ps`, `GET events` (server-sent events: scheduler and job updates), `POST unload` |
-| Models | `GET models`, `GET/DELETE models/{name}`, `POST copy`, `GET/PUT/DELETE models/{name}/settings`, `GET models/{name}/recommended`, `GET models/{name}/estimate` (memory estimate) |
-| Downloads | `POST/GET pulls`, `DELETE pulls/{id}`, `GET jobs`, `GET jobs/{id}`, `POST jobs/{id}/cancel`, `DELETE jobs/{id}` |
-| Discovery | `GET hf/search`, `GET hf/model`, `GET hf/files`, `GET/PUT/DELETE hf/token`, `GET ollama/search` |
-| Engines | `GET engines`, `POST engines/install`, `DELETE engines/{id}` |
+| System | `GET info`, `GET ps` (with an estimated `load_progress` while a model loads, CPU and GPU `utilization`, engine `cpu_percent`), `GET events` (server-sent events: scheduler, job and `request` updates), `POST unload`, `POST models/{name}/kill` (SIGKILL a hung engine), `GET requests` (recent inference requests: route, model, key, tokens, duration, status; never content), `GET utilization` |
+| Models | `GET models`, `GET/DELETE models/{name}`, `POST copy`, `GET/PUT/DELETE models/{name}/settings`, `GET models/{name}/recommended`, `GET models/{name}/estimate` (memory estimate; KV cache types f32, f16, bf16, q8_0, q5_1, q5_0, q4_1, q4_0, iq4_nl) |
+| Downloads | `POST/GET pulls`, `DELETE pulls/{id}`, `GET jobs`, `GET jobs/{id}`, `GET jobs/{id}/log` (output tail, source build log), `POST jobs/{id}/cancel`, `DELETE jobs/{id}` |
+| Discovery | `GET hf/search`, `GET hf/model`, `GET hf/files`, `GET hf/estimate` (memory estimate of a quant before download), `GET/PUT/DELETE hf/token`, `GET ollama/search`, `GET ollama/tags` (tags of a library model) |
+| Engines | `GET engines`, `POST engines/install`, `DELETE engines/{id}` (409 while a loaded model runs on the build), `POST engines/reload`, `GET/PUT engines/{id}/override` (executable path and extra arguments, applied on restart); listings carry `bundled` and `download_bytes` |
 | Keys | `GET keys`, `POST keys` (the secret is returned once), `DELETE keys/{id}` |
 | Settings | `GET/PUT settings/network`, `GET/PUT settings/server` |
 | Logs | `GET logs/engines`, `GET logs/engines/{name}`, `GET logs/server` |

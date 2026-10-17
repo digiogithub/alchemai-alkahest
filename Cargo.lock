@@ -222,6 +222,7 @@ dependencies = [
  "bytes",
  "futures",
  "hex",
+ "http-body",
  "hyper",
  "hyper-util",
  "parking_lot",
