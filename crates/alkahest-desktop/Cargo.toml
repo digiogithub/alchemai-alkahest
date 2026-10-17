@@ -17,7 +17,7 @@ default = []
 # The GPUI window. Off by default so `cargo build --workspace` (and every server-side story)
 # does not compile GPUI; `alkahest --features desktop` turns it on. Without it the crate only
 # holds the GPUI-free logic (connection state machine, server launcher, settings, tokens).
-gui = ["dep:gpui-kit"]
+gui = ["dep:gpui-kit", "dep:resvg", "dep:ksni", "dep:tray-icon"]
 # GPUI headless test contexts for the GUI unit tests (desktop CI job only).
 gui-test = ["gui", "gpui-kit/test-support"]
 
@@ -35,6 +35,15 @@ time.workspace = true
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
+
+# The tray icon is `design/brand/mark-tray.svg` rasterised at run time.
+resvg = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { workspace = true, optional = true }
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+tray-icon = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

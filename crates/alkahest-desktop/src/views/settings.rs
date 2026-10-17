@@ -86,6 +86,9 @@ pub struct SettingsView {
     url_input: Entity<InputState>,
     key_input: Entity<InputState>,
     pending_reload: bool,
+    /// The `alkahest` executable an autostart entry runs; `None` hides the toggle.
+    autostart_exe: Option<PathBuf>,
+    autostart: bool,
 }
 
 impl std::fmt::Debug for SettingsView {
@@ -107,6 +110,7 @@ impl SettingsView {
         settings_file: Option<PathBuf>,
         keyring: bool,
         env_key: bool,
+        autostart_exe: Option<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -192,6 +196,8 @@ impl SettingsView {
             url_input,
             key_input,
             pending_reload: false,
+            autostart: crate::autostart::is_enabled(&crate::autostart::process_env),
+            autostart_exe,
         }
     }
 
@@ -842,6 +848,51 @@ impl SettingsView {
         el
     }
 
+    fn toggle_autostart(&mut self, cx: &mut Context<Self>) {
+        let Some(exe) = &self.autostart_exe else {
+            return;
+        };
+        let on = !self.autostart;
+        match crate::autostart::set_enabled(on, exe, &crate::autostart::process_env) {
+            Ok(()) => self.autostart = on,
+            Err(e) => self.notice = Some((true, format!("Start at login: {e}"))),
+        }
+        cx.notify();
+    }
+
+    fn desktop_card(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
+        self.autostart_exe.as_ref()?;
+        let on = self.autostart;
+        Some(
+            card(p)
+                .child(div().type_style(text::TITLE).child("Desktop"))
+                .child(
+                    h_flex()
+                        .id("settings-autostart")
+                        .gap(px(space::S2))
+                        .items_center()
+                        .cursor_pointer()
+                        .child(checkbox("settings-autostart-box", on, p))
+                        .child(
+                            div()
+                                .type_style(text::SMALL)
+                                .child("Start Alkahest at login"),
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_autostart(cx))),
+                )
+                .child(
+                    div()
+                        .type_style(text::CAPTION)
+                        .text_color(c(p.text_muted))
+                        .child(
+                            "Opens this app at login. With a system tray, closing the window keeps \
+                             Alkahest in the tray; Quit is in the tray menu. The server itself \
+                             starts with its service (alkahest service install --user).",
+                        ),
+                ),
+        )
+    }
+
     fn appearance_card(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
         let current = Theme::get(cx).preference;
         let segs = [
@@ -1010,7 +1061,8 @@ impl Render for SettingsView {
             .flex_shrink_0()
             .gap(px(space::S4))
             .child(self.connection_card(p, cx))
-            .child(self.appearance_card(p, cx));
+            .child(self.appearance_card(p, cx))
+            .children(self.desktop_card(p, cx));
         if self.draft.is_some() {
             side = side
                 .child(self.logging_card(p, cx))

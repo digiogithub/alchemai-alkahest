@@ -16,6 +16,8 @@ use crate::launcher::is_local_url;
 use crate::nav::{Counter, NavCounters, Screen, ServiceCard, Tone, display_address};
 use crate::settings::{ApiKeyStore, DesktopSettings, KeyringKeyStore};
 use crate::theme::tokens::{Palette, radius, size, space, text};
+use crate::tokio_bridge;
+use crate::tray::{TrayAction, TrayModel};
 use crate::ui::input::{Input, InputState};
 use crate::ui::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FontWeight, Hsla, InteractiveElement,
@@ -56,6 +58,8 @@ pub struct Shell {
     ever_connected: bool,
     key_input: Entity<InputState>,
     follow: Option<Task<()>>,
+    /// The client of the current connection (tray actions).
+    client: Client,
 }
 
 impl std::fmt::Debug for Shell {
@@ -79,7 +83,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let screens = Self::build_screens(&options, client, window, cx);
+        let screens = Self::build_screens(&options, client.clone(), window, cx);
         let key_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("alk_\u{2026}")
@@ -97,6 +101,7 @@ impl Shell {
             ever_connected: false,
             key_input,
             follow: None,
+            client,
         }
     }
 
@@ -117,6 +122,7 @@ impl Shell {
                 options.settings_file.clone(),
                 !options.smoke_test,
                 options.api_key.is_some(),
+                options.serve_program.clone(),
                 window,
                 cx,
             )
@@ -214,6 +220,7 @@ impl Shell {
                 client,
             )) => {
                 self.commands = commands;
+                self.client = client.clone();
                 self.screens = Self::build_screens(&self.options, client, window, cx);
                 self.service = ServiceCard::connecting(&url);
                 self.card_action = None;
@@ -238,8 +245,50 @@ impl Shell {
         }
     }
 
+    /// Carries out a tray menu click (ALK-US-0073).
+    pub fn tray_action(&mut self, action: TrayAction, cx: &mut Context<Self>) {
+        match action {
+            TrayAction::StartServer => {
+                let _ = self.commands.send(Command::StartServer);
+            }
+            TrayAction::StopServer => {
+                // The server's pid (for a server no service unit manages) comes from the
+                // admin info route.
+                let client = self.client.clone();
+                let commands = self.commands.clone();
+                tokio_bridge::spawn(cx, async move {
+                    let pid = client.server_info(false).await.ok().map(|i| i.pid);
+                    let _ = commands.send(Command::StopServer { pid });
+                })
+                .detach();
+            }
+            TrayAction::StopAllModels => {
+                let client = self.client.clone();
+                tokio_bridge::spawn(cx, async move {
+                    if let Err(e) = client.unload_all().await {
+                        tracing::warn!("tray: stop all models failed: {e}");
+                    }
+                })
+                .detach();
+            }
+            TrayAction::Open | TrayAction::Quit => {}
+        }
+    }
+
     /// Shows a connection snapshot: service card, its button and the rail counters.
     pub fn apply(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
+        crate::app::update_tray(
+            TrayModel {
+                running: matches!(snapshot.state, ConnectionState::Connected(_)),
+                busy: matches!(
+                    snapshot.state,
+                    ConnectionState::Starting { .. } | ConnectionState::Stopping { .. }
+                ),
+                loaded: snapshot.counters().loaded.unwrap_or(0),
+                manages_server: snapshot.manages_server,
+            },
+            cx,
+        );
         let s = &self.screens;
         s.library.update(cx, |view, cx| view.apply(snapshot, cx));
         s.running.update(cx, |view, cx| view.apply(snapshot, cx));
