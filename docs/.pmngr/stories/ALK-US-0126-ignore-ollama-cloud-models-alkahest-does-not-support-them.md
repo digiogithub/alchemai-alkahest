@@ -2,7 +2,7 @@
 id: ALK-US-0126
 type: story
 title: "Ignore Ollama cloud models: Alkahest does not support them"
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0003
 milestone: ALK-M-0006
@@ -10,7 +10,8 @@ author: mcp
 labels: [store, ollama, bug]
 estimate: 2
 created: 2026-10-17T22:55:11Z
-updated: 2026-10-17T22:55:11Z
+updated: 2026-10-17T23:04:24Z
+started: 2026-10-17T23:04:24Z
 ---
 
 ## Description
