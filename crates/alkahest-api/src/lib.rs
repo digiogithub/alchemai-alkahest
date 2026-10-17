@@ -27,7 +27,9 @@ pub mod generation;
 pub mod keys;
 pub mod ollama;
 pub mod openai;
+pub mod pooled;
 pub mod pull;
+pub mod rerank;
 pub mod responses;
 pub mod router;
 pub mod sampling;
@@ -46,6 +48,7 @@ pub fn inference_routes() -> axum::Router<AppState> {
         .merge(openai::routes())
         .merge(anthropic::routes())
         .merge(responses::routes())
+        .merge(rerank::routes())
         .merge(decisions::routes())
         .merge(admin::routes())
 }

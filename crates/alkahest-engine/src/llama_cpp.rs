@@ -33,6 +33,13 @@ const ALL_LAYERS: i32 = 999;
 /// pool (ALK-US-0062).
 pub const DECISION_SLOTS: u32 = 16;
 
+/// Logical and physical batch size of embedding and rerank engines when the model has no
+/// configured context length. A pooled input must fit one micro-batch, and llama-server's
+/// default of 512 would refuse longer inputs that fit the context (llama.cpp clamps the batch
+/// to the context, so a larger value is safe). The API truncates inputs to
+/// `min(n_ctx, batch)` with the same number.
+pub const EMBED_BATCH_DEFAULT: u64 = 8192;
+
 /// Built-in chat templates of `llama-server` b11669 (`--chat-template` list in `--help`).
 pub const BUILTIN_TEMPLATES: &[&str] = &[
     "bailing",
@@ -255,10 +262,21 @@ impl LlamaCppEngine {
             a.extend(["-t".into(), t.to_string()]);
         }
 
+        // Pooled kinds: one input per micro-batch, so the batch must hold a whole input.
+        // Pooling itself comes from the GGUF (`<arch>.pooling_type`) except for rerank.
+        let batch = s
+            .context_length
+            .filter(|c| *c > 0)
+            .unwrap_or(EMBED_BATCH_DEFAULT)
+            .to_string();
         match req.kind {
-            ModelKind::Embeddings => a.push("--embeddings".into()),
+            ModelKind::Embeddings => {
+                a.push("--embeddings".into());
+                a.extend(["-b".into(), batch.clone(), "-ub".into(), batch]);
+            }
             ModelKind::Rerank => {
                 a.extend(["--reranking".into(), "--pooling".into(), "rank".into()]);
+                a.extend(["-b".into(), batch.clone(), "-ub".into(), batch]);
             }
             ModelKind::Decision => {
                 // One KV pool shared by the slots, and no prompt cache: scoring prompts are

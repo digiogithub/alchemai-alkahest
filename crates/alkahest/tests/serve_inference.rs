@@ -6,7 +6,8 @@
 //! The chat part (`/api/chat` and streamed `/v1/chat/completions`) uses
 //! `ALKAHEST_TEST_CHAT_MODEL`, default `qwen2.5-coder:0.5b` (set it empty to skip). Decision
 //! models such as `tev1:0.8b` refuse chat (ALK-US-0093) and are not valid chat models here;
-//! `ALKAHEST_TEST_EMBED_MODEL` additionally exercises `/api/embed` and `/v1/embeddings`.
+//! `ALKAHEST_TEST_EMBED_MODEL` additionally exercises `/api/embed` and `/v1/embeddings`,
+//! `ALKAHEST_TEST_RERANK_MODEL` `/v1/rerank`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::process::{Child, Command, Stdio};
@@ -180,6 +181,22 @@ async fn real_engine_answers_generate_chat_completions_and_embeddings() {
             v["data"][0]["embedding"].as_array().unwrap().len() > 8,
             "{v}"
         );
+        // Longer than llama-server's default 512-token batch: fits now (ALK-US-0055), and
+        // Ollama's default truncation keeps far longer inputs working.
+        let v = post(
+            base,
+            "/api/embed",
+            json!({"model": embed, "input": "word ".repeat(1500)}),
+        )
+        .await;
+        assert_eq!(v["embeddings"].as_array().unwrap().len(), 1, "{v}");
+        let v = post(
+            base,
+            "/api/embed",
+            json!({"model": embed, "input": "word ".repeat(20000)}),
+        )
+        .await;
+        assert_eq!(v["embeddings"].as_array().unwrap().len(), 1, "{v}");
     }
 
     // Scenarios ALK-SP-0004.R7 "ps" and R5 "stop" through the CLI.
@@ -219,4 +236,24 @@ async fn real_engine_answers_generate_chat_completions_and_embeddings() {
         .await
         .unwrap();
     assert!(ps["models"].as_array().unwrap().is_empty() || ps["models"][0]["name"] != model);
+
+    // A reranker, e.g. `hf.co/gpustack/jina-reranker-v1-tiny-en-GGUF:Q4_K_M` (33 MB). Last,
+    // so loading a fourth model cannot evict the one the `ps` checks above look for.
+    if let Ok(rerank) = std::env::var("ALKAHEST_TEST_RERANK_MODEL") {
+        let v = post(
+            base,
+            "/v1/rerank",
+            json!({"model": rerank, "query": "What is the capital of France?", "top_n": 2,
+                   "documents": ["Berlin is the capital of Germany.",
+                                 "Paris is the capital of France.", "Bananas are yellow."]}),
+        )
+        .await;
+        let results = v["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2, "{v}");
+        assert_eq!(results[0]["index"], 1, "{v}");
+        assert_eq!(
+            results[0]["document"]["text"],
+            "Paris is the capital of France."
+        );
+    }
 }

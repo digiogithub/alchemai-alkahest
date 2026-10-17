@@ -1,4 +1,8 @@
 //! `/api/embed` and the legacy `/api/embeddings`.
+//!
+//! Vectors come L2-normalised from llama-server (as Ollama and OpenAI return them);
+//! `dimensions` truncates and renormalises; inputs longer than the context are truncated
+//! unless `truncate: false` ([`crate::pooled::fit_inputs`]).
 
 use std::time::Instant;
 
@@ -16,6 +20,7 @@ use super::generate::parse;
 use crate::auth::RequestContext;
 use crate::dialect::Family;
 use crate::generation::{Acquired, acquire};
+use crate::pooled::{fit_inputs, input_too_long};
 use crate::sampling::ollama_options;
 use crate::service::{self, HttpError, UsageSink, respond};
 use crate::state::AppState;
@@ -102,14 +107,25 @@ async fn run_embeddings(
 ) -> Result<(Vec<Vec<f64>>, u64), HttpError> {
     let lease = &acquired.lease;
     service::require(lease, model, Capability::Embeddings)?;
-    let mut body = json!({"model": lease.model(), "input": texts, "encoding_format": "float"});
-    if truncate == Some(false) {
-        body["truncate"] = json!(false);
-    }
     let client = service::upstream(state);
+    let base = lease.base_url();
     let call = async {
-        let resp = post_json(&client, &lease.base_url(), "/v1/embeddings", &body).await?;
-        read_json(resp).await
+        // Ollama truncates inputs to the context unless `truncate: false` (then a too-long
+        // input is the engine's error).
+        let texts = if truncate == Some(false) {
+            texts.to_vec()
+        } else {
+            fit_inputs(
+                &client,
+                &base,
+                texts,
+                lease.instance_settings().context_length,
+            )
+            .await?
+        };
+        let body = json!({"model": lease.model(), "input": texts, "encoding_format": "float"});
+        let resp = post_json(&client, &base, "/v1/embeddings", &body).await?;
+        read_json(resp).await.map_err(input_too_long)
     };
     let doc = tokio::select! {
         biased;

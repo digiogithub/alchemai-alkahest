@@ -316,7 +316,7 @@ async fn embeddings_inner(
     let client = service::upstream(state);
     let call = async {
         let resp = post_json(&client, &lease.base_url(), "/v1/embeddings", &upstream_body).await?;
-        read_json(resp).await
+        read_json(resp).await.map_err(crate::pooled::input_too_long)
     };
     let doc = tokio::select! {
         biased;
