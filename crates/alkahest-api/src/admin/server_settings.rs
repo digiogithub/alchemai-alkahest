@@ -10,7 +10,10 @@
 //!   from the environment or another file never leak into it).
 //!
 //! Nothing is applied live: the scheduler, the stores and the logger are built at start-up,
-//! so every saved change reports `restart_required` (as the network settings do).
+//! so every saved change reports `restart_required` (as the network settings do). The one
+//! exception is `catalog_limits` (`[catalog_limits]`: `max_snapshot_bytes`, `max_file_bytes`,
+//! `max_archive_bytes`; `null` resets one): it is saved and applies to the next catalog sync
+//! at once, so it never needs a restart (ALK-US-0124).
 //! A field set by an environment variable cannot be changed here: the variable would win
 //! again on the next start, so saving it would only mislead.
 
@@ -362,6 +365,8 @@ fn document(ctx: &AdminContext) -> Value {
         "restart_required": !changed.is_empty(),
         "changed": changed,
         "file": ctx.config_file,
+        "catalog_limits": ctx.catalogs.limits(),
+        "catalog_limits_default": alkahest_core::config::CatalogLimits::default(),
         "locked": locked(ctx),
         "sources": ctx.sources,
         "paths": {
@@ -385,26 +390,61 @@ pub(super) async fn get_server(State(state): State<AppState>) -> Response {
     reply(&state, r)
 }
 
+/// Writes the patched `[catalog_limits]` keys (`None` removes a key: the default).
+fn write_limits(path: &Path, keys: &[(&'static str, Option<u64>)]) -> Result<(), HttpError> {
+    write_document(path, |doc| {
+        let t = ensure_table(doc.as_item_mut(), "catalog_limits");
+        for (key, v) in keys {
+            match v {
+                Some(n) => {
+                    let n = i64::try_from(*n)
+                        .map_err(|_| HttpError::bad_request(format!("{key}: too large")))?;
+                    t[*key] = toml_edit::value(n);
+                }
+                None => {
+                    if let Some(t) = t.as_table_like_mut() {
+                        t.remove(key);
+                    }
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
 /// `PUT /alkahest/v1/settings/server`.
 pub(super) async fn put_server(State(state): State<AppState>, body: Bytes) -> Response {
     let r = async {
-        let patch: Map<String, Value> = parse_body(&body)?;
+        let mut patch: Map<String, Value> = parse_body(&body)?;
+        let limits_patch = patch.remove("catalog_limits");
         let ctx = admin(&state)?;
         let doc = blocking(move || {
-            let locked = locked(&ctx);
-            if let Some((field, var)) = patch.keys().find_map(|k| locked.get_key_value(k)) {
-                return Err(HttpError::bad_request(format!(
-                    "{field} is set by {} in the server's environment; change it there",
-                    var.as_str().unwrap_or_default()
-                )));
+            let _edit = ctx.catalog_edit.lock();
+            // Everything is checked before anything is written.
+            let limits = limits_patch
+                .map(|lp| super::catalogs::patched_limits(ctx.catalogs.limits(), &lp))
+                .transpose()?;
+            if !patch.is_empty() {
+                let locked = locked(&ctx);
+                if let Some((field, var)) = patch.keys().find_map(|k| locked.get_key_value(k)) {
+                    return Err(HttpError::bad_request(format!(
+                        "{field} is set by {} in the server's environment; change it there",
+                        var.as_str().unwrap_or_default()
+                    )));
+                }
+                let mut saved = ctx.saved_server.lock();
+                let next = patched(&saved, &patch)?;
+                write_patch(&ctx.config_file, &patch)?;
+                tracing::info!(file = %ctx.config_file.display(), fields = ?patch.keys().collect::<Vec<_>>(),
+                    "server settings saved");
+                *saved = next;
             }
-            let mut saved = ctx.saved_server.lock();
-            let next = patched(&saved, &patch)?;
-            write_patch(&ctx.config_file, &patch)?;
-            tracing::info!(file = %ctx.config_file.display(), fields = ?patch.keys().collect::<Vec<_>>(),
-                "server settings saved");
-            *saved = next;
-            drop(saved);
+            if let Some((next, keys)) = limits {
+                write_limits(&ctx.config_file, &keys)?;
+                ctx.catalogs.set_limits(next);
+                tracing::info!(file = %ctx.config_file.display(), limits = ?next,
+                    "catalog limits saved");
+            }
             Ok(document(&ctx))
         })
         .await?;

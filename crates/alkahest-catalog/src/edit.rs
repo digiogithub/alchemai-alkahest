@@ -1,10 +1,12 @@
-//! `alkahest catalog add|rm`: edits `[[catalogs]]` in a configuration file with `toml_edit`,
-//! keeping comments and every other key as they are (ALK-SP-0011.R9).
+//! `alkahest catalog add|rm|enable|disable|edit` and the admin API: edit `[[catalogs]]` in a
+//! configuration file with `toml_edit`, keeping comments and every other key as they are
+//! (ALK-SP-0011.R9).
 
 use std::path::Path;
 
 use alkahest_core::Config;
-use alkahest_core::config::CatalogSource;
+use alkahest_core::config::{CatalogSource, OFFICIAL_CATALOG_NAME};
+use serde::{Deserialize, Deserializer};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
 
 use crate::error::{CatalogError, Result};
@@ -106,21 +108,32 @@ pub fn add_source(path: &Path, source: &CatalogSource, effective: &[CatalogSourc
 }
 
 /// What [`remove_source`] did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Removal {
     /// The source was removed.
     Removed,
-    /// It was the last source: the official catalog is kept but disabled, because a
-    /// configuration without `[[catalogs]]` gets the official catalog back.
+    /// The official catalog (or the last source, replaced by the official one) is kept but
+    /// disabled, because a configuration without `[[catalogs]]` gets the official catalog
+    /// back.
     Disabled,
 }
 
-/// Removes the source `name` from `[[catalogs]]` of the file at `path`.
+/// Removes the source `name` from `[[catalogs]]` of the file at `path`. The official catalog
+/// is never removed: it is disabled (`enabled = false`) instead.
 ///
 /// # Errors
 ///
 /// [`CatalogError::Unknown`] when no source has that name.
 pub fn remove_source(path: &Path, name: &str, effective: &[CatalogSource]) -> Result<Removal> {
+    if name == OFFICIAL_CATALOG_NAME {
+        let patch = SourcePatch {
+            enabled: Some(false),
+            ..SourcePatch::default()
+        };
+        update_source(path, name, &patch, effective)?;
+        return Ok(Removal::Disabled);
+    }
     let mut doc = read_doc(path)?;
     let arr = catalogs(&mut doc, effective)?;
     let Some(i) = arr.iter().position(|t| name_of(t) == Some(name)) else {
@@ -137,6 +150,131 @@ pub fn remove_source(path: &Path, name: &str, effective: &[CatalogSource]) -> Re
     };
     write_doc(path, &doc)?;
     Ok(outcome)
+}
+
+/// A change to one catalog source (`PATCH /alkahest/v1/catalogs/{name}`,
+/// `alkahest catalog enable|disable|edit`). Absent fields stay as they are; `pin: null`
+/// removes the pin. The URL and the name never change (remove and add instead).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SourcePatch {
+    /// Turn the catalog on or off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Branch or tag to follow.
+    #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<String>,
+    /// Folder of the catalog inside the repository.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subdir: Option<String>,
+    /// `Some(Some(commit))` pins, `Some(None)` (JSON `null`) unpins, `None` leaves it.
+    #[serde(
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub pin: Option<Option<String>>,
+    /// Refresh interval (`24h`, `30m`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_interval: Option<String>,
+}
+
+/// Distinguishes an explicit `null` (`Some(None)`) from an absent field (`None`, through
+/// `#[serde(default)]`).
+fn double_option<'de, D: Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
+}
+
+impl SourcePatch {
+    /// Whether the patch changes nothing.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// `source` with the patch applied (not validated).
+    pub fn apply(&self, source: &CatalogSource) -> CatalogSource {
+        let mut s = source.clone();
+        if let Some(e) = self.enabled {
+            s.enabled = e;
+        }
+        if let Some(r) = &self.r#ref {
+            s.r#ref = r.trim().to_string();
+        }
+        if let Some(d) = &self.subdir {
+            let d = d.trim();
+            s.subdir = if d.is_empty() { ".".into() } else { d.into() };
+        }
+        if let Some(p) = &self.pin {
+            s.pin = p
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_ascii_lowercase);
+        }
+        if let Some(i) = &self.refresh_interval {
+            s.refresh_interval = i.trim().to_string();
+        }
+        s
+    }
+}
+
+/// Applies `patch` to the source `name` of `[[catalogs]]` in the file at `path`, key by key
+/// (comments inside the table are kept), and returns the updated source.
+///
+/// # Errors
+///
+/// [`CatalogError::Unknown`] when no source has that name, [`CatalogError::Config`] when the
+/// result breaks a rule of ALK-SP-0011.R9.
+pub fn update_source(
+    path: &Path,
+    name: &str,
+    patch: &SourcePatch,
+    effective: &[CatalogSource],
+) -> Result<CatalogSource> {
+    let current = effective
+        .iter()
+        .find(|s| s.name == name)
+        .ok_or_else(|| CatalogError::Unknown(name.to_string()))?;
+    let next = patch.apply(current);
+    next.validate()
+        .map_err(|e| CatalogError::Config(e.to_string()))?;
+    let mut doc = read_doc(path)?;
+    let arr = catalogs(&mut doc, effective)?;
+    let Some(t) = arr.iter_mut().find(|t| name_of(t) == Some(name)) else {
+        return Err(CatalogError::Unknown(name.to_string()));
+    };
+    let mut set = |key: &str, v: Option<Item>| match v {
+        Some(v) => {
+            t.insert(key, v);
+        }
+        None => {
+            t.remove(key);
+        }
+    };
+    if patch.enabled.is_some() {
+        set("enabled", (!next.enabled).then(|| value(false)));
+    }
+    if patch.r#ref.is_some() {
+        set("ref", Some(value(next.r#ref.as_str())));
+    }
+    if patch.subdir.is_some() {
+        set(
+            "subdir",
+            (next.subdir != ".").then(|| value(next.subdir.as_str())),
+        );
+    }
+    if patch.pin.is_some() {
+        set("pin", next.pin.as_deref().map(value));
+    }
+    if patch.refresh_interval.is_some() {
+        set(
+            "refresh_interval",
+            (next.refresh_interval != "24h").then(|| value(next.refresh_interval.as_str())),
+        );
+    }
+    write_doc(path, &doc)?;
+    Ok(next)
 }
 
 #[cfg(test)]

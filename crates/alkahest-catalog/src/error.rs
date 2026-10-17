@@ -167,6 +167,9 @@ pub enum CatalogError {
     /// The source configuration is wrong.
     #[error("{0}")]
     Config(String),
+    /// The OS keyring failed (the message never carries a token).
+    #[error("keyring: {0}")]
+    Keyring(String),
     /// A filesystem operation failed.
     #[error("{path}: {source}")]
     Io {

@@ -214,6 +214,7 @@ name = "alkahest-api"
 version = "0.1.1"
 dependencies = [
  "alkahest-catalog",
+ "alkahest-client",
  "alkahest-core",
  "alkahest-decision",
  "alkahest-engine",
@@ -252,6 +253,7 @@ dependencies = [
  "tower",
  "tower-http 0.7.1",
  "tracing",
+ "tracing-subscriber",
  "windows-sys 0.61.2",
  "wiremock",
  "zeroize",

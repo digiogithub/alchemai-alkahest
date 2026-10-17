@@ -373,14 +373,10 @@ async fn install_cmd(
         // A native variant is never auto-selected: look for the one matching this machine in
         // the requested version, else the newest version that has one.
         catalog
-            .versions(args.engine)
-            .iter()
-            .filter(|v| args.version.is_none_or(|want| want == v.as_str()))
-            .find_map(|v| alkahest_recipes::select_native(&catalog.variants(args.engine, v), &system, &host))
-            .ok_or_else(|| {
+            .resolve_native(args.engine, args.version, &system, &host)
+            .map_err(|e| {
                 anyhow::anyhow!(
-                    "engine `{}` has no native variant for this machine; `alkahest engines info {}` lists its variants",
-                    args.engine,
+                    "{e}; `alkahest engines info {}` lists its variants",
                     args.engine
                 )
             })?

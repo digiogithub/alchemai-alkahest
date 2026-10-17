@@ -216,6 +216,7 @@ pub fn context(data_dir: &Path) -> SyncContext {
         credentials: Arc::new(NoCredentials),
         alkahest_version: alkahest_catalog::running_version(),
         deadline: None,
+        progress: None,
     }
 }
 

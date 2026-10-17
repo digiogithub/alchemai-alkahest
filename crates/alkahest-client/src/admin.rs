@@ -437,6 +437,30 @@ pub struct EngineVariant {
     pub bundled: bool,
     /// Size of the prebuilt archive for the server's platform, when known.
     pub download_bytes: Option<u64>,
+    /// Recipe layer: `built-in`, `catalog:<name>` or `dir:<path>`.
+    pub origin: Option<String>,
+    /// Snapshot commit of a `catalog:<name>` origin.
+    pub origin_commit: Option<String>,
+    /// A native variant (built for the host CPU, installed only on request).
+    pub native: bool,
+    /// An installed native build made for another CPU ("Rebuild for this CPU").
+    pub native_stale: bool,
+    /// Dependencies of the variant for the server's platform.
+    pub dependencies: Vec<EngineDependency>,
+}
+
+/// One dependency download of an engine variant.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EngineDependency {
+    /// Identifier (`vulkan-loader`, `cuda-runtime`).
+    pub id: String,
+    /// Installed only on request ([`EngineInstall::with`]).
+    pub optional: bool,
+    /// Download size in bytes.
+    pub size: Option<u64>,
+    /// Present in the installed build.
+    pub installed: bool,
 }
 
 /// `GET /alkahest/v1/engines`.
@@ -466,6 +490,20 @@ pub struct EngineInstall {
     /// Reinstall.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub force: bool,
+}
+
+/// Catalog-era install options (ALK-US-0124), sent with [`Client::install_engine_with`].
+/// Kept apart from [`EngineInstall`] so existing struct literals keep compiling.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EngineInstallOptions {
+    /// Optional dependencies to install too (ids from [`EngineVariant::dependencies`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub with: Vec<String>,
+    /// Install the native variant built for the server's CPU (leave
+    /// [`EngineInstall::variant`] empty).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub native: bool,
 }
 
 /// Usage counters of a key.
@@ -694,6 +732,10 @@ pub struct ServerSettingsDoc {
     pub sources: Vec<String>,
     /// Resolved folders: `data_dir`, `models_dir`, `ollama_store`, `engines_dir`, `log_dir`.
     pub paths: Map<String, Value>,
+    /// `[catalog_limits]` in force (applied at once when changed, no restart).
+    pub catalog_limits: crate::CatalogLimits,
+    /// Default catalog limits.
+    pub catalog_limits_default: crate::CatalogLimits,
 }
 
 /// `GET /alkahest/v1/info`.
@@ -1055,6 +1097,26 @@ impl Client {
     /// `POST /alkahest/v1/engines/install`: starts (or joins) an install job.
     pub async fn install_engine(&self, req: &EngineInstall) -> Result<JobStarted> {
         let body = Self::to_json(req)?;
+        self.admin_json(
+            reqwest::Method::POST,
+            "/alkahest/v1/engines/install",
+            &[],
+            Some(&body),
+        )
+        .await
+    }
+
+    /// `POST /alkahest/v1/engines/install` with optional dependencies (`with`) or the native
+    /// build of the server's CPU (`native`).
+    pub async fn install_engine_with(
+        &self,
+        req: &EngineInstall,
+        opts: &EngineInstallOptions,
+    ) -> Result<JobStarted> {
+        let mut body = Self::to_json(req)?;
+        if let (Some(b), Value::Object(extra)) = (body.as_object_mut(), Self::to_json(opts)?) {
+            b.extend(extra);
+        }
         self.admin_json(
             reqwest::Method::POST,
             "/alkahest/v1/engines/install",

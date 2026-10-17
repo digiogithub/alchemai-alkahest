@@ -212,7 +212,13 @@ async fn serve(
         SchedulerOptions::from_config(&config.scheduler),
     )
     .context("starting the scheduler")?;
-    let pulls = Arc::new(PullService::new(config.clone(), paths.clone()));
+    // One live set of catalog sources and limits: catalog edits through the admin API apply
+    // to the engine manager, the pull service and the background refresh at once.
+    let catalog_set =
+        alkahest_catalog::CatalogSet::new(config.catalogs.clone(), config.catalog_limits);
+    let pulls = Arc::new(
+        PullService::new(config.clone(), paths.clone()).with_catalog_set(catalog_set.clone()),
+    );
     // The admin API saves network settings where the operator's settings live: the
     // `--config` file when one was given, else the user configuration file.
     let config_file = loaded
@@ -233,18 +239,17 @@ async fn serve(
             },
             system.clone(),
         )
-        .with_catalogs(&paths.data_dir, config.catalogs.clone()),
-    );
-    spawn_catalog_refresh(
-        paths.data_dir.clone(),
-        config.catalogs.clone(),
-        alkahest_catalog::Limits::from_config(&config.catalog_limits),
+        .with_catalog_set(&paths.data_dir, catalog_set.clone()),
     );
     let admin = AdminContext::builder(config.clone(), paths.clone(), config_file)
         .sources(loaded.sources.iter().map(ToString::to_string).collect())
         .engines(engines)
         .system(system)
+        .catalog_set(catalog_set)
         .build();
+    // Background catalog refresh (ALK-SP-0011.R10); `ALKAHEST_CATALOG_AUTO_SYNC=0` turns it
+    // off. A first failure is published as a `catalog` event.
+    let _refresh = alkahest_api::admin::spawn_refresh(admin.clone());
 
     let usage = Arc::new(UsageTracker::open(usage_path(&paths.key_store)));
     let mut builder = AppState::builder(ServerInfo::default())
@@ -330,54 +335,4 @@ async fn serve(
     );
     eprintln!("alkahest serve: stopped");
     Ok(())
-}
-
-/// How often `serve` looks for catalogs whose refresh interval expired.
-const CATALOG_CHECK_EVERY: Duration = Duration::from_secs(10 * 60);
-
-/// Refreshes the git catalogs in the background while the server runs (ALK-SP-0011.R10):
-/// a catalog is synced when its last check is older than its `refresh_interval`. Requests never
-/// wait for it; the engine manager reads the snapshots afresh on each use.
-/// `ALKAHEST_CATALOG_AUTO_SYNC=0` turns it off.
-fn spawn_catalog_refresh(
-    data_dir: std::path::PathBuf,
-    sources: Vec<alkahest_core::config::CatalogSource>,
-    limits: alkahest_catalog::Limits,
-) {
-    if std::env::var(crate::catalog_cmd::AUTO_SYNC_ENV).is_ok_and(|v| {
-        matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "0" | "false" | "no" | "off"
-        )
-    }) {
-        return;
-    }
-    tokio::spawn(async move {
-        let ctx = match alkahest_catalog::SyncContext::new(&data_dir) {
-            Ok(c) => c.with_limits(limits),
-            Err(e) => {
-                tracing::warn!(error = %e, "catalog refresh disabled");
-                return;
-            }
-        };
-        loop {
-            let states = {
-                let (d, s) = (data_dir.clone(), sources.clone());
-                tokio::task::spawn_blocking(move || alkahest_catalog::load_states(&d, &s))
-                    .await
-                    .unwrap_or_default()
-            };
-            for state in states.iter().filter(|s| s.is_due()) {
-                match alkahest_catalog::sync(&state.source, &ctx).await {
-                    Ok(r) => {
-                        tracing::info!(catalog = %r.catalog, outcome = ?r.outcome, "catalog refreshed")
-                    }
-                    Err(e) => {
-                        tracing::warn!(catalog = %state.source.name, error = %e, "catalog refresh failed; keeping the last good snapshot")
-                    }
-                }
-            }
-            tokio::time::sleep(CATALOG_CHECK_EVERY).await;
-        }
-    });
 }

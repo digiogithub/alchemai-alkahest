@@ -1,4 +1,4 @@
-//! Background jobs of the admin API: model pulls and engine installs.
+//! Background jobs of the admin API: model pulls, engine installs and catalog syncs.
 //!
 //! A job runs on the tokio runtime, independent of the HTTP request that started it, so the
 //! desktop app can close the Discover screen and still see the download progress elsewhere.
@@ -42,6 +42,9 @@ pub enum JobKind {
     Pull,
     /// An engine install (prebuilt download or source build).
     EngineInstall,
+    /// A git catalog sync (one catalog or every enabled one); `completed` / `total` count
+    /// files, not bytes.
+    CatalogSync,
 }
 
 /// Lifecycle of a job.

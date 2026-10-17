@@ -1,5 +1,7 @@
-//! `alkahest catalog ls|sync|add|rm|index` and the catalog refresh used by the commands that
-//! read catalogs (ALK-US-0118, ALK-SP-0011.R9, R10).
+//! `alkahest catalog ls|sync|add|rm|enable|disable|edit|token|index` and the catalog refresh
+//! used by the commands that read catalogs (ALK-US-0118, ALK-US-0124, ALK-SP-0011.R9, R10).
+//! Configuration edits, the listing document and tokens go through
+//! [`alkahest_catalog::manage`], the same functions the admin API calls.
 //!
 //! Refresh policy for reading commands ([`prepare`]): a catalog that was never fetched is
 //! fetched once in the foreground with a short deadline (so a fresh install with network sees
@@ -8,27 +10,30 @@
 //! so the command never waits for the network. A failed sync is recorded in the snapshot and
 //! shown once.
 
-use std::io::Write;
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, Stdio};
+use std::sync::Arc;
 use std::time::Duration;
 
-use alkahest_catalog::edit::{Removal, add_source, remove_source};
+use alkahest_catalog::manage::{
+    CatalogTokenStore, KeyringTokenStore, add_catalog, describe, edit_catalog, remove_catalog,
+    status_text, token_source,
+};
 use alkahest_catalog::manifest::{Index, SCHEMA_VERSION};
-use alkahest_catalog::snapshot::{read_files, snapshot_dir};
+use alkahest_catalog::snapshot::read_files;
 use alkahest_catalog::{
-    CatalogState, Limits, SyncContext, SyncOutcome, load_states, mark_error_reported, sync,
+    CatalogState, Limits, Removal, SourcePatch, SyncContext, SyncOutcome, Token, TokenSource,
+    load_states, mark_error_reported, sync,
 };
 use alkahest_core::config::{CatalogSource, Loaded, Source};
 use anyhow::{Context, Result, bail};
 use serde_json::json;
 
-use crate::cli::CatalogAction;
+use crate::cli::{CatalogAction, CatalogTokenAction};
 use crate::output::{Format, Listing};
 
-/// Environment switch: `0`, `false`, `no` or `off` turns the automatic refresh off (CI,
-/// air-gapped machines); `alkahest catalog sync` still works.
-pub const AUTO_SYNC_ENV: &str = "ALKAHEST_CATALOG_AUTO_SYNC";
+pub use alkahest_catalog::manage::AUTO_SYNC_ENV;
 /// Deadline of the one-time foreground fetch of a catalog that has no snapshot yet.
 const FIRST_FETCH_DEADLINE: Duration = Duration::from_secs(10);
 
@@ -58,7 +63,7 @@ pub fn run(action: &CatalogAction, loaded: &Loaded, json: bool) -> Result<ExitCo
             source.subdir = subdir.clone();
             source.pin = pin.clone();
             let file = config_file(loaded);
-            add_source(&file, &source, sources)?;
+            add_catalog(&file, &source, sources)?;
             report(
                 json,
                 json!({"added": name, "config": file}),
@@ -68,23 +73,66 @@ pub fn run(action: &CatalogAction, loaded: &Loaded, json: bool) -> Result<ExitCo
                 ),
             )
         }
-        CatalogAction::Rm { name } => {
+        CatalogAction::Rm { name, delete_token } => {
             let file = config_file(loaded);
-            let outcome = remove_source(&file, name, sources)?;
-            let dir = snapshot_dir(&data_dir, name);
-            if dir.exists() {
-                std::fs::remove_dir_all(&dir)
-                    .with_context(|| format!("removing {}", dir.display()))?;
-            }
-            let text = match outcome {
+            let store = KeyringTokenStore;
+            let tokens: Option<&dyn CatalogTokenStore> =
+                delete_token.then_some(&store as &dyn CatalogTokenStore);
+            let out = remove_catalog(&file, &data_dir, name, sources, tokens)?;
+            let mut text = match out.result {
                 Removal::Removed => format!("removed catalog {name} and its snapshot"),
+                Removal::Disabled if name == alkahest_core::config::OFFICIAL_CATALOG_NAME => {
+                    format!(
+                        "the official catalog cannot be removed; it is disabled now \
+                         (`alkahest catalog enable {name}` turns it back on)"
+                    )
+                }
                 Removal::Disabled => format!(
                     "removed catalog {name}; the official catalog is kept but disabled \
                      (`enabled = false`), because a configuration without catalogs gets it back"
                 ),
             };
-            report(json, json!({"removed": name, "config": file}), &text)
+            if out.token_deleted {
+                text.push_str("; its keyring token was deleted");
+            }
+            report(
+                json,
+                json!({"removed": name, "result": out.result, "config": file,
+                       "snapshot_deleted": out.snapshot_deleted,
+                       "token_deleted": out.token_deleted}),
+                &text,
+            )
         }
+        CatalogAction::Enable { name } | CatalogAction::Disable { name } => {
+            let enabled = matches!(action, CatalogAction::Enable { .. });
+            let patch = SourcePatch {
+                enabled: Some(enabled),
+                ..SourcePatch::default()
+            };
+            edit(loaded, name, &patch, json)
+        }
+        CatalogAction::Edit {
+            name,
+            git_ref,
+            subdir,
+            pin,
+            unpin,
+            refresh_interval,
+        } => {
+            let patch = SourcePatch {
+                enabled: None,
+                r#ref: git_ref.clone(),
+                subdir: subdir.clone(),
+                pin: if *unpin {
+                    Some(None)
+                } else {
+                    pin.clone().map(Some)
+                },
+                refresh_interval: refresh_interval.clone(),
+            };
+            edit(loaded, name, &patch, json)
+        }
+        CatalogAction::Token { action } => token(action, sources, json),
         CatalogAction::Index { dir } => index(dir, json),
     }
 }
@@ -122,57 +170,13 @@ fn age_text(d: Duration) -> String {
     }
 }
 
-fn status(state: &CatalogState) -> String {
-    if !state.source.enabled {
-        return "disabled".into();
-    }
-    let mut parts = Vec::new();
-    if let Some(e) = &state.load_error {
-        parts.push(format!("unusable snapshot: {e}"));
-    } else if state.content.is_none() {
-        parts.push("not fetched".into());
-    } else if state.source.pin.is_some() {
-        parts.push("pinned".into());
-    } else {
-        parts.push("ok".into());
-    }
-    if let Some(e) = state.meta.as_ref().and_then(|m| m.last_error.as_deref()) {
-        parts.push(format!("last sync failed: {e}"));
-    }
-    if let Some(c) = &state.content
-        && !c.warnings.is_empty()
-    {
-        parts.push(format!("{} warning(s)", c.warnings.len()));
-    }
-    parts.join("; ")
-}
-
 /// `catalog ls`.
 fn ls(data_dir: &Path, sources: &[CatalogSource], json: bool) -> Result<ExitCode> {
     let states = load_states(data_dir, sources);
     if json {
-        let rows: Vec<_> = states
-            .iter()
-            .map(|s| {
-                json!({
-                    "name": s.source.name,
-                    "url": s.source.url,
-                    "ref": s.source.r#ref,
-                    "subdir": s.source.subdir,
-                    "pin": s.source.pin,
-                    "enabled": s.source.enabled,
-                    "commit": s.commit(),
-                    "fetched_at": s.meta.as_ref().map(|m| &m.fetched_at).filter(|t| !t.is_empty()),
-                    "checked_at": s.meta.as_ref().map(|m| &m.checked_at).filter(|t| !t.is_empty()),
-                    "last_error": s.meta.as_ref().and_then(|m| m.last_error.as_ref()),
-                    "load_error": s.load_error,
-                    "engines": s.content.as_ref().map(|c| c.recipe_count()),
-                    "models": s.content.as_ref().map(|c| c.models.len()),
-                    "warnings": s.content.as_ref().map(|c| c.warnings.iter().map(ToString::to_string).collect::<Vec<_>>()).unwrap_or_default(),
-                    "status": status(s),
-                })
-            })
-            .collect();
+        let store = KeyringTokenStore;
+        let env: alkahest_catalog::manage::EnvLookup = Arc::new(|k| std::env::var(k).ok());
+        let rows = describe(data_dir, &states, |n| token_source(n, &store, &env));
         println!("{}", serde_json::to_string_pretty(&rows)?);
         return Ok(ExitCode::SUCCESS);
     }
@@ -210,7 +214,7 @@ fn ls(data_dir: &Path, sources: &[CatalogSource], json: bool) -> Result<ExitCode
             s.content
                 .as_ref()
                 .map_or("-".into(), |c| c.models.len().to_string()),
-            status(s),
+            status_text(s),
         ]);
     }
     let mut out = std::io::stdout().lock();
@@ -326,6 +330,106 @@ fn short(commit: &str) -> String {
     commit[..commit.len().min(12)].to_string()
 }
 
+/// `catalog enable|disable|edit`.
+fn edit(loaded: &Loaded, name: &str, patch: &SourcePatch, json: bool) -> Result<ExitCode> {
+    let file = config_file(loaded);
+    let (source, _) = edit_catalog(&file, name, patch, &loaded.config.catalogs)?;
+    let state = if source.enabled {
+        "enabled"
+    } else {
+        "disabled"
+    };
+    let reference = source
+        .pin
+        .as_deref()
+        .map_or_else(|| source.r#ref.clone(), |p| format!("pin {}", short(p)));
+    report(
+        json,
+        json!({"catalog": source.name, "enabled": source.enabled, "ref": source.r#ref,
+               "subdir": source.subdir, "pin": source.pin,
+               "refresh_interval": source.refresh_interval, "config": file}),
+        &format!(
+            "catalog {name}: {state}, {reference}, subdir {}, refreshed every {} ({})",
+            source.subdir,
+            source.refresh_interval,
+            file.display()
+        ),
+    )
+}
+
+/// `catalog token set|clear <name>`. The token is read from stdin (no echo on a terminal) and
+/// never printed.
+fn token(action: &CatalogTokenAction, sources: &[CatalogSource], json: bool) -> Result<ExitCode> {
+    let name = match action {
+        CatalogTokenAction::Set { name } | CatalogTokenAction::Clear { name } => name,
+    };
+    if !sources.iter().any(|s| &s.name == name) {
+        bail!("no catalog named `{name}`; `alkahest catalog ls` lists them");
+    }
+    let store = KeyringTokenStore;
+    match action {
+        CatalogTokenAction::Set { .. } => {
+            let text = read_token(name)?;
+            if text.chars().any(char::is_control) {
+                bail!("the token must not contain control characters or line breaks");
+            }
+            let token = Token::new(&text).context("the token is empty")?;
+            drop(text);
+            store
+                .set(name, &token)
+                .context("storing the token in the OS keyring")?;
+            let shadowed = std::env::var(alkahest_catalog::token_env_var(name)).is_ok();
+            let mut line = format!(
+                "stored the token of catalog {name} in the OS keyring (service `alkahest`, user \
+                 `catalog:{name}`)"
+            );
+            if shadowed {
+                line.push_str(&format!(
+                    "; note: {} is set and wins over the keyring",
+                    alkahest_catalog::token_env_var(name)
+                ));
+            }
+            report(
+                json,
+                json!({"catalog": name, "token_present": true, "token_source": "keyring"}),
+                &line,
+            )
+        }
+        CatalogTokenAction::Clear { .. } => {
+            store
+                .delete(name)
+                .context("removing the token from the OS keyring")?;
+            let env: alkahest_catalog::manage::EnvLookup = Arc::new(|k| std::env::var(k).ok());
+            let left = token_source(name, &store, &env);
+            report(
+                json,
+                json!({"catalog": name, "token_present": left != TokenSource::None,
+                       "token_source": left}),
+                &format!("removed the token of catalog {name} from the OS keyring"),
+            )
+        }
+    }
+}
+
+/// A hidden prompt on a terminal, one stdin line otherwise. Never an argument: command lines
+/// end up in shell history and process listings.
+fn read_token(name: &str) -> Result<String> {
+    if std::io::stdin().is_terminal() {
+        return rpassword::prompt_password(format!("Token of catalog {name}: "))
+            .context("reading the token");
+    }
+    let mut line = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .context("reading the token from stdin")?;
+    let line = line.trim_end_matches(['\r', '\n']).to_string();
+    if line.trim().is_empty() {
+        bail!("no token on stdin");
+    }
+    Ok(line)
+}
+
 /// `catalog index <dir>`.
 fn index(dir: &Path, json: bool) -> Result<ExitCode> {
     let files = read_files(dir);
@@ -352,13 +456,9 @@ fn index(dir: &Path, json: bool) -> Result<ExitCode> {
     )
 }
 
-fn auto_sync_enabled() -> bool {
-    !std::env::var(AUTO_SYNC_ENV).is_ok_and(|v| {
-        matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "0" | "false" | "no" | "off"
-        )
-    })
+/// Whether the automatic refresh is on (`ALKAHEST_CATALOG_AUTO_SYNC`).
+pub fn auto_sync_enabled() -> bool {
+    alkahest_catalog::manage::auto_sync_enabled(std::env::var(AUTO_SYNC_ENV).ok().as_deref())
 }
 
 /// Starts `alkahest catalog sync --background <name>` detached (own process group on Unix,

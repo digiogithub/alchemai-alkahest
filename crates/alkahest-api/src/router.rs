@@ -211,6 +211,7 @@ fn cors_layer(origins: &[String]) -> Option<CorsLayer> {
                 Method::POST,
                 Method::PUT,
                 Method::DELETE,
+                Method::PATCH,
                 Method::HEAD,
                 Method::OPTIONS,
             ])

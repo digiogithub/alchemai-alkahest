@@ -558,8 +558,9 @@ pub(super) async fn catalog_search(
     let r = async {
         let ctx = admin(&state)?;
         let catalog = p.catalog.filter(|c| !c.trim().is_empty());
+        let sources = ctx.catalogs.sources();
         if let Some(c) = &catalog
-            && !ctx.config.catalogs.iter().any(|s| &s.name == c)
+            && !sources.iter().any(|s| &s.name == c)
         {
             return Err(HttpError::new(
                 ErrorKind::NotFound,
@@ -567,7 +568,6 @@ pub(super) async fn catalog_search(
             ));
         }
         let data_dir = ctx.paths.data_dir.clone();
-        let sources = ctx.config.catalogs.clone();
         let limit = p.limit.unwrap_or(50).clamp(1, MAX_LIMIT as usize);
         let query = p.q;
         let models = blocking(move || {

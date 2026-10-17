@@ -84,12 +84,25 @@ pub enum PullError {
 pub struct PullService {
     config: Config,
     paths: ResolvedPaths,
+    /// Live catalog sources (admin API edits); the configuration's when `None`.
+    catalogs: Option<alkahest_catalog::CatalogSet>,
 }
 
 impl PullService {
     /// A service for `config` with its resolved paths.
     pub fn new(config: Config, paths: ResolvedPaths) -> Self {
-        Self { config, paths }
+        Self {
+            config,
+            paths,
+            catalogs: None,
+        }
+    }
+
+    /// Reads the catalog sources from `set`, so catalogs added or changed through the admin
+    /// API are pulled from without a restart.
+    pub fn with_catalog_set(mut self, set: alkahest_catalog::CatalogSet) -> Self {
+        self.catalogs = Some(set);
+        self
     }
 
     /// Pulls `reference` (`llama3.2:3b`, `hf.co/org/repo:Q4_K_M`, `host/ns/model:tag`).
@@ -118,7 +131,11 @@ impl PullService {
                 if let Some(p) = progress {
                     transfer = transfer.with_progress(p);
                 }
-                let states = load_states(&self.paths.data_dir, &self.config.catalogs);
+                let sources = self
+                    .catalogs
+                    .as_ref()
+                    .map_or_else(|| self.config.catalogs.clone(), |s| s.sources());
+                let states = load_states(&self.paths.data_dir, &sources);
                 let overlays = ModelOverlays::in_data_dir(&self.paths.data_dir);
                 let outcome = pull_catalog(
                     &transfer,

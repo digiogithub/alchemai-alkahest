@@ -116,14 +116,54 @@ Under `/alkahest/v1/`, described by an OpenAPI 3.1 document served at
 
 | Area | Routes |
 |---|---|
-| System | `GET info`, `GET ps` (with an estimated `load_progress` while a model loads, CPU and GPU `utilization`, engine `cpu_percent`), `GET events` (server-sent events: scheduler, job and `request` updates), `POST unload`, `POST models/{name}/kill` (SIGKILL a hung engine), `GET requests` (recent inference requests: route, model, key, tokens, duration, status; never content), `GET utilization` |
+| System | `GET info`, `GET ps` (with an estimated `load_progress` while a model loads, CPU and GPU `utilization`, engine `cpu_percent`), `GET events` (server-sent events: scheduler `status`, `job`, `request` and `catalog` updates), `POST unload`, `POST models/{name}/kill` (SIGKILL a hung engine), `GET requests` (recent inference requests: route, model, key, tokens, duration, status; never content), `GET utilization` |
 | Models | `GET models`, `GET/DELETE models/{name}`, `POST copy`, `GET/PUT/DELETE models/{name}/settings`, `GET models/{name}/recommended`, `GET models/{name}/estimate` (memory estimate; KV cache types f32, f16, bf16, q8_0, q5_1, q5_0, q4_1, q4_0, iq4_nl) |
 | Downloads | `POST/GET pulls`, `DELETE pulls/{id}`, `GET jobs`, `GET jobs/{id}`, `GET jobs/{id}/log` (output tail, source build log), `POST jobs/{id}/cancel`, `DELETE jobs/{id}` |
 | Discovery | `GET hf/search`, `GET hf/model`, `GET hf/files`, `GET hf/estimate` (memory estimate of a quant before download), `GET/PUT/DELETE hf/token`, `GET ollama/search`, `GET ollama/tags` (tags of a library model), `GET catalog/search` (git catalog model entries, one row per tag: `q`, `catalog`, `limit`) |
-| Engines | `GET engines`, `POST engines/install`, `DELETE engines/{id}` (409 while a loaded model runs on the build), `POST engines/reload`, `GET/PUT engines/{id}/override` (executable path and extra arguments, applied on restart); listings carry `bundled` and `download_bytes` |
+| Catalogs | `GET catalogs`, `POST catalogs`, `PATCH catalogs/{name}`, `DELETE catalogs/{name}`, `POST catalogs/sync`, `POST catalogs/{name}/sync`, `PUT/DELETE catalogs/{name}/token`, `GET catalog/models/{ns}/{model}`; see [Git catalogs](#git-catalogs) |
+| Engines | `GET engines`, `POST engines/install` (`with`, `native`), `DELETE engines/{id}` (409 while a loaded model runs on the build), `POST engines/reload`, `GET/PUT engines/{id}/override` (executable path and extra arguments, applied on restart); listings carry `bundled`, `download_bytes`, `origin`, `origin_commit`, `native`, `native_stale` and `dependencies` |
 | Keys | `GET keys`, `POST keys` (the secret is returned once), `DELETE keys/{id}` |
-| Settings | `GET/PUT settings/network`, `GET/PUT settings/server` |
+| Settings | `GET/PUT settings/network`, `GET/PUT settings/server` (`catalog_limits` applies at once) |
 | Logs | `GET logs/engines`, `GET logs/engines/{name}`, `GET logs/server` |
+
+### Git catalogs
+
+The catalog routes manage the `[[catalogs]]` sources of the server's configuration file (the
+`--config` file, else the user configuration file) and their snapshots, as `alkahest catalog`
+does. Edits keep the file's comments and apply at once: the next engine listing, catalog
+search, pull or background refresh sees them, without a restart. A remote caller needs an API
+key with the `admin` scope, like every admin route.
+
+| Route | Request | Response |
+|---|---|---|
+| `GET catalogs` | | `{"catalogs": [row], "limits", "default_limits", "file", "auto_sync", "keyring_service", "token_env"}`; a row has `position` (1 = lowest layer), `name`, `url`, `ref`, `subdir`, `pin`, `enabled`, `refresh_interval`, `official`, `commit`, `fetched_at`, `checked_at`, `error_at`, `last_error`, `error_reported`, `load_error`, `engines`, `models`, `warnings`, `status`, `token_present`, `token_source` (`env`, `keyring`, `none`), `syncing` (the same rows as `alkahest catalog ls --json`) |
+| `POST catalogs` | `{"name", "url", "ref"?, "subdir"?, "pin"?, "refresh_interval"?, "enabled"?, "sync"?}` | `201 {"catalog": row, "job": job or null}`. The catalog goes last in the layer order. `sync: true` starts its sync job. A `token` field is refused: use `PUT catalogs/{name}/token` |
+| `PATCH catalogs/{name}` | any of `{"enabled", "ref", "subdir", "pin", "refresh_interval"}`; `"pin": null` unpins | `{"catalog": row}`. The URL and the name cannot change (remove and add instead) |
+| `DELETE catalogs/{name}?delete_token=true` | | `{"catalog", "result": "removed" or "disabled", "snapshot_deleted", "token_deleted"}`. `official` is disabled, never removed, and keeps its snapshot. `delete_token=true` also clears the keyring entry |
+| `POST catalogs/sync` | | `202 {"job", "created"}`: a `catalog_sync` job over every enabled catalog |
+| `POST catalogs/{name}/sync` | | `202 {"job", "created"}`; `409` for a disabled catalog |
+| `PUT catalogs/{name}/token` | `{"token": "..."}` | `{"catalog", "token_present", "token_source", "shadowed_by_env"}`. Stored in the server's OS keyring (service `alkahest`, user `catalog:<name>`). The token is never returned, logged or echoed in an error |
+| `DELETE catalogs/{name}/token` | | `{"catalog", "token_present", "token_source"}` |
+| `GET catalog/models/{ns}/{model}?catalog=` | | `{"name", "reference", "description", "license", "homepage", "tags", "default_tag", "catalog", "commit", "variants": [...]}`; a variant has `tag`, `reference`, `default`, `format`, `quant`, `engine`, `engine_resolved`, `engine_build` (`engine`, `installed`, `version`, `variant`, `path`, `native`, `native_stale`), `template`, `template_text`, `template_format`, `params`, `size`, `files` (`kind`, `filename`, `size`, `sha256`, `sha256_short`, `urls`, `auth`), `catalog`, `commit`, `pulled` |
+
+A sync job reports its step as the job `phase`, prefixed with the catalog name: `resolving
+ref`, `reading directory`, `downloading changed files n / m` (with `completed` / `total`
+counting files), `extracting archive`, `validating`. A failed sync fails the job and keeps the
+previous snapshot.
+
+The background refresh of `serve` (off with `ALKAHEST_CATALOG_AUTO_SYNC=0`) publishes a
+`catalog` event on `GET events` the first time a catalog's sync fails:
+`{"kind": "sync_failed", "catalog", "error", "error_at", "retry_after_secs",
+"snapshot_in_use"}`. Further failures of the same catalog are not announced again until a sync
+succeeds.
+
+`PUT settings/server` accepts `{"catalog_limits": {"max_snapshot_bytes", "max_file_bytes",
+"max_archive_bytes"}}` (bytes; `null` resets a field); `GET settings/server` returns
+`catalog_limits` and `catalog_limits_default`. The limits apply to the next sync at once.
+
+`POST engines/install` takes `with: ["<dependency id>"]` (optional dependencies of the variant
+for the server's platform) and `native: true` (the native variant of the server's CPU, built
+from source; not combined with `variant`).
 
 ## Compatibility notes
 
