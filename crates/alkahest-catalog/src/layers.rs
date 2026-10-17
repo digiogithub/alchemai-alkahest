@@ -11,7 +11,11 @@ use serde::Serialize;
 
 use crate::content::{CatalogContent, ValidateOptions, validate};
 use crate::model::{ModelEntry, ModelVariant};
-use crate::snapshot::{self, SnapshotMeta, read_files, read_meta};
+use crate::snapshot::{self, SnapshotMeta, read_meta, read_snapshot};
+
+/// After a failed sync, the next attempt is due this soon (or at the refresh interval, if
+/// shorter), so one network hiccup does not leave a catalog stale for a day.
+pub const RETRY_AFTER_ERROR: Duration = Duration::from_secs(15 * 60);
 
 /// One configured catalog as found on disk.
 #[derive(Debug, Clone, Serialize)]
@@ -56,10 +60,13 @@ impl CatalogState {
         {
             return false;
         }
-        let interval = self
+        let mut interval = self
             .source
             .refresh_duration()
             .unwrap_or(Duration::from_secs(86_400));
+        if self.meta.as_ref().is_some_and(|m| m.last_error.is_some()) {
+            interval = interval.min(RETRY_AFTER_ERROR);
+        }
         match self.meta.as_ref().and_then(SnapshotMeta::checked_age) {
             Some(age) => age >= interval,
             None => true,
@@ -83,14 +90,14 @@ pub fn load_states(data_dir: &Path, sources: &[CatalogSource]) -> Vec<CatalogSta
         .iter()
         .map(|source| {
             let dir = snapshot::snapshot_dir(data_dir, &source.name);
-            let meta = read_meta(&dir);
-            let (content, load_error) = if source.enabled && snapshot::has_content(&dir) {
-                match validate(&read_files(&dir), &ValidateOptions::lenient(&source.name)) {
-                    Ok(c) => (Some(c), None),
-                    Err(e) => (None, Some(e.to_string())),
+            let (meta, content, load_error) = match read_snapshot(&dir) {
+                Some((meta, files)) if source.enabled => {
+                    match validate(&files, &ValidateOptions::lenient(&source.name)) {
+                        Ok(c) => (Some(meta), Some(c), None),
+                        Err(e) => (Some(meta), None, Some(e.to_string())),
+                    }
                 }
-            } else {
-                (None, None)
+                _ => (read_meta(&dir), None, None),
             };
             CatalogState {
                 source: source.clone(),

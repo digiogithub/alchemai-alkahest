@@ -119,16 +119,20 @@ alkahest catalog rm acme                  # removes the source and its snapshot
 - **Refresh.** `serve` and `engines` refresh a catalog older than its `refresh_interval`
   (default `24h`) in the background and never wait for the network. A catalog that was never
   fetched is fetched once in the foreground (at most 10 s); offline, the built-in recipes are
-  used and one notice says so. `ALKAHEST_CATALOG_AUTO_SYNC=0` turns automatic refresh off;
-  `pin = "<commit>"` freezes a catalog.
+  used and one notice says so. After a failed sync the next attempt comes 15 minutes later
+  (or at the refresh interval, if shorter). `ALKAHEST_CATALOG_AUTO_SYNC=0` turns automatic
+  refresh off; `pin = "<commit>"` freezes a catalog.
+- **Limits.** `[catalog_limits]` bounds a sync: `max_snapshot_bytes` (16 MiB),
+  `max_file_bytes` (1 MiB) and `max_archive_bytes` (256 MiB, the commit archive of the
+  fallback transport; its decompressed stream is bounded to four times that).
 - **Transport.** No `git` is needed: the ref is resolved over git smart HTTP, then only the
   changed files of that commit are downloaded (HTTPS, system proxy settings honoured). GitHub,
   GitLab and Gitea/Forgejo work as is; other hosts need `raw_url` and `archive_url` templates
   in the `[[catalogs]]` entry. A `file://` URL reads a plain directory (air-gapped installs).
 - **Private catalogs.** Store the token in the OS keyring (service `alkahest`, user
   `catalog:<name>`) or set `ALKAHEST_CATALOG_TOKEN_<NAME>` (name upper-cased, `-` and `.` as
-  `_`). It is sent only to the repository's own host, never written to configuration,
-  snapshots or logs.
+  `_`). It is looked up only after the host refuses anonymous access (401/403), sent only to
+  the repository's own host, and never written to configuration, snapshots or logs.
 - **Safety.** A sync only downloads and parses TOML. It never runs anything and never
   downloads an engine or a model; that happens on `engines install` or `pull`, verified against
   the sha256 the catalog pins.

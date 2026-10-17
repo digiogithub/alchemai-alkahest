@@ -55,6 +55,8 @@ pub struct Config {
     /// Git catalog sources (`[[catalogs]]`), lowest layer first (ALK-SP-0011.R9). Without any
     /// `[[catalogs]]` table the list holds the official catalog.
     pub catalogs: Vec<CatalogSource>,
+    /// Size bounds of catalog syncs (ALK-SP-0011.R14).
+    pub catalog_limits: CatalogLimits,
 }
 
 impl Default for Config {
@@ -69,6 +71,31 @@ impl Default for Config {
             logging: LoggingConfig::default(),
             pull: PullConfig::default(),
             catalogs: vec![CatalogSource::official()],
+            catalog_limits: CatalogLimits::default(),
+        }
+    }
+}
+
+/// Size bounds of catalog syncs (`[catalog_limits]`, ALK-SP-0011.R14). A sync that exceeds
+/// one fails and keeps the previous snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CatalogLimits {
+    /// Largest catalog snapshot in bytes (all its files together).
+    pub max_snapshot_bytes: u64,
+    /// Largest single catalog file in bytes.
+    pub max_file_bytes: u64,
+    /// Largest commit archive (`tar.gz`, the fallback transport) in bytes; its decompressed
+    /// stream is bounded to four times this.
+    pub max_archive_bytes: u64,
+}
+
+impl Default for CatalogLimits {
+    fn default() -> Self {
+        Self {
+            max_snapshot_bytes: 16 * 1024 * 1024,
+            max_file_bytes: 1024 * 1024,
+            max_archive_bytes: 256 * 1024 * 1024,
         }
     }
 }
@@ -190,10 +217,8 @@ impl CatalogSource {
                 self.url
             )));
         }
-        if self.url.contains('@') && !self.url.starts_with("file://") {
-            return Err(bad(
-                "url must not carry credentials; store the token in the OS keyring".into(),
-            ));
+        if !self.url.starts_with("file://") {
+            check_url_text("url", &self.url).map_err(bad)?;
         }
         if self.r#ref.trim().is_empty()
             || self.r#ref.starts_with('-')
@@ -207,15 +232,10 @@ impl CatalogSource {
                 self.r#ref
             )));
         }
-        let sub = self.subdir.trim_matches('/');
-        if self.subdir.starts_with('/')
-            || self.subdir.contains('\\')
-            || sub
-                .split('/')
-                .any(|c| c == ".." || (c.is_empty() && !sub.is_empty()))
-        {
+        if self.subdir != "." && !is_safe_subdir(&self.subdir) {
             return Err(bad(format!(
-                "subdir `{}` must be a relative path without `..`",
+                "subdir `{}` must be `.` or relative folder names of letters, digits, `.`, `_` \
+                 and `-` (not starting with `.`)",
                 self.subdir
             )));
         }
@@ -234,6 +254,7 @@ impl CatalogSource {
                 if !(t.starts_with("https://") || is_loopback_http(t)) {
                     return Err(bad(format!("{key} must be an https:// URL template")));
                 }
+                check_url_text(key, t).map_err(bad)?;
                 if !t.contains("{commit}") {
                     return Err(bad(format!("{key} must contain `{{commit}}`")));
                 }
@@ -248,6 +269,36 @@ impl CatalogSource {
             .map_err(|e| bad(format!("refresh_interval: {e}")))?;
         Ok(())
     }
+}
+
+/// Refuses URL text whose host a reader could misjudge: user info (`@`), backslashes (which
+/// URL parsers treat as `/`, so `https://evil.example\\@good.example/` goes to `evil.example`),
+/// whitespace and control characters. Credentials never belong in a URL anyway.
+fn check_url_text(key: &str, url: &str) -> std::result::Result<(), String> {
+    if url.contains('@') {
+        return Err(format!(
+            "{key} must not carry credentials (`@`); store the token in the OS keyring"
+        ));
+    }
+    if url.contains('\\') || url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(format!(
+            "{key} must not contain backslashes, spaces or control characters"
+        ));
+    }
+    Ok(())
+}
+
+/// A repository folder: `/`-separated names of ASCII letters, digits, `.`, `_` and `-`, none
+/// empty and none starting with `.` (so no `..`, and nothing a URL could decode differently).
+fn is_safe_subdir(subdir: &str) -> bool {
+    let s = subdir.trim_end_matches('/');
+    !s.is_empty()
+        && s.split('/').all(|c| {
+            !c.is_empty()
+                && !c.starts_with('.')
+                && c.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        })
 }
 
 /// Whether `name` is a valid catalog (or catalog entry component) name: non-empty, lower-case
@@ -759,6 +810,17 @@ impl Config {
         if self.logging.max_files == 0 {
             return Err(Error::InvalidConfig(
                 "logging.max_files must be at least 1".into(),
+            ));
+        }
+        let l = &self.catalog_limits;
+        if l.max_file_bytes < 1024
+            || l.max_snapshot_bytes < l.max_file_bytes
+            || l.max_archive_bytes < 1024
+        {
+            return Err(Error::InvalidConfig(
+                "catalog_limits: max_file_bytes and max_archive_bytes must be at least 1024, \
+                 and max_snapshot_bytes at least max_file_bytes"
+                    .into(),
             ));
         }
         for (i, c) in self.catalogs.iter().enumerate() {
@@ -1359,6 +1421,11 @@ mod tests {
             "[[catalogs]]\nname = \"a\"\nurl = \"http://x.org/a\"\n",
             "[[catalogs]]\nname = \"a\"\nurl = \"https://u:p@x.org/a\"\n",
             "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\nsubdir = \"../x\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\nsubdir = \"%2e%2e/x\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\nsubdir = \"a?b\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\nsubdir = \"a#b\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://evil.com\\\\@git.example.org/a\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\nraw_url = \"https://evil.com\\\\@x.org/{commit}/{path}\"\n",
             "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\npin = \"abc\"\n",
             "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\nrefresh_interval = \"soon\"\n",
             "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\n[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/b\"\n",
@@ -1384,6 +1451,17 @@ mod tests {
         let err = load_with(&opts(tmp.path()), &fake(&[])).unwrap_err();
         assert!(matches!(err, Error::SecretInConfig { .. }));
         assert!(!err.to_string().contains("ghp_secret"));
+    }
+
+    #[test]
+    fn catalog_limits_are_configurable() {
+        let c = Config::from_toml_str(
+            "[catalog_limits]\nmax_snapshot_bytes = 4096\nmax_file_bytes = 2048\n",
+        )
+        .unwrap();
+        assert_eq!(c.catalog_limits.max_file_bytes, 2048);
+        assert_eq!(c.catalog_limits.max_archive_bytes, 256 * 1024 * 1024);
+        assert!(Config::from_toml_str("[catalog_limits]\nmax_file_bytes = 0\n").is_err());
     }
 
     #[test]

@@ -235,7 +235,11 @@ async fn serve(
         )
         .with_catalogs(&paths.data_dir, config.catalogs.clone()),
     );
-    spawn_catalog_refresh(paths.data_dir.clone(), config.catalogs.clone());
+    spawn_catalog_refresh(
+        paths.data_dir.clone(),
+        config.catalogs.clone(),
+        alkahest_catalog::Limits::from_config(&config.catalog_limits),
+    );
     let admin = AdminContext::builder(config.clone(), paths.clone(), config_file)
         .sources(loaded.sources.iter().map(ToString::to_string).collect())
         .engines(engines)
@@ -338,6 +342,7 @@ const CATALOG_CHECK_EVERY: Duration = Duration::from_secs(10 * 60);
 fn spawn_catalog_refresh(
     data_dir: std::path::PathBuf,
     sources: Vec<alkahest_core::config::CatalogSource>,
+    limits: alkahest_catalog::Limits,
 ) {
     if std::env::var(crate::catalog_cmd::AUTO_SYNC_ENV).is_ok_and(|v| {
         matches!(
@@ -349,14 +354,19 @@ fn spawn_catalog_refresh(
     }
     tokio::spawn(async move {
         let ctx = match alkahest_catalog::SyncContext::new(&data_dir) {
-            Ok(c) => c,
+            Ok(c) => c.with_limits(limits),
             Err(e) => {
                 tracing::warn!(error = %e, "catalog refresh disabled");
                 return;
             }
         };
         loop {
-            let states = alkahest_catalog::load_states(&data_dir, &sources);
+            let states = {
+                let (d, s) = (data_dir.clone(), sources.clone());
+                tokio::task::spawn_blocking(move || alkahest_catalog::load_states(&d, &s))
+                    .await
+                    .unwrap_or_default()
+            };
             for state in states.iter().filter(|s| s.is_due()) {
                 match alkahest_catalog::sync(&state.source, &ctx).await {
                     Ok(r) => {

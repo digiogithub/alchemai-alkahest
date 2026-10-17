@@ -59,6 +59,9 @@ Sections are TOML tables: `server.port` is `port` under `[server]`. A key shown 
 | `catalogs[].refresh_interval` | String | unset | How old a snapshot may get before a background refresh (`30m`, `24h`, `7d`). |
 | `catalogs[].raw_url` | optional String | unset | Raw file URL template for hosts other than GitHub, GitLab and Gitea/Forgejo, with `{commit}` and `{path}` placeholders. |
 | `catalogs[].archive_url` | optional String | unset | Commit archive (`tar.gz`) URL template for other hosts, with a `{commit}` placeholder. |
+| `catalog_limits.max_snapshot_bytes` | u64 | `16777216` | Largest catalog snapshot in bytes (all its files together). |
+| `catalog_limits.max_file_bytes` | u64 | `1048576` | Largest single catalog file in bytes. |
+| `catalog_limits.max_archive_bytes` | u64 | `268435456` | Largest commit archive (`tar.gz`, the fallback transport) in bytes; its decompressed stream is bounded to four times this. |
 
 ## Environment variables that set a key
 

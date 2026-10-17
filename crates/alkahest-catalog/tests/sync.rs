@@ -5,7 +5,7 @@ mod common;
 
 use std::sync::{Arc, Mutex};
 
-use alkahest_catalog::snapshot::{read_meta, snapshot_dir};
+use alkahest_catalog::snapshot::{content_dir, read_meta, snapshot_dir};
 use alkahest_catalog::{CatalogError, SyncOutcome, load_states, sync};
 use common::*;
 use wiremock::matchers::{method, path};
@@ -268,12 +268,16 @@ async fn interrupted_sync_leaves_no_partial_snapshot() {
         .mount(&server)
         .await;
     assert!(sync(&source(&server), &context(data.path())).await.is_err());
-    let names: Vec<String> = std::fs::read_dir(data.path().join("catalogs"))
+    // Only the current version directory and snapshot.toml remain.
+    let dir = snapshot_dir(data.path(), "acme");
+    let current = read_meta(&dir).unwrap().version;
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(names, vec!["acme".to_string()]);
+    names.sort();
+    assert_eq!(names, vec!["snapshot.toml".to_string(), current]);
     let states = load_states(data.path(), &[source(&server)]);
     assert_eq!(states[0].commit(), Some(C1));
     assert_eq!(states[0].content.as_ref().unwrap().models.len(), 1);
@@ -336,7 +340,7 @@ async fn archive_fallback_without_index() {
         panic!();
     };
     assert_eq!(transport, "archive");
-    let dir = snapshot_dir(data.path(), "acme");
+    let dir = content_dir(&snapshot_dir(data.path(), "acme")).unwrap();
     assert!(dir.join("engines/llama-cpp.toml").is_file());
     assert!(!dir.join("README.md").exists());
     assert!(!dir.join("scripts").exists());
@@ -497,7 +501,7 @@ async fn token_never_logged() {
         .await;
     let data = tempfile::tempdir().unwrap();
     let mut ctx = context(data.path());
-    ctx.credentials = Arc::new(FixedToken(SECRET));
+    ctx.credentials = Arc::new(FixedToken::new(SECRET));
     let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
     let writer = {
         let buf = buf.clone();
@@ -520,9 +524,10 @@ async fn token_never_logged() {
     let meta =
         std::fs::read_to_string(snapshot_dir(data.path(), "acme").join("snapshot.toml")).unwrap();
     assert!(!meta.contains(SECRET));
-    // The token was sent (basic auth) to the repository host itself.
+    // Anonymous first; the token (basic auth) only after the 401, to the repository host.
     let reqs = server.received_requests().await.unwrap();
-    assert!(reqs[0].headers.get("authorization").is_some());
+    assert!(reqs[0].headers.get("authorization").is_none());
+    assert!(reqs.last().unwrap().headers.get("authorization").is_some());
 }
 
 struct SharedWriter(Arc<Mutex<Vec<u8>>>);
@@ -537,6 +542,35 @@ impl std::io::Write for SharedWriter {
     }
 }
 
+/// A private host: 401 without `Authorization`, otherwise ls-refs, raw files, and a
+/// redirect of `catalog.toml` to another host.
+struct PrivateHost {
+    files: std::collections::BTreeMap<String, Vec<u8>>,
+    redirect: String,
+}
+
+impl wiremock::Respond for PrivateHost {
+    fn respond(&self, req: &wiremock::Request) -> ResponseTemplate {
+        if req.headers.get("authorization").is_none() {
+            return ResponseTemplate::new(401);
+        }
+        let p = req.url.path();
+        if p.ends_with("git-upload-pack") {
+            return ResponseTemplate::new(200).set_body_string(ls_refs(C1));
+        }
+        if p.ends_with("/catalog/catalog.toml") {
+            return ResponseTemplate::new(302).insert_header("location", self.redirect.as_str());
+        }
+        match p
+            .strip_prefix(&format!("/raw/{C1}/catalog/"))
+            .and_then(|r| self.files.get(r))
+        {
+            Some(b) => ResponseTemplate::new(200).set_body_bytes(b.clone()),
+            None => ResponseTemplate::new(404),
+        }
+    }
+}
+
 /// R14 "token not forwarded across hosts": a raw file redirected to another host.
 #[tokio::test]
 async fn token_not_forwarded_across_hosts() {
@@ -544,18 +578,13 @@ async fn token_not_forwarded_across_hosts() {
     let other = MockServer::start().await;
     let data = tempfile::tempdir().unwrap();
     let files = catalog_files(ENGINE_URL);
-    mount_refs(&server, C1).await;
-    let mut local = files.clone();
-    local.remove("catalog.toml");
-    mount_raw(&server, C1, &local).await;
     // `localhost` instead of `127.0.0.1`: another host, not just another port.
     let target = other.uri().replace("127.0.0.1", "localhost");
-    Mock::given(method("GET"))
-        .and(path(format!("/raw/{C1}/catalog/catalog.toml")))
-        .respond_with(
-            ResponseTemplate::new(302)
-                .insert_header("location", format!("{target}/moved/catalog.toml").as_str()),
-        )
+    Mock::given(wiremock::matchers::any())
+        .respond_with(PrivateHost {
+            files: files.clone(),
+            redirect: format!("{target}/moved/catalog.toml"),
+        })
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -564,18 +593,113 @@ async fn token_not_forwarded_across_hosts() {
         .mount(&other)
         .await;
     let mut ctx = context(data.path());
-    ctx.credentials = Arc::new(FixedToken("tok_secret"));
+    let creds = Arc::new(FixedToken::new("tok_secret"));
+    ctx.credentials = creds.clone();
     sync(&source(&server), &ctx).await.unwrap();
+    assert_eq!(creds.lookups(), 1);
     let redirected = other.received_requests().await.unwrap();
     assert_eq!(redirected.len(), 1);
     assert!(redirected[0].headers.get("authorization").is_none());
-    // The first host did get it.
-    let first = server.received_requests().await.unwrap();
+}
+
+/// Security review finding 2: a public catalog never looks for a token (no keyring access).
+#[tokio::test]
+async fn public_catalog_never_reads_the_keyring() {
+    let server = MockServer::start().await;
+    let data = tempfile::tempdir().unwrap();
+    let files = catalog_files(ENGINE_URL);
+    mount_refs(&server, C1).await;
+    mount_raw(&server, C1, &files).await;
+    let mut ctx = context(data.path());
+    let creds = Arc::new(FixedToken::new("tok_secret"));
+    ctx.credentials = creds.clone();
+    sync(&source(&server), &ctx).await.unwrap();
+    assert_eq!(creds.lookups(), 0);
+    let reqs = server.received_requests().await.unwrap();
     assert!(
-        first
-            .iter()
-            .all(|r| r.headers.get("authorization").is_some())
+        reqs.iter()
+            .all(|r| r.headers.get("authorization").is_none())
     );
+}
+
+/// Security review finding 2: the deadline fires even on a current-thread runtime, and the
+/// timeout is recorded like any failure.
+#[tokio::test]
+async fn sync_deadline_fires() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(ls_refs(C1))
+                .set_delay(std::time::Duration::from_secs(5)),
+        )
+        .mount(&server)
+        .await;
+    let data = tempfile::tempdir().unwrap();
+    let mut ctx = context(data.path());
+    ctx.deadline = Some(std::time::Duration::from_millis(300));
+    let started = std::time::Instant::now();
+    let err = sync(&source(&server), &ctx).await.unwrap_err();
+    assert!(matches!(err, CatalogError::Timeout(_)), "{err}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    let meta = read_meta(&snapshot_dir(data.path(), "acme")).unwrap();
+    assert!(meta.last_error.unwrap().contains("timed out"));
+    // The lock was released.
+    assert!(!alkahest_catalog::snapshot::sync_in_progress(
+        data.path(),
+        "acme"
+    ));
+}
+
+/// Security review finding 9: index sizes that overflow when summed fail cleanly.
+#[tokio::test]
+async fn huge_index_sizes_do_not_overflow() {
+    let server = MockServer::start().await;
+    let data = tempfile::tempdir().unwrap();
+    let mut idx = String::from("schema_version = \"1.0\"\n");
+    for p in ["catalog.toml", "engines/a.toml", "engines/b.toml"] {
+        idx.push_str(&format!(
+            "[[files]]\npath = \"{p}\"\nsha256 = \"{}\"\nsize = {}\n",
+            "0".repeat(64),
+            u64::MAX / 2
+        ));
+    }
+    let mut ctx = context(data.path());
+    ctx.limits.max_file_bytes = u64::MAX;
+    ctx.limits.max_total_bytes = u64::MAX - 1;
+    let mut files = std::collections::BTreeMap::new();
+    files.insert("index.toml".to_string(), idx.into_bytes());
+    mount_refs(&server, C1).await;
+    mount_raw(&server, C1, &files).await;
+    let err = sync(&source(&server), &ctx).await.unwrap_err();
+    assert!(matches!(err, CatalogError::TooLarge { .. }), "{err}");
+}
+
+/// Security review finding 6: a failed sync is retried after a short delay, not after the
+/// whole refresh interval.
+#[tokio::test]
+async fn failed_sync_is_retried_after_a_short_delay() {
+    let server = MockServer::start().await;
+    let mut src = source(&server);
+    src.url = "http://127.0.0.1:9/acme/catalog".into();
+    let data = tempfile::tempdir().unwrap();
+    assert!(sync(&src, &context(data.path())).await.is_err());
+    let states = load_states(data.path(), std::slice::from_ref(&src));
+    assert!(!states[0].is_due(), "just checked");
+    let dir = snapshot_dir(data.path(), "acme");
+    let text = std::fs::read_to_string(dir.join("snapshot.toml")).unwrap();
+    let mut meta: toml::Table = toml::from_str(&text).unwrap();
+    let past = time::OffsetDateTime::now_utc() - time::Duration::minutes(20);
+    meta.insert(
+        "checked_at".into(),
+        toml::Value::String(
+            past.format(&time::format_description::well_known::Rfc3339)
+                .unwrap(),
+        ),
+    );
+    std::fs::write(dir.join("snapshot.toml"), toml::to_string(&meta).unwrap()).unwrap();
+    let states = load_states(data.path(), &[src]);
+    assert!(states[0].is_due(), "20 minutes after a failure");
 }
 
 /// `file://` sources: a plain directory, for air-gapped installs (R9).

@@ -1,6 +1,18 @@
-//! Snapshots on disk (ALK-SP-0011.R10): `<data_dir>/catalogs/<name>/` holds the catalog files
-//! of one commit plus `snapshot.toml`. A new snapshot is written to a temporary directory and
-//! swapped in only after validation; a failed sync leaves the previous one untouched.
+//! Snapshots on disk (ALK-SP-0011.R10).
+//!
+//! ```text
+//! <data_dir>/catalogs/
+//!   .lock-<name>                 advisory OS lock held while <name> is synced
+//!   <name>/
+//!     snapshot.toml              metadata + `version`: the pointer to the content in use
+//!     v-<commit12>-<nanos>/      catalog files of one commit (immutable once written)
+//! ```
+//!
+//! A new snapshot is written to a fresh version directory and becomes current by one atomic
+//! rename of `snapshot.toml` naming it, so a reader sees either the old or the new commit, never
+//! a mix and never nothing. Version directories that `snapshot.toml` does not name are removed
+//! under the lock after a grace period; the current one is never removed. Every write of
+//! `snapshot.toml` happens under the catalog lock.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -14,19 +26,21 @@ use time::format_description::well_known::Rfc3339;
 use crate::error::{CatalogError, Result};
 use crate::layout;
 
-/// Metadata file of a snapshot.
+/// Metadata (and current-version pointer) file of a snapshot.
 pub const SNAPSHOT_FILE: &str = "snapshot.toml";
-/// Prefix of temporary and retired directories inside `catalogs/`.
-const TMP_PREFIX: &str = ".tmp-";
-const OLD_PREFIX: &str = ".old-";
+/// Prefix of version directories.
+const VERSION_PREFIX: &str = "v-";
 const LOCK_PREFIX: &str = ".lock-";
-/// A lock or temporary directory older than this belongs to a dead process.
-const STALE_AFTER: Duration = Duration::from_secs(15 * 60);
+/// Version directories not named by `snapshot.toml` are kept this long, so a reader that read
+/// the previous pointer a moment ago still finds its files.
+const ORPHAN_GRACE: Duration = Duration::from_secs(10 * 60);
 
 /// `snapshot.toml`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SnapshotMeta {
+    /// Version directory holding the content in use; empty when no content was ever fetched.
+    pub version: String,
     /// Source URL the content came from.
     pub url: String,
     /// Ref followed.
@@ -98,22 +112,62 @@ pub fn read_meta(dir: &Path) -> Option<SnapshotMeta> {
     toml::from_str(&text).ok()
 }
 
-/// Writes `snapshot.toml` atomically (temporary file + rename), creating `dir`.
+/// Writes `snapshot.toml` atomically (temporary file + rename), creating `dir`. Callers hold
+/// the catalog lock.
 ///
 /// # Errors
 ///
 /// [`CatalogError::Io`].
-pub fn write_meta(dir: &Path, meta: &SnapshotMeta) -> Result<()> {
+pub(crate) fn write_meta(dir: &Path, meta: &SnapshotMeta) -> Result<()> {
     fs::create_dir_all(dir).map_err(|e| CatalogError::io(dir, e))?;
     let text = toml::to_string(meta).map_err(|e| CatalogError::Config(e.to_string()))?;
-    let tmp = dir.join(format!("{SNAPSHOT_FILE}.tmp"));
+    let tmp = dir.join(format!("{SNAPSHOT_FILE}.{}.tmp", std::process::id()));
     fs::write(&tmp, text).map_err(|e| CatalogError::io(&tmp, e))?;
     let dest = dir.join(SNAPSHOT_FILE);
-    fs::rename(&tmp, &dest).map_err(|e| CatalogError::io(&dest, e))
+    fs::rename(&tmp, &dest).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        CatalogError::io(&dest, e)
+    })
 }
 
-/// Reads the catalog files of a snapshot directory (`path -> bytes`), layout files only.
-/// Symlinks are never followed.
+/// Whether `version` is a plain version directory name (never a path).
+fn is_version_name(version: &str) -> bool {
+    version.starts_with(VERSION_PREFIX)
+        && version
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+/// The metadata and the files of the snapshot in use, read consistently: when the version
+/// directory vanished between reading the pointer and the files (a concurrent sync retired it),
+/// the pointer is read again.
+pub fn read_snapshot(dir: &Path) -> Option<(SnapshotMeta, BTreeMap<String, Vec<u8>>)> {
+    for _ in 0..3 {
+        let meta = read_meta(dir)?;
+        if !is_version_name(&meta.version) {
+            return None;
+        }
+        let vdir = dir.join(&meta.version);
+        if !vdir.is_dir() {
+            continue;
+        }
+        let files = read_files(&vdir);
+        if files.contains_key(layout::MANIFEST) {
+            return Some((meta, files));
+        }
+    }
+    None
+}
+
+/// The directory of the snapshot in use, for inspection (tests, diagnostics).
+pub fn content_dir(dir: &Path) -> Option<PathBuf> {
+    read_meta(dir)
+        .filter(|m| is_version_name(&m.version))
+        .map(|m| dir.join(m.version))
+}
+
+/// Reads the catalog files of a directory (`path -> bytes`), layout files only. Symlinks are
+/// never followed.
 pub fn read_files(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     let mut out = BTreeMap::new();
     collect(dir, "", 0, &mut out);
@@ -148,14 +202,23 @@ fn collect(dir: &Path, prefix: &str, depth: usize, out: &mut BTreeMap<String, Ve
     }
 }
 
-/// Removes temporary and retired directories and dead locks left by killed processes.
-pub(crate) fn cleanup_stale(root: &Path) {
-    let Ok(read) = fs::read_dir(root) else {
+/// Removes version directories of `dir` that `snapshot.toml` does not name and that are older
+/// than the grace period, plus stray temporary files. The current version is never removed.
+/// Callers hold the catalog lock.
+pub(crate) fn cleanup(dir: &Path) {
+    cleanup_with_grace(dir, ORPHAN_GRACE);
+}
+
+fn cleanup_with_grace(dir: &Path, grace: Duration) {
+    let current = read_meta(dir).map(|m| m.version).unwrap_or_default();
+    let Ok(read) = fs::read_dir(dir) else {
         return;
     };
     for entry in read.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !(name.starts_with(TMP_PREFIX) || name.starts_with(OLD_PREFIX)) {
+        let removable = (is_version_name(&name) && name != current)
+            || (name.starts_with(SNAPSHOT_FILE) && name.ends_with(".tmp"));
+        if !removable {
             continue;
         }
         let old = entry
@@ -163,53 +226,55 @@ pub(crate) fn cleanup_stale(root: &Path) {
             .and_then(|m| m.modified())
             .ok()
             .and_then(|t| SystemTime::now().duration_since(t).ok())
-            .is_some_and(|d| d > STALE_AFTER);
+            .is_some_and(|d| d >= grace);
         if old {
-            let _ = fs::remove_dir_all(entry.path());
+            let p = entry.path();
+            if p.is_dir() {
+                let _ = fs::remove_dir_all(p);
+            } else {
+                let _ = fs::remove_file(p);
+            }
         }
     }
 }
 
-/// An exclusive per-catalog lock file, removed on drop.
+/// An exclusive per-catalog advisory OS lock (`flock`/`LockFileEx` through `std::fs::File`).
+/// The OS releases it when the holder exits, so a crashed sync never leaves a stale lock, and
+/// a long sync is never mistaken for a dead one.
 #[derive(Debug)]
 pub(crate) struct SyncLock {
-    path: PathBuf,
+    _file: fs::File,
 }
 
 impl SyncLock {
-    /// Takes the lock of `name`, stealing it when it is older than [`STALE_AFTER`].
+    /// Takes the lock of `name` without waiting.
+    ///
+    /// # Errors
+    ///
+    /// [`CatalogError::Busy`] when another sync holds it.
     pub(crate) fn acquire(root: &Path, name: &str) -> Result<Self> {
         fs::create_dir_all(root).map_err(|e| CatalogError::io(root, e))?;
         let path = root.join(format!("{LOCK_PREFIX}{name}"));
-        for _ in 0..2 {
-            match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(_) => return Ok(Self { path }),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let stale = fs::metadata(&path)
-                        .and_then(|m| m.modified())
-                        .ok()
-                        .and_then(|t| SystemTime::now().duration_since(t).ok())
-                        .is_some_and(|d| d > STALE_AFTER);
-                    if !stale {
-                        return Err(CatalogError::Busy(name.to_string()));
-                    }
-                    let _ = fs::remove_file(&path);
-                }
-                Err(e) => return Err(CatalogError::io(&path, e)),
-            }
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|e| CatalogError::io(&path, e))?;
+        match file.try_lock() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(fs::TryLockError::WouldBlock) => Err(CatalogError::Busy(name.to_string())),
+            Err(fs::TryLockError::Error(e)) => Err(CatalogError::io(&path, e)),
         }
-        Err(CatalogError::Busy(name.to_string()))
     }
 }
 
-impl Drop for SyncLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
+/// Whether a sync of `name` is running right now (its lock is held).
+pub fn sync_in_progress(data_dir: &Path, name: &str) -> bool {
+    matches!(
+        SyncLock::acquire(&catalogs_root(data_dir), name),
+        Err(CatalogError::Busy(_))
+    )
 }
 
 /// Removes a directory on drop unless disarmed.
@@ -223,31 +288,32 @@ impl Drop for DirGuard {
     }
 }
 
-fn unique_suffix(name: &str) -> String {
-    let nanos = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or_default();
-    format!("{name}-{}-{nanos}", std::process::id())
-}
-
-/// Writes a validated snapshot to a temporary directory and swaps it in for
-/// `<root>/<name>`. On any failure the temporary directory is removed and the previous
-/// snapshot stays as it was.
+/// Writes `files` into a new version directory of `dir` and returns its name. Nothing points
+/// at it yet; [`activate`] makes it current. On failure the directory is removed.
 ///
 /// # Errors
 ///
 /// [`CatalogError::Io`] or [`CatalogError::UnsafePath`].
-pub(crate) fn install(
-    root: &Path,
+pub(crate) fn stage(
+    dir: &Path,
     name: &str,
+    commit: &str,
     files: &BTreeMap<String, Vec<u8>>,
-    meta: &SnapshotMeta,
-) -> Result<()> {
-    fs::create_dir_all(root).map_err(|e| CatalogError::io(root, e))?;
-    let tmp = root.join(format!("{TMP_PREFIX}{}", unique_suffix(name)));
-    let mut guard = DirGuard(Some(tmp.clone()));
-    fs::create_dir(&tmp).map_err(|e| CatalogError::io(&tmp, e))?;
+) -> Result<String> {
+    fs::create_dir_all(dir).map_err(|e| CatalogError::io(dir, e))?;
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let short: String = commit
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(12)
+        .collect();
+    let version = format!("{VERSION_PREFIX}{short}-{nanos}-{}", std::process::id());
+    let vdir = dir.join(&version);
+    let mut guard = DirGuard(Some(vdir.clone()));
+    fs::create_dir(&vdir).map_err(|e| CatalogError::io(&vdir, e))?;
     for (rel, bytes) in files {
         if layout::check_relative(rel).is_err() || layout::classify(rel).is_none() {
             return Err(CatalogError::UnsafePath {
@@ -255,78 +321,97 @@ pub(crate) fn install(
                 path: rel.clone(),
             });
         }
-        let dest = tmp.join(rel);
+        let dest = vdir.join(rel);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|e| CatalogError::io(parent, e))?;
         }
         fs::write(&dest, bytes).map_err(|e| CatalogError::io(&dest, e))?;
     }
-    write_meta(&tmp, meta)?;
-
-    let current = root.join(name);
-    let retired = root.join(format!("{OLD_PREFIX}{}", unique_suffix(name)));
-    let had_current = current.exists();
-    if had_current {
-        fs::rename(&current, &retired).map_err(|e| CatalogError::io(&current, e))?;
-    }
-    if let Err(e) = fs::rename(&tmp, &current) {
-        if had_current {
-            let _ = fs::rename(&retired, &current);
-        }
-        return Err(CatalogError::io(&current, e));
-    }
     guard.0 = None;
-    if had_current {
-        let _ = fs::remove_dir_all(&retired);
-    }
-    Ok(())
+    Ok(version)
 }
 
-/// Whether a directory holds catalog content (not just a `snapshot.toml` recording errors).
-pub(crate) fn has_content(dir: &Path) -> bool {
-    dir.join(layout::MANIFEST).is_file()
+/// Makes `meta.version` current with one atomic rename of `snapshot.toml`, then retires old
+/// versions. Callers hold the catalog lock.
+///
+/// # Errors
+///
+/// [`CatalogError::Io`]; the previous snapshot stays current.
+pub(crate) fn activate(dir: &Path, meta: &SnapshotMeta) -> Result<()> {
+    if let Err(e) = write_meta(dir, meta) {
+        let _ = fs::remove_dir_all(dir.join(&meta.version));
+        return Err(e);
+    }
+    cleanup(dir);
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn install_swaps_and_leaves_no_temporary_directory() {
-        let root = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        let mut files = BTreeMap::new();
-        files.insert("catalog.toml".to_string(), b"a".to_vec());
-        install(root.path(), "x", &files, &SnapshotMeta::default())
-            .unwrap_or_else(|e| panic!("{e}"));
-        files.insert("catalog.toml".to_string(), b"b".to_vec());
-        install(root.path(), "x", &files, &SnapshotMeta::default())
-            .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(
-            fs::read(root.path().join("x/catalog.toml")).unwrap_or_default(),
-            b"b"
-        );
-        let names: Vec<String> = fs::read_dir(root.path())
-            .unwrap_or_else(|e| panic!("{e}"))
-            .flatten()
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(names, vec!["x".to_string()]);
+    fn files(text: &[u8]) -> BTreeMap<String, Vec<u8>> {
+        let mut f = BTreeMap::new();
+        f.insert("catalog.toml".to_string(), text.to_vec());
+        f
+    }
+
+    fn install(dir: &Path, text: &[u8]) -> String {
+        let v = stage(dir, "x", "abc", &files(text)).unwrap_or_else(|e| panic!("{e}"));
+        let meta = SnapshotMeta {
+            version: v.clone(),
+            ..SnapshotMeta::default()
+        };
+        activate(dir, &meta).unwrap_or_else(|e| panic!("{e}"));
+        v
     }
 
     #[test]
-    fn unsafe_file_names_abort_the_install() {
+    fn the_pointer_switches_versions_atomically() {
         let root = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        let mut files = BTreeMap::new();
-        files.insert("../evil.toml".to_string(), b"a".to_vec());
-        assert!(install(root.path(), "x", &files, &SnapshotMeta::default()).is_err());
+        let dir = root.path().join("x");
+        install(&dir, b"a");
+        let second = install(&dir, b"b");
+        let (meta, f) = read_snapshot(&dir).unwrap_or_default();
+        assert_eq!(meta.version, second);
+        assert_eq!(f.get("catalog.toml").map(Vec::as_slice), Some(&b"b"[..]));
+    }
+
+    #[test]
+    fn unsafe_file_names_abort_the_stage() {
+        let root = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let mut f = BTreeMap::new();
+        f.insert("../evil.toml".to_string(), b"a".to_vec());
+        assert!(stage(root.path(), "x", "c", &f).is_err());
         assert_eq!(fs::read_dir(root.path()).map(|r| r.count()).unwrap_or(1), 0);
     }
 
+    /// Security review finding 4: cleanup must never delete the last good snapshot, however
+    /// old it is, and must remove orphaned versions.
     #[test]
-    fn a_second_lock_is_refused() {
+    fn cleanup_never_deletes_the_current_snapshot() {
+        let root = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let dir = root.path().join("x");
+        let current = install(&dir, b"a");
+        // An orphan left by a crashed sync (staged, never activated).
+        let orphan = stage(&dir, "x", "def", &files(b"b")).unwrap_or_default();
+        cleanup_with_grace(&dir, Duration::ZERO);
+        assert!(dir.join(&current).is_dir());
+        assert!(!dir.join(&orphan).exists());
+        assert!(read_snapshot(&dir).is_some());
+    }
+
+    /// Security review finding 5: a held lock is never stolen, however old its file is.
+    #[test]
+    fn a_running_sync_lock_is_not_stolen() {
         let root = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
         let first = SyncLock::acquire(root.path(), "x");
         assert!(first.is_ok());
+        let lock_file = root.path().join(".lock-x");
+        let f = fs::File::options().write(true).open(&lock_file);
+        if let Ok(f) = f {
+            let _ = f.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1));
+        }
         assert!(matches!(
             SyncLock::acquire(root.path(), "x"),
             Err(CatalogError::Busy(_))

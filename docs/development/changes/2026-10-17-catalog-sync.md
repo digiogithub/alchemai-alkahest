@@ -69,10 +69,56 @@ Scenario tests: `crates/alkahest-catalog/tests/sync.rs`, `tests/layers.rs`,
 `crates/alkahest/tests/catalog.rs`, plus unit tests in `alkahest-core::config` and the catalog
 crate modules.
 
+## Security review hardening
+
+A review of the first commit (6306717) found ten problems. Each is fixed, with the regression
+test named after it:
+
+1. **Unbounded decompression** (high). The archive is now read in raw tar mode. GNU
+   long-name/link and pax headers are parsed here and each is capped at 64 KiB. The gzip stream
+   is wrapped in a reader that fails beyond four times `max_archive_bytes`. Tests:
+   `archive.rs#huge_gnu_long_name_is_refused`, `#decompression_bomb_is_refused`,
+   `#pax_long_paths_are_honoured`.
+2. **Blocking work in async code.** Lock, snapshot reads, extraction, validation, staging and the
+   keyring lookup run on `spawn_blocking`. The deadline is part of `SyncContext` and fires on a
+   current-thread runtime. The token is looked up only after a 401/403, so a public catalog never
+   touches the keyring. Tests: `sync.rs#sync_deadline_fires`,
+   `#public_catalog_never_reads_the_keyring`, `#token_never_logged` (anonymous first),
+   `#token_not_forwarded_across_hosts` (now through a host that requires the token).
+3. **Host confusion with backslashes.** `host_of` and `split_url` use `reqwest::Url`
+   (`host_str` + `port_or_known_default`), and tokens are bound to `host:port`. The
+   configuration refuses `@`, `\`, whitespace and control characters in `url`, `raw_url` and
+   `archive_url`. Tests: `hosts.rs#backslash_userinfo_does_not_leak_the_token`,
+   `config.rs#catalog_sources_are_validated`.
+4. **Non-atomic swap.** Snapshot content now lives in immutable `v-<commit>-<nanos>`
+   directories, and `snapshot.toml` names the current one. One rename switches content and
+   metadata together, and readers re-read the pointer if a version vanishes. Cleanup removes
+   only versions that are not current and older than 10 minutes. Test:
+   `snapshot.rs#cleanup_never_deletes_the_current_snapshot`,
+   `#the_pointer_switches_versions_atomically`.
+5. **Stealable lock.** The lock is now an advisory OS lock (`std::fs::File::try_lock`, no new
+   dependency). It is never stolen, and the OS releases it when its holder dies. Every write of
+   `snapshot.toml` happens under it. Test: `snapshot.rs#a_running_sync_lock_is_not_stolen`.
+6. **A day without a catalog after one failure.** A failed check is retried after 15 minutes
+   (`RETRY_AFTER_ERROR`, or the refresh interval if shorter). Timeouts are recorded by the sync
+   itself, under the lock, and `record_timeout` is gone. Test:
+   `sync.rs#failed_sync_is_retried_after_a_short_delay`.
+7. **Optional commit check.** Archives from GitHub, GitLab and Gitea must carry the pax commit.
+   A custom `archive_url` without it only produces a warning. Test:
+   `archive.rs#archive_without_commit_is_refused_for_known_hosts`.
+8. **`subdir` escapes.** Each component must be `[A-Za-z0-9._-]` and must not start with `.`.
+   Test: `config.rs#catalog_sources_are_validated` (`%2e%2e`, `?`, `#`).
+9. **Size overflow.** Per-file checks come first, then a `checked_add` sum. Test:
+   `sync.rs#huge_index_sizes_do_not_overflow`.
+10. **Background child.** It runs in its own process group on Unix and with
+    `DETACHED_PROCESS | CREATE_NO_WINDOW` on Windows. It is not spawned while a sync holds the
+    lock. There is no automated test; this was checked by hand.
+
+The snapshot limits are now configurable in `[catalog_limits]` (`max_snapshot_bytes`,
+`max_file_bytes`, `max_archive_bytes`) and documented in the generated configuration
+reference. Test: `config.rs#catalog_limits_are_configurable`.
+
 ## Open points
 
-- Size limits are configurable in code (`Limits`) but not yet from the configuration file.
 - GitLab/Gitea raw and archive authentication uses `Authorization: Bearer`; verified only
   against the wiremock host, not a real private GitLab or Gitea.
-- The background refresh of CLI commands is a detached child process; on Windows it is not
-  started with `DETACHED_PROCESS`, so it may briefly share the console.

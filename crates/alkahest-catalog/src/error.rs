@@ -155,6 +155,9 @@ pub enum CatalogError {
         /// Cause.
         reason: String,
     },
+    /// The sync did not finish within its deadline.
+    #[error("timed out after {0}s")]
+    Timeout(u64),
     /// Another process is syncing the same catalog.
     #[error("catalog {0} is being synced by another process")]
     Busy(String),

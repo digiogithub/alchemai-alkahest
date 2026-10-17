@@ -33,23 +33,27 @@ pub enum HostKind {
     Other,
 }
 
-/// Scheme + authority (`https://host:port`) and the path of `url`, without query or fragment.
+/// Scheme + authority (`https://host:port`) and the path of `url`, as a URL parser (the one
+/// reqwest uses) reads them.
 pub(crate) fn split_url(url: &str) -> Option<(String, String)> {
-    let (scheme, rest) = url.split_once("://")?;
-    let rest = rest.split(['?', '#']).next().unwrap_or_default();
-    let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
-    Some((
-        format!("{scheme}://{authority}"),
-        path.trim_matches('/').to_string(),
-    ))
+    let u = reqwest::Url::parse(url).ok()?;
+    let host = u.host_str()?;
+    let base = match u.port() {
+        Some(p) => format!("{}://{host}:{p}", u.scheme()),
+        None => format!("{}://{host}", u.scheme()),
+    };
+    Some((base, u.path().trim_matches('/').to_string()))
 }
 
-/// The host (with port) of `url`, lower-cased, without user info.
+/// `host:port` of `url` (port explicit or the scheme's default), lower-cased, exactly as the
+/// HTTP client will connect to it. Tokens are bound to these values, so a URL that looks like
+/// one host but connects to another (`https://evil.example\\@good.example/`) cannot borrow
+/// the token of the host it pretends to be.
 pub fn host_of(url: &str) -> Option<String> {
-    let (base, _) = split_url(url)?;
-    let authority = base.split_once("://")?.1;
-    let authority = authority.rsplit('@').next().unwrap_or(authority);
-    Some(authority.to_ascii_lowercase())
+    let u = reqwest::Url::parse(url).ok()?;
+    let host = u.host_str()?.to_ascii_lowercase();
+    let port = u.port_or_known_default()?;
+    Some(format!("{host}:{port}"))
 }
 
 impl HostKind {
@@ -60,7 +64,7 @@ impl HostKind {
         };
         let path = path.trim_end_matches(".git").to_string();
         let host = host_of(url).unwrap_or_default();
-        let name = host.split(':').next().unwrap_or_default();
+        let name = host.rsplit_once(':').map_or(host.as_str(), |(h, _)| h);
         if name == "github.com" {
             let mut parts = path.splitn(2, '/');
             if let (Some(owner), Some(repo)) = (parts.next(), parts.next())
@@ -95,9 +99,9 @@ impl HostKind {
     pub fn credential_hosts(&self, url: &str) -> Vec<String> {
         match self {
             Self::GitHub { .. } => vec![
-                "github.com".into(),
-                "raw.githubusercontent.com".into(),
-                "codeload.github.com".into(),
+                "github.com:443".into(),
+                "raw.githubusercontent.com:443".into(),
+                "codeload.github.com:443".into(),
             ],
             _ => host_of(url).into_iter().collect(),
         }
@@ -209,7 +213,7 @@ mod tests {
         );
         assert!(
             k.credential_hosts(&s.url)
-                .contains(&"raw.githubusercontent.com".to_string())
+                .contains(&"raw.githubusercontent.com:443".to_string())
         );
     }
 
@@ -240,6 +244,18 @@ mod tests {
             raw_url(&s, &k, C, "index.toml").as_deref(),
             Some(format!("https://files.example.org/{C}/index.toml").as_str())
         );
+    }
+
+    /// Security review finding 3: the host a token is bound to is the host the request goes
+    /// to, backslash tricks included.
+    #[test]
+    fn backslash_userinfo_does_not_leak_the_token() {
+        let tricky = "https://evil.com\\@git.example.org/a/c";
+        assert_eq!(host_of(tricky).as_deref(), Some("evil.com:443"));
+        let kind = HostKind::detect("https://git.example.org/a");
+        let hosts = kind.credential_hosts("https://git.example.org/a");
+        assert_eq!(hosts, vec!["git.example.org:443".to_string()]);
+        assert!(!hosts.contains(&host_of(tricky).unwrap_or_default()));
     }
 
     #[test]

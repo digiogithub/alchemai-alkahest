@@ -6,8 +6,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
-use alkahest_core::config::{CatalogSource, is_commit_id};
+use alkahest_core::config::{CatalogLimits, CatalogSource, is_commit_id};
 use alkahest_fetch::FetchConfig;
 use serde::Serialize;
 
@@ -23,7 +24,7 @@ use crate::snapshot::{
     self, SnapshotMeta, SyncLock, catalogs_root, now_rfc3339, read_files, read_meta,
 };
 
-/// Size bounds of a snapshot (ALK-SP-0011.R14).
+/// Size bounds of a snapshot (ALK-SP-0011.R14), from `[catalog_limits]` in the configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
     /// Whole snapshot (default 16 MiB).
@@ -37,11 +38,24 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
+        Self::from_config(&CatalogLimits::default())
+    }
+}
+
+impl Limits {
+    /// The limits configured in `[catalog_limits]`.
+    pub fn from_config(c: &CatalogLimits) -> Self {
         Self {
-            max_total_bytes: 16 * 1024 * 1024,
-            max_file_bytes: 1024 * 1024,
-            max_archive_bytes: 256 * 1024 * 1024,
+            max_total_bytes: c.max_snapshot_bytes,
+            max_file_bytes: c.max_file_bytes,
+            max_archive_bytes: c.max_archive_bytes,
         }
+    }
+
+    /// Bound of the decompressed archive stream: four times the compressed bound (text
+    /// compresses well, a decompression bomb far better).
+    pub fn max_unpacked_bytes(&self) -> u64 {
+        self.max_archive_bytes.saturating_mul(4)
     }
 }
 
@@ -54,10 +68,12 @@ pub struct SyncContext {
     pub http: HttpClient,
     /// Size bounds.
     pub limits: Limits,
-    /// Token lookup.
+    /// Token lookup; consulted only after the host answered 401 or 403.
     pub credentials: Arc<dyn CredentialSource>,
     /// Version checked against `min_alkahest`.
     pub alkahest_version: semver::Version,
+    /// Overall deadline of one sync; a sync cut short records the timeout like any failure.
+    pub deadline: Option<Duration>,
 }
 
 impl std::fmt::Debug for SyncContext {
@@ -65,13 +81,14 @@ impl std::fmt::Debug for SyncContext {
         f.debug_struct("SyncContext")
             .field("data_dir", &self.data_dir)
             .field("limits", &self.limits)
+            .field("deadline", &self.deadline)
             .finish_non_exhaustive()
     }
 }
 
 impl SyncContext {
     /// The production context: the `alkahest-fetch` client settings, keyring credentials,
-    /// default limits and this build's version.
+    /// default limits, no deadline and this build's version.
     ///
     /// # Errors
     ///
@@ -83,7 +100,20 @@ impl SyncContext {
             limits: Limits::default(),
             credentials: Arc::new(KeyringCredentials),
             alkahest_version: crate::running_version(),
+            deadline: None,
         })
+    }
+
+    /// Uses `limits`.
+    pub fn with_limits(mut self, limits: Limits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Bounds every sync to `deadline`.
+    pub fn with_deadline(mut self, deadline: Duration) -> Self {
+        self.deadline = Some(deadline);
+        self
     }
 }
 
@@ -127,26 +157,78 @@ pub struct SyncReport {
     pub warnings: Vec<String>,
 }
 
+/// The previous snapshot: metadata and files.
+type Previous = (SnapshotMeta, BTreeMap<String, Vec<u8>>);
+
+/// Runs blocking work (parsing, hashing, filesystem, keyring) off the async workers, so a
+/// deadline can fire and a server worker is never tied up.
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| CatalogError::Config(format!("background task failed: {e}")))
+}
+
 /// Syncs `source` now (foreground). On failure the previous snapshot stays in use and the
 /// error is recorded in its `snapshot.toml` (shown once by the next command).
 ///
 /// # Errors
 ///
-/// Every failure of resolution, transport, limits or validation.
+/// Every failure of resolution, transport, limits or validation, [`CatalogError::Busy`] when
+/// another sync of the catalog runs, [`CatalogError::Timeout`] past the context's deadline.
 pub async fn sync(source: &CatalogSource, ctx: &SyncContext) -> Result<SyncReport> {
     let root = catalogs_root(&ctx.data_dir);
-    let _lock = SyncLock::acquire(&root, &source.name)?;
-    snapshot::cleanup_stale(&root);
+    let lock = {
+        let (root, name) = (root.clone(), source.name.clone());
+        blocking(move || SyncLock::acquire(&root, &name)).await??
+    };
     let dir = root.join(&source.name);
-    let previous = read_meta(&dir).filter(|_| snapshot::has_content(&dir));
-    match run(source, ctx, &dir, previous.as_ref()).await {
-        Ok(report) => Ok(report),
-        Err(e) => {
-            let e = with_catalog(e, &source.name);
-            record_error(&dir, source, &e);
-            Err(e)
+    let previous = {
+        let dir = dir.clone();
+        blocking(move || {
+            snapshot::cleanup(&dir);
+            snapshot::read_snapshot(&dir)
+        })
+        .await?
+    };
+    let attempt = async {
+        let first = run(source, ctx, &dir, previous.as_ref(), None).await;
+        let denied = matches!(
+            first,
+            Err(CatalogError::Status {
+                status: 401 | 403,
+                ..
+            })
+        );
+        if !denied || source.url.starts_with("file://") {
+            return first;
         }
+        // Only now, for a host that refused anonymous access, look for a token: a public
+        // catalog never touches the keyring.
+        let creds = ctx.credentials.clone();
+        let name = source.name.clone();
+        let Some(token) = blocking(move || creds.catalog_token(&name)).await? else {
+            return first;
+        };
+        let kind = HostKind::detect(&source.url);
+        let cred = Credential {
+            token,
+            hosts: kind.credential_hosts(&source.url),
+            git_user: kind.git_user(),
+        };
+        run(source, ctx, &dir, previous.as_ref(), Some(&cred)).await
+    };
+    let result = match ctx.deadline {
+        Some(d) => tokio::time::timeout(d, attempt)
+            .await
+            .unwrap_or(Err(CatalogError::Timeout(d.as_secs()))),
+        None => attempt.await,
+    };
+    let result = result.map_err(|e| with_catalog(e, &source.name));
+    if let Err(e) = &result {
+        record_error(&dir, source, e);
     }
+    drop(lock);
+    result
 }
 
 /// Fills the catalog name into errors raised below the sync (HTTP size limits).
@@ -167,7 +249,8 @@ fn with_catalog(e: CatalogError, name: &str) -> CatalogError {
     }
 }
 
-/// Records a failed sync in `snapshot.toml`, keeping the content as it is.
+/// Records a failed sync in `snapshot.toml`, keeping the content as it is. Called with the
+/// catalog lock held.
 fn record_error(dir: &Path, source: &CatalogSource, e: &CatalogError) {
     let mut meta = read_meta(dir).unwrap_or_else(|| SnapshotMeta {
         url: source.url.clone(),
@@ -185,8 +268,12 @@ fn record_error(dir: &Path, source: &CatalogSource, e: &CatalogError) {
     }
 }
 
-/// Marks the recorded error of `name` as shown, so it is shown only once.
+/// Marks the recorded error of `name` as shown, so it is shown only once. Skipped while a
+/// sync of the catalog runs (it writes its own record).
 pub fn mark_error_reported(data_dir: &Path, name: &str) {
+    let Ok(_lock) = SyncLock::acquire(&catalogs_root(data_dir), name) else {
+        return;
+    };
     let dir = snapshot::snapshot_dir(data_dir, name);
     if let Some(mut meta) = read_meta(&dir)
         && !meta.error_reported
@@ -204,8 +291,10 @@ async fn run(
     source: &CatalogSource,
     ctx: &SyncContext,
     dir: &Path,
-    previous: Option<&SnapshotMeta>,
+    previous: Option<&Previous>,
+    cred: Option<&Credential>,
 ) -> Result<SyncReport> {
+    let prev_meta = previous.map(|p| &p.0);
     let name = source.name.as_str();
     let opts = ValidateOptions {
         catalog: name.to_string(),
@@ -230,13 +319,18 @@ async fn run(
     };
 
     if let Some(path) = source.url.strip_prefix("file://") {
-        let files = read_files(Path::new(path));
-        let listing: String = files
-            .iter()
-            .map(|(p, b)| format!("{p} {}\n", sha256_hex(b)))
-            .collect();
-        let commit = format!("dir-{}", &sha256_hex(listing.as_bytes())[..16]);
-        if let Some(prev) = previous.filter(|p| p.commit == commit && same_source(p, source)) {
+        let path = PathBuf::from(path);
+        let (files, commit) = blocking(move || {
+            let files = read_files(&path);
+            let listing: String = files
+                .iter()
+                .map(|(p, b)| format!("{p} {}\n", sha256_hex(b)))
+                .collect();
+            let commit = format!("dir-{}", &sha256_hex(listing.as_bytes())[..16]);
+            (files, commit)
+        })
+        .await?;
+        if let Some(prev) = prev_meta.filter(|p| p.commit == commit && same_source(p, source)) {
             return finish(prev);
         }
         check_total(name, &files, &ctx.limits)?;
@@ -244,26 +338,22 @@ async fn run(
         return commit_snapshot(
             source,
             ctx,
-            previous,
+            dir,
+            prev_meta,
             files,
             &opts,
             &commit,
             downloaded,
             Vec::new(),
             "directory",
-        );
+        )
+        .await;
     }
 
     let kind = HostKind::detect(&source.url);
-    let cred = ctx.credentials.catalog_token(name).map(|token| Credential {
-        token,
-        hosts: kind.credential_hosts(&source.url),
-        git_user: kind.git_user(),
-    });
-
     let commit = match &source.pin {
         Some(pin) => {
-            if let Some(prev) = previous.filter(|p| p.commit == *pin && same_source(p, source)) {
+            if let Some(prev) = prev_meta.filter(|p| p.commit == *pin && same_source(p, source)) {
                 let mut report = finish(prev)?;
                 report.outcome = SyncOutcome::Pinned {
                     commit: pin.clone(),
@@ -272,7 +362,7 @@ async fn run(
             }
             pin.clone()
         }
-        None => refs::resolve(&ctx.http, name, &source.url, &source.r#ref, cred.as_ref()).await?,
+        None => refs::resolve(&ctx.http, name, &source.url, &source.r#ref, cred).await?,
     };
     if !is_commit_id(&commit) {
         return Err(CatalogError::Protocol {
@@ -280,7 +370,7 @@ async fn run(
             reason: format!("`{commit}` is not a commit id"),
         });
     }
-    if let Some(prev) = previous.filter(|p| p.commit == commit && same_source(p, source)) {
+    if let Some(prev) = prev_meta.filter(|p| p.commit == commit && same_source(p, source)) {
         return finish(prev);
     }
 
@@ -290,7 +380,7 @@ async fn run(
             .http
             .get(
                 &index_url,
-                cred.as_ref(),
+                cred,
                 AuthStyle::Bearer,
                 ctx.limits.max_file_bytes,
             )
@@ -303,7 +393,7 @@ async fn run(
                     dir,
                     previous,
                     &kind,
-                    cred.as_ref(),
+                    cred,
                     &commit,
                     index_bytes,
                     &opts,
@@ -326,26 +416,41 @@ async fn run(
     };
     let data = ctx
         .http
-        .get(
-            &url,
-            cred.as_ref(),
-            AuthStyle::Bearer,
-            ctx.limits.max_archive_bytes,
-        )
+        .get(&url, cred, AuthStyle::Bearer, ctx.limits.max_archive_bytes)
         .await?;
-    let files = extract_catalog(name, &data, &source.subdir, &commit, &ctx.limits)?;
-    let downloaded = files.keys().cloned().collect();
-    commit_snapshot(
+    // Built-in hosts write the commit into the archive (pax `comment`); a custom
+    // `archive_url` host may not, which is only a warning.
+    let require_commit = source.archive_url.is_none() && kind != HostKind::Other;
+    let extracted = {
+        let (name, subdir, commit, limits) = (
+            name.to_string(),
+            source.subdir.clone(),
+            commit.clone(),
+            ctx.limits,
+        );
+        blocking(move || extract_catalog(&name, &data, &subdir, &commit, &limits, require_commit))
+            .await??
+    };
+    let downloaded = extracted.files.keys().cloned().collect();
+    let mut report = commit_snapshot(
         source,
         ctx,
-        previous,
-        files,
+        dir,
+        prev_meta,
+        extracted.files,
         &opts,
         &commit,
         downloaded,
         Vec::new(),
         "archive",
     )
+    .await?;
+    if !extracted.commit_checked {
+        report.warnings.push(format!(
+            "the archive does not record its commit; its content was not checked against {commit}"
+        ));
+    }
+    Ok(report)
 }
 
 fn check_total(name: &str, files: &BTreeMap<String, Vec<u8>>, limits: &Limits) -> Result<()> {
@@ -359,7 +464,10 @@ fn check_total(name: &str, files: &BTreeMap<String, Vec<u8>>, limits: &Limits) -
             });
         }
     }
-    let total: u64 = files.values().map(|b| b.len() as u64).sum();
+    let total = files
+        .values()
+        .try_fold(0u64, |acc, b| acc.checked_add(b.len() as u64))
+        .unwrap_or(u64::MAX);
     if total > limits.max_total_bytes {
         return Err(CatalogError::TooLarge {
             catalog: name.to_string(),
@@ -376,7 +484,7 @@ async fn fetch_raw(
     source: &CatalogSource,
     ctx: &SyncContext,
     dir: &Path,
-    previous: Option<&SnapshotMeta>,
+    previous: Option<&Previous>,
     kind: &HostKind,
     cred: Option<&Credential>,
     commit: &str,
@@ -403,7 +511,7 @@ async fn fetch_raw(
             issues,
         });
     }
-    let total: u64 = index.files.iter().map(|f| f.size).sum::<u64>() + index_bytes.len() as u64;
+    // Each file first, then the sum without overflow: sizes come from the remote.
     for f in &index.files {
         if f.size > ctx.limits.max_file_bytes {
             return Err(CatalogError::TooLarge {
@@ -414,6 +522,11 @@ async fn fetch_raw(
             });
         }
     }
+    let total = index
+        .files
+        .iter()
+        .try_fold(index_bytes.len() as u64, |acc, f| acc.checked_add(f.size))
+        .unwrap_or(u64::MAX);
     if total > ctx.limits.max_total_bytes {
         return Err(CatalogError::TooLarge {
             catalog: name.to_string(),
@@ -423,9 +536,10 @@ async fn fetch_raw(
         });
     }
 
+    let empty = BTreeMap::new();
     let old_files = match previous {
-        Some(p) if same_source(p, source) => read_files(dir),
-        _ => BTreeMap::new(),
+        Some((m, f)) if same_source(m, source) => f,
+        _ => &empty,
     };
     let mut files = BTreeMap::new();
     let mut downloaded = vec![layout::INDEX.to_string()];
@@ -468,15 +582,28 @@ async fn fetch_raw(
     }
     files.insert(layout::INDEX.to_string(), index_bytes);
     commit_snapshot(
-        source, ctx, previous, files, opts, commit, downloaded, reused, "raw",
+        source,
+        ctx,
+        dir,
+        previous.map(|p| &p.0),
+        files,
+        opts,
+        commit,
+        downloaded,
+        reused,
+        "raw",
     )
+    .await
 }
 
-/// Validates `files` (all-or-nothing) and swaps them in as the new snapshot.
+/// Validates `files` (all-or-nothing), stages them in a new version directory (off the
+/// async workers) and makes it current with one rename of `snapshot.toml` (under the lock, on
+/// the caller's task, so a cancelled sync never activates anything).
 #[allow(clippy::too_many_arguments)]
-fn commit_snapshot(
+async fn commit_snapshot(
     source: &CatalogSource,
-    ctx: &SyncContext,
+    _ctx: &SyncContext,
+    dir: &Path,
     previous: Option<&SnapshotMeta>,
     files: BTreeMap<String, Vec<u8>>,
     opts: &ValidateOptions,
@@ -485,10 +612,24 @@ fn commit_snapshot(
     reused: Vec<String>,
     transport: &str,
 ) -> Result<SyncReport> {
-    let content: CatalogContent = validate(&files, opts)?;
-    let warnings: Vec<String> = content.warnings.iter().map(ToString::to_string).collect();
+    let (version, warnings) = {
+        let (dir, name, commit, opts) = (
+            dir.to_path_buf(),
+            source.name.clone(),
+            commit.to_string(),
+            opts.clone(),
+        );
+        blocking(move || -> Result<(String, Vec<String>)> {
+            let content: CatalogContent = validate(&files, &opts)?;
+            let warnings = content.warnings.iter().map(ToString::to_string).collect();
+            let version = snapshot::stage(&dir, &name, &commit, &files)?;
+            Ok((version, warnings))
+        })
+        .await??
+    };
     let now = now_rfc3339();
     let meta = SnapshotMeta {
+        version,
         url: source.url.clone(),
         r#ref: source.r#ref.clone(),
         subdir: source.subdir.clone(),
@@ -500,8 +641,7 @@ fn commit_snapshot(
         error_reported: false,
         warnings: warnings.clone(),
     };
-    let root = catalogs_root(&ctx.data_dir);
-    snapshot::install(&root, &source.name, &files, &meta)?;
+    snapshot::activate(dir, &meta)?;
     Ok(SyncReport {
         catalog: source.name.clone(),
         outcome: SyncOutcome::Updated {

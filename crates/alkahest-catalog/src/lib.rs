@@ -39,7 +39,8 @@ pub use http::{
     token_env_var,
 };
 pub use layers::{
-    CatalogModel, CatalogState, find_model, layered_models, load_states, recipe_catalog,
+    CatalogModel, CatalogState, RETRY_AFTER_ERROR, find_model, layered_models, load_states,
+    recipe_catalog,
 };
 pub use model::{ModelEntry, ModelFile, ModelFileKind, ModelFormat, ModelVariant, TemplateFormat};
 pub use snapshot::SnapshotMeta;

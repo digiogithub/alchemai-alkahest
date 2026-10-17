@@ -17,7 +17,7 @@ use alkahest_catalog::edit::{Removal, add_source, remove_source};
 use alkahest_catalog::manifest::{Index, SCHEMA_VERSION};
 use alkahest_catalog::snapshot::{read_files, snapshot_dir};
 use alkahest_catalog::{
-    CatalogState, SyncContext, SyncOutcome, load_states, mark_error_reported, sync,
+    CatalogState, Limits, SyncContext, SyncOutcome, load_states, mark_error_reported, sync,
 };
 use alkahest_core::config::{CatalogSource, Loaded, Source};
 use anyhow::{Context, Result, bail};
@@ -38,9 +38,14 @@ pub fn run(action: &CatalogAction, loaded: &Loaded, json: bool) -> Result<ExitCo
     let sources = &loaded.config.catalogs;
     match action {
         CatalogAction::Ls => ls(&data_dir, sources, json),
-        CatalogAction::Sync { name, background } => {
-            sync_cmd(&data_dir, sources, name.as_deref(), *background, json)
-        }
+        CatalogAction::Sync { name, background } => sync_cmd(
+            &data_dir,
+            sources,
+            limits(loaded),
+            name.as_deref(),
+            *background,
+            json,
+        ),
         CatalogAction::Add {
             name,
             url,
@@ -227,10 +232,16 @@ fn runtime() -> Result<tokio::runtime::Runtime> {
         .context("starting the async runtime")
 }
 
+/// The `[catalog_limits]` of the configuration.
+fn limits(loaded: &Loaded) -> Limits {
+    Limits::from_config(&loaded.config.catalog_limits)
+}
+
 /// `catalog sync [name]`.
 fn sync_cmd(
     data_dir: &Path,
     sources: &[CatalogSource],
+    limits: Limits,
     name: Option<&str>,
     background: bool,
     json: bool,
@@ -244,7 +255,7 @@ fn sync_cmd(
         }
         None => sources.iter().filter(|s| s.enabled).collect(),
     };
-    let ctx = SyncContext::new(data_dir)?;
+    let ctx = SyncContext::new(data_dir)?.with_limits(limits);
     let rt = runtime()?;
     let mut failed = false;
     let mut rows = Vec::new();
@@ -350,9 +361,13 @@ fn auto_sync_enabled() -> bool {
     })
 }
 
-/// Starts `alkahest catalog sync --background <name>` detached, so the calling command does
-/// not wait for the network.
-fn spawn_background(loaded: &Loaded, name: &str) {
+/// Starts `alkahest catalog sync --background <name>` detached (own process group on Unix,
+/// no console on Windows), so the calling command does not wait for the network and a Ctrl-C
+/// in the terminal does not reach it. Nothing is started while a sync of `name` already runs.
+fn spawn_background(loaded: &Loaded, data_dir: &Path, name: &str) {
+    if alkahest_catalog::snapshot::sync_in_progress(data_dir, name) {
+        return;
+    }
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
@@ -364,6 +379,18 @@ fn spawn_background(loaded: &Loaded, name: &str) {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        /// `DETACHED_PROCESS | CREATE_NO_WINDOW`.
+        const FLAGS: u32 = 0x0000_0008 | 0x0800_0000;
+        cmd.creation_flags(FLAGS);
+    }
     match cmd.spawn() {
         Ok(_child) => tracing::debug!(catalog = name, "background catalog refresh started"),
         Err(e) => {
@@ -382,25 +409,17 @@ pub fn prepare(loaded: &Loaded) -> Vec<CatalogState> {
         let mut fetched = false;
         for state in states.iter().filter(|s| s.is_due()) {
             if state.content.is_some() {
-                spawn_background(loaded, &state.source.name);
+                spawn_background(loaded, &data_dir, &state.source.name);
                 continue;
             }
             fetched = true;
-            match first_fetch(&data_dir, &state.source) {
-                Ok(()) => {}
-                Err((message, timed_out)) => {
-                    eprintln!(
-                        "notice: catalog {} could not be fetched ({message}); using the built-in \
-                         recipes",
-                        state.source.name
-                    );
-                    if timed_out {
-                        // A cancelled sync records nothing: write the record so the next
-                        // command does not wait again before the refresh interval.
-                        record_timeout(&data_dir, &state.source);
-                    }
-                    mark_error_reported(&data_dir, &state.source.name);
-                }
+            if let Err(message) = first_fetch(&data_dir, limits(loaded), &state.source) {
+                eprintln!(
+                    "notice: catalog {} could not be fetched ({message}); using the built-in \
+                     recipes",
+                    state.source.name
+                );
+                mark_error_reported(&data_dir, &state.source.name);
             }
         }
         if fetched {
@@ -428,33 +447,19 @@ pub fn prepare(loaded: &Loaded) -> Vec<CatalogState> {
 }
 
 /// The one-time foreground fetch of a catalog without a snapshot, bounded by
-/// [`FIRST_FETCH_DEADLINE`]. The error says whether the deadline cut it short.
-fn first_fetch(data_dir: &Path, source: &CatalogSource) -> std::result::Result<(), (String, bool)> {
-    let ctx = SyncContext::new(data_dir).map_err(|e| (e.to_string(), false))?;
-    let rt = runtime().map_err(|e| (format!("{e:#}"), false))?;
-    rt.block_on(async {
-        match tokio::time::timeout(FIRST_FETCH_DEADLINE, sync(source, &ctx)).await {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err((e.to_string(), false)),
-            Err(_) => Err((
-                format!("timed out after {}s", FIRST_FETCH_DEADLINE.as_secs()),
-                true,
-            )),
-        }
-    })
-}
-
-/// Records a timed-out first fetch in `snapshot.toml`.
-fn record_timeout(data_dir: &Path, source: &CatalogSource) {
-    let dir = snapshot_dir(data_dir, &source.name);
-    let mut meta = alkahest_catalog::snapshot::read_meta(&dir).unwrap_or_default();
-    let now = alkahest_catalog::snapshot::now_rfc3339();
-    meta.url = source.url.clone();
-    meta.r#ref = source.r#ref.clone();
-    meta.subdir = source.subdir.clone();
-    meta.checked_at = now.clone();
-    meta.last_error = Some("timed out".into());
-    meta.error_at = Some(now);
-    meta.error_reported = true;
-    let _ = alkahest_catalog::snapshot::write_meta(&dir, &meta);
+/// [`FIRST_FETCH_DEADLINE`]. The sync records its own failure (timeouts included) under the
+/// catalog lock, which makes the next attempt wait for the retry delay.
+fn first_fetch(
+    data_dir: &Path,
+    limits: Limits,
+    source: &CatalogSource,
+) -> std::result::Result<(), String> {
+    let ctx = SyncContext::new(data_dir)
+        .map_err(|e| e.to_string())?
+        .with_limits(limits)
+        .with_deadline(FIRST_FETCH_DEADLINE);
+    let rt = runtime().map_err(|e| format!("{e:#}"))?;
+    rt.block_on(sync(source, &ctx))
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }

@@ -183,11 +183,24 @@ pub fn archive(
     b.into_inner().unwrap().finish().unwrap()
 }
 
-/// A static token for one catalog.
-pub struct FixedToken(pub &'static str);
+/// A static token for one catalog, counting lookups.
+pub struct FixedToken(pub &'static str, pub std::sync::atomic::AtomicUsize);
+
+impl FixedToken {
+    /// A token source returning `token`.
+    pub fn new(token: &'static str) -> Self {
+        Self(token, std::sync::atomic::AtomicUsize::new(0))
+    }
+
+    /// How often the token was looked up.
+    pub fn lookups(&self) -> usize {
+        self.1.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
 
 impl CredentialSource for FixedToken {
     fn catalog_token(&self, _name: &str) -> Option<Token> {
+        self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Token::new(self.0)
     }
 }
@@ -202,6 +215,7 @@ pub fn context(data_dir: &Path) -> SyncContext {
         limits: Limits::default(),
         credentials: Arc::new(NoCredentials),
         alkahest_version: alkahest_catalog::running_version(),
+        deadline: None,
     }
 }
 
