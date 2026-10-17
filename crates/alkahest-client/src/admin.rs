@@ -82,11 +82,14 @@ pub struct CatalogModel {
     pub family: Option<String>,
     /// Architecture.
     pub architecture: Option<String>,
-    /// Parameter count label (`3.2B`). The detail route reuses the `parameters` key for the
-    /// model's default parameter map; a non-string value reads as `None` so the detail still
-    /// decodes.
+    /// Parameter count label (`3.2B`). Servers before ALK-US-0103 reused this key in the
+    /// detail route for the default parameter map; a non-string value reads as `None` so such
+    /// answers still decode.
     #[serde(deserialize_with = "label_or_none")]
     pub parameters: Option<String>,
+    /// Default parameters of the model's params layer (`stop`, `temperature`, ...); only the
+    /// detail route (`Client::model`) fills it.
+    pub default_parameters: Map<String, Value>,
     /// Trained context length.
     pub context_length: Option<u64>,
     /// Embedding width.
@@ -1121,8 +1124,8 @@ mod tests {
     use wiremock::matchers::{body_json, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    /// The detail route overwrites `parameters` with the default parameter map; the row must
-    /// still decode, with the template in `extra`.
+    /// Old servers overwrote `parameters` with the default parameter map; the row must still
+    /// decode, with the template in `extra`.
     #[test]
     fn model_detail_with_a_parameter_map_decodes() {
         let v = json!({
@@ -1136,6 +1139,20 @@ mod tests {
         assert_eq!(m.model_path.as_deref(), Some("/blobs/sha256-2069"));
         let row: CatalogModel = serde_json::from_value(json!({"parameters": "494M"})).unwrap();
         assert_eq!(row.parameters.as_deref(), Some("494M"));
+        assert!(row.default_parameters.is_empty());
+    }
+
+    /// ALK-US-0103: the detail route sends the label and the map under separate keys.
+    #[test]
+    fn model_detail_keeps_the_label_and_the_default_parameters() {
+        let v = json!({
+            "name": "qwen2.5-coder:0.5b", "parameters": "494M",
+            "default_parameters": {"stop": ["<|im_end|>"], "temperature": 0.7}
+        });
+        let m: CatalogModel = serde_json::from_value(v).unwrap();
+        assert_eq!(m.parameters.as_deref(), Some("494M"));
+        assert_eq!(m.default_parameters["temperature"], 0.7);
+        assert!(!m.extra.contains_key("default_parameters"));
     }
 
     #[test]

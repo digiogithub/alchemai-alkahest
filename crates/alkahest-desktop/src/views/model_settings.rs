@@ -16,6 +16,7 @@ use serde_json::{Map, Value};
 use crate::model_settings::{
     CONTEXT_STOPS, Debounce, ENGINES, ESTIMATE_DEBOUNCE, EstimateTone, EstimateView, FieldDisplay,
     KEEP_ALIVE_PRESETS, KV_TYPES, Origin, SettingsForm, context_position, context_stop_label,
+    default_parameters_line,
 };
 use crate::ops::{self, ModelOp};
 use crate::present::{format_tag, group_digits, is_read_only, kind_of};
@@ -36,11 +37,12 @@ use crate::views::widgets::{
 /// Width of the side column (memory estimate, model card, launch line).
 const SIDE_WIDTH: f32 = 400.0;
 
-/// Text fields of the form, by overlay key (plus `parallel`, estimate only).
-const TEXT_FIELDS: [&str; 12] = [
+/// Text fields of the form, by overlay key.
+const TEXT_FIELDS: [&str; 13] = [
     "keep_alive",
     "context_length",
     "gpu_layers",
+    "num_parallel",
     "temperature",
     "top_p",
     "top_k",
@@ -59,7 +61,7 @@ const ESTIMATE_KEYS: [&str; 6] = [
     "kv_cache_type_v",
     "flash_attention",
     "gpu_layers",
-    "parallel",
+    "num_parallel",
 ];
 
 /// What the settings screen asks of its host (the Library).
@@ -75,6 +77,8 @@ struct ModelTemplate {
     text: Option<String>,
     from_gguf: bool,
     model_file: Option<String>,
+    /// The model's default parameters as one line (ALK-US-0103), if it has any.
+    parameters: Option<String>,
 }
 
 /// The estimate panel state.
@@ -95,7 +99,6 @@ pub struct ModelSettingsView {
     template: ModelTemplate,
     custom_template: bool,
     inputs: Vec<(&'static str, Entity<InputState>)>,
-    parallel: Entity<InputState>,
     template_input: Entity<TextareaState>,
     estimate: EstimateState,
     debounce: Debounce,
@@ -141,22 +144,6 @@ impl ModelSettingsView {
             .detach();
             inputs.push((key, input));
         }
-        let parallel = cx.new(|cx| InputState::new(window, cx).default_value("1"));
-        cx.subscribe_in(
-            &parallel,
-            window,
-            |this, input, event: &InputEvent, _, cx| {
-                if matches!(event, InputEvent::Change) {
-                    let text = input.read(cx).value().to_string();
-                    if let Some(form) = this.form.as_mut() {
-                        form.parallel = text.trim().parse::<u32>().unwrap_or(1).clamp(1, 64);
-                    }
-                    this.schedule_estimate(cx);
-                    cx.notify();
-                }
-            },
-        )
-        .detach();
         let template_input = cx.new(|cx| TextareaState::new(window, cx).rows(10));
         cx.subscribe_in(
             &template_input,
@@ -180,7 +167,6 @@ impl ModelSettingsView {
             template: ModelTemplate::default(),
             custom_template: false,
             inputs,
-            parallel,
             template_input,
             estimate: EstimateState::Idle,
             debounce: Debounce::default(),
@@ -231,6 +217,7 @@ impl ModelSettingsView {
                             .and_then(Value::as_bool)
                             .unwrap_or(false),
                         model_file: d.model_path.clone(),
+                        parameters: default_parameters_line(&d.default_parameters),
                     };
                 }
                 match doc {
@@ -969,28 +956,6 @@ impl ModelSettingsView {
             .iter()
             .map(|t| (*t, Value::String((*t).to_string())))
             .collect();
-        let parallel = v_flex()
-            .gap(px(6.0))
-            .min_w_0()
-            .child(
-                h_flex()
-                    .gap(px(space::S2))
-                    .child(field_label("Parallel slots", p))
-                    .child(
-                        div()
-                            .type_style(text::CAPTION)
-                            .text_color(c(p.text_muted))
-                            .child("estimate only \u{b7} server-wide setting"),
-                    ),
-            )
-            .child(
-                field_frame(false, p).child(
-                    div()
-                        .flex_1()
-                        .type_style(text::MONO)
-                        .child(Input::new(&self.parallel).appearance(false)),
-                ),
-            );
         card(p)
             .gap(px(space::S4))
             .child(div().type_style(text::TITLE).child("Runtime"))
@@ -1055,7 +1020,12 @@ impl ModelSettingsView {
                             .flex_1()
                             .child(self.text_field("gpu_layers", "GPU layers", p, cx)),
                     )
-                    .child(div().flex_1().child(parallel)),
+                    .child(div().flex_1().child(self.text_field(
+                        "num_parallel",
+                        "Parallel slots",
+                        p,
+                        cx,
+                    ))),
             )
             .child(self.tri_state(
                 "flash_attention",
@@ -1159,6 +1129,18 @@ impl ModelSettingsView {
                     .child(segmented(segs, p)),
             )
             .child(body)
+            .children(self.template.parameters.clone().map(|line| {
+                v_flex()
+                    .gap(px(space::S1))
+                    .child(field_label("Model file parameters", p))
+                    .child(
+                        div()
+                            .type_style(text::MONO)
+                            .text_size(px(text::CAPTION.size))
+                            .text_color(c(p.text_secondary))
+                            .child(line),
+                    )
+            }))
             .child(self.text_field("extra_args", "Extra engine arguments", p, cx))
     }
 

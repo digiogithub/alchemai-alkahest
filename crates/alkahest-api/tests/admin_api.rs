@@ -408,6 +408,15 @@ async fn catalog_lists_kind_source_engine_context_paths_and_runtime() {
     let (status, d) = send(&h, "GET", "/alkahest/v1/models/llama3.2", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(d["template"], "{{ .Prompt }}");
+    // ALK-US-0103: the row's parameter-count label and the params layer's default map
+    // never share a key, so each keeps one JSON type.
+    assert!(
+        d["parameters"].is_string() || d["parameters"].is_null(),
+        "{}",
+        d["parameters"]
+    );
+    assert!(d["default_parameters"].is_object(), "{d}");
+    assert_eq!(d["parameters"], doc["models"][0]["parameters"]);
     let (status, _) = send(&h, "GET", "/alkahest/v1/models/nope", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }

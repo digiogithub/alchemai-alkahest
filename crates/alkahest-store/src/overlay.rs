@@ -40,6 +40,10 @@ use crate::reference::ModelName;
 /// Directory below the data dir that holds the overlays.
 pub const OVERLAY_DIR: &str = "model-config";
 
+/// Largest per-model `num_parallel`: every slot multiplies the KV cache, so larger values are
+/// almost always a typo.
+pub const MAX_NUM_PARALLEL: u32 = 64;
+
 /// Every tunable of a model run. All fields are optional: a layer sets only what it decides.
 /// The same type is used for each layer (request, overlay, recommended, global) and for the
 /// result, so layers merge field by field.
@@ -61,6 +65,10 @@ pub struct ModelSettings {
     /// Flash attention on or off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flash_attention: Option<bool>,
+    /// Parallel request slots of this model's engine (`-np`, vLLM `--max-num-seqs`),
+    /// 1..=[`MAX_NUM_PARALLEL`]; unset follows `scheduler.num_parallel`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_parallel: Option<u32>,
     /// Prompt template overriding the model's own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub template: Option<String>,
@@ -141,6 +149,7 @@ settings_fields!(
     kv_cache_type_v,
     gpu_layers,
     flash_attention,
+    num_parallel,
     template,
     tools_enabled,
     temperature,
@@ -163,12 +172,13 @@ impl ModelSettings {
         *self == Self::default()
     }
 
-    /// The global layer derived from the server configuration: today the scheduler's
-    /// `keep_alive`. Fields the configuration does not define stay unset, so the engine's own
-    /// default applies.
+    /// The global layer derived from the server configuration: the scheduler's `keep_alive`
+    /// and, when it is not automatic (`0`), its `num_parallel`. Fields the configuration does
+    /// not define stay unset, so the engine's own default applies.
     pub fn global_defaults(config: &Config) -> Self {
         Self {
             keep_alive: Some(config.scheduler.keep_alive),
+            num_parallel: Some(config.scheduler.num_parallel).filter(|n| *n > 0),
             ..Self::default()
         }
     }
@@ -202,6 +212,13 @@ impl ModelSettings {
             "kv_cache_type_v" => self.kv_cache_type_v = Some(kv_type(key, value)?),
             "gpu_layers" | "num_gpu" => self.gpu_layers = Some(num(key, value)?),
             "flash_attention" | "flash_attn" => self.flash_attention = Some(flag(key, value)?),
+            "num_parallel" | "parallel" => {
+                let n: u32 = num(key, value)?;
+                if !(1..=MAX_NUM_PARALLEL).contains(&n) {
+                    return Err(format!("{key}: must be between 1 and {MAX_NUM_PARALLEL}"));
+                }
+                self.num_parallel = Some(n);
+            }
             "template" => self.template = Some(value.to_owned()),
             "tools_enabled" | "tools" => self.tools_enabled = Some(flag(key, value)?),
             "temperature" => self.temperature = Some(num(key, value)?),
@@ -246,6 +263,7 @@ impl ModelSettings {
             "kv_cache_type_v" => self.kv_cache_type_v = None,
             "gpu_layers" | "num_gpu" => self.gpu_layers = None,
             "flash_attention" | "flash_attn" => self.flash_attention = None,
+            "num_parallel" | "parallel" => self.num_parallel = None,
             "template" => self.template = None,
             "tools_enabled" | "tools" => self.tools_enabled = None,
             "temperature" => self.temperature = None,
@@ -650,6 +668,24 @@ fn remove_optional(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn num_parallel_is_a_model_setting_with_limits() {
+        let mut s = ModelSettings::default();
+        s.set_key("num_parallel", "4").unwrap();
+        assert_eq!(s.num_parallel, Some(4));
+        assert!(s.set_key("parallel", "0").is_err());
+        assert!(s.set_key("num_parallel", "65").is_err());
+        assert_eq!(s.num_parallel, Some(4));
+        let toml = toml::to_string(&s).unwrap();
+        assert!(toml.contains("num_parallel = 4"), "{toml}");
+        s.unset_key("parallel").unwrap();
+        assert_eq!(s.num_parallel, None);
+        let mut cfg = Config::default();
+        assert_eq!(ModelSettings::global_defaults(&cfg).num_parallel, None);
+        cfg.scheduler.num_parallel = 2;
+        assert_eq!(ModelSettings::global_defaults(&cfg).num_parallel, Some(2));
+    }
 
     fn s(f: impl FnOnce(&mut ModelSettings)) -> ModelSettings {
         let mut m = ModelSettings::default();

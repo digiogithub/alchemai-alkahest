@@ -81,7 +81,7 @@ routes! {
     post "/alkahest/v1/unload" "runtime" "Unload one model (`model`) or all (`all: true`)" => runtime::unload;
     get "/metrics" "runtime" "Prometheus metrics" => runtime::metrics;
     get "/alkahest/v1/models" "models" "Merged catalog with kind, format, source, engine, context, paths and runtime state; store paths" => models::list;
-    get "/alkahest/v1/models/{name}" "models" "One model: summary, template, system prompt, licence, parameters" => models::detail;
+    get "/alkahest/v1/models/{name}" "models" "One model: summary, template, system prompt, licence, default parameters" => models::detail;
     delete "/alkahest/v1/models/{name}" "models" "Unload and delete a model (Ollama-store models are read-only)" => models::delete;
     post "/alkahest/v1/copy" "models" "Copy a model under a new name" => models::copy;
     get "/alkahest/v1/models/{name}/settings" "models" "Per-model overlay, recommended layer, effective values and their layers" => models::get_settings;

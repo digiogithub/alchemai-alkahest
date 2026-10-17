@@ -104,6 +104,17 @@ impl SchedulerOptions {
     }
 }
 
+/// Parallel slots for `model`: its effective `num_parallel` setting (model overlay or
+/// request, ALK-US-0102), else the scheduler-wide value.
+pub fn parallel_slots(model: &ResolvedModel, opts: &SchedulerOptions) -> u32 {
+    model
+        .request
+        .settings
+        .num_parallel
+        .filter(|n| *n > 0)
+        .unwrap_or_else(|| opts.parallel())
+}
+
 /// Per-slot context length for `model`: the settings value, else the default capped by the
 /// trained context.
 pub fn context_length(model: &ResolvedModel, opts: &SchedulerOptions) -> u64 {
@@ -122,7 +133,7 @@ pub fn context_length(model: &ResolvedModel, opts: &SchedulerOptions) -> u64 {
 pub fn launch_request(model: &ResolvedModel, opts: &SchedulerOptions) -> LaunchRequest {
     let mut req = model.request.clone();
     req.settings.context_length = Some(context_length(model, opts));
-    req.num_parallel = Some(opts.parallel());
+    req.num_parallel = Some(parallel_slots(model, opts));
     req
 }
 
@@ -145,7 +156,7 @@ impl LoadFingerprint {
             digest: model.digest.clone(),
             engine: model.engine,
             context: context_length(model, opts),
-            parallel: opts.parallel(),
+            parallel: parallel_slots(model, opts),
             settings: ModelSettings {
                 kv_cache_type_k: s.kv_cache_type_k.clone(),
                 kv_cache_type_v: s.kv_cache_type_v.clone(),
@@ -1059,7 +1070,9 @@ impl Scheduler {
                             status: watch::Sender::new(RunnerStatus::Loading),
                             engine: OnceLock::new(),
                             load_task: Mutex::new(None),
-                            slots: Arc::new(Semaphore::new(inner.opts.parallel() as usize)),
+                            slots: Arc::new(Semaphore::new(
+                                parallel_slots(&resolved, &inner.opts) as usize
+                            )),
                             requests_total: AtomicU64::new(0),
                             stats: Mutex::new(RunnerStats::default()),
                         });
@@ -1239,7 +1252,7 @@ impl Scheduler {
             .values()
             .map(|e| QueueStatus {
                 model: e.runner.model.name.clone(),
-                slots: self.inner.opts.parallel() as usize,
+                slots: parallel_slots(&e.runner.model, &self.inner.opts) as usize,
                 active: e.active,
                 queued: e.waiting,
                 requests_total: e.runner.requests_total.load(Ordering::Relaxed),
@@ -1474,7 +1487,7 @@ fn model_status(
         pid: engine.and_then(|en| en.pid()),
         port: engine.map(|en| en.port()),
         context_length: r.fingerprint.context,
-        num_parallel: opts.parallel(),
+        num_parallel: parallel_slots(&r.model, opts),
         gpu_layers,
         total_layers,
         processor,
