@@ -1,26 +1,24 @@
-# Engine recipe: mainline llama.cpp, CPU-only prebuilt (ALK-SP-0003.R6, ALK-US-0026).
+# Engine recipe: mainline llama.cpp (ALK-SP-0003.R3, R6; ALK-US-0026, ALK-US-0049).
 #
 # Pinned to one upstream release tag. The sha256 values are the digests GitHub reports for the
-# release assets; the linux-x64 and windows-x64 ones were also checked against a manual
-# download. Moving the pin means editing this file, re-checking the digests and running the
-# install test with ALKAHEST_TEST_NET=1.
-#
-# The data model is shared with the full recipe system (ALK-US-0049): `kind` will gain
-# `source` (build from source per accelerator); `variant` names the accelerator build.
+# release assets. Moving the pin means editing this file, re-checking the digests and running
+# the install test with ALKAHEST_TEST_NET=1.
 
 id = "llama-cpp"
-variant = "cpu"
-kind = "prebuilt"
-description = "llama.cpp (mainline), CPU-only build with runtime-selected SIMD backends"
+version = "b11669"
+description = "llama.cpp (mainline)"
 license = "MIT"
 homepage = "https://github.com/ggml-org/llama.cpp"
-tag = "b11669"
 # Path of the server binary inside the extracted tree (".exe" is added on Windows).
 executable = "llama-server"
 
+[variants.cpu]
+accelerator = "cpu"
+
+
 # Unix release archives hold one top-level directory (`llama-b11669/`), which is stripped.
 # The Windows archives are flat.
-[[assets]]
+[[variants.cpu.assets]]
 os = "linux"
 arch = "x86_64"
 url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-x64.tar.gz"
@@ -29,7 +27,7 @@ size = 17851611
 format = "tar.gz"
 strip_components = 1
 
-[[assets]]
+[[variants.cpu.assets]]
 os = "linux"
 arch = "aarch64"
 url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-arm64.tar.gz"
@@ -38,7 +36,7 @@ size = 13900160
 format = "tar.gz"
 strip_components = 1
 
-[[assets]]
+[[variants.cpu.assets]]
 os = "macos"
 arch = "aarch64"
 url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-macos-arm64.tar.gz"
@@ -47,7 +45,7 @@ size = 12191582
 format = "tar.gz"
 strip_components = 1
 
-[[assets]]
+[[variants.cpu.assets]]
 os = "macos"
 arch = "x86_64"
 url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-macos-x64.tar.gz"
@@ -56,7 +54,7 @@ size = 11677404
 format = "tar.gz"
 strip_components = 1
 
-[[assets]]
+[[variants.cpu.assets]]
 os = "windows"
 arch = "x86_64"
 url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-cpu-x64.zip"
@@ -65,7 +63,7 @@ size = 19537886
 format = "zip"
 strip_components = 0
 
-[[assets]]
+[[variants.cpu.assets]]
 os = "windows"
 arch = "aarch64"
 url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-cpu-arm64.zip"

@@ -269,15 +269,42 @@ pub enum EnginesAction {
     #[command(visible_alias = "list")]
     Ls,
     /// Download and install an engine from its recipe.
+    #[command(disable_version_flag = true)]
     Install {
         /// Engine id (`alkahest engines ls` lists them).
         engine: String,
-        /// Accelerator build; the CPU build when omitted.
+        /// Accelerator build (`cpu`, `cuda12.8`, `cuda12`, `vulkan`, ...); the best one for
+        /// this machine when omitted.
         #[arg(long)]
         variant: Option<String>,
+        /// Engine version to install; the newest one when omitted. Several versions can be
+        /// installed side by side.
+        #[arg(long = "version")]
+        engine_version: Option<String>,
+        /// Build from the recipe's source steps (needs git, cmake and ninja) instead of
+        /// downloading the prebuilt archive.
+        #[arg(long)]
+        from_source: bool,
         /// Reinstall even when the engine is already installed.
         #[arg(long)]
         force: bool,
+    },
+    /// Remove an installed engine version.
+    #[command(visible_alias = "remove", disable_version_flag = true)]
+    Rm {
+        /// Engine id.
+        engine: String,
+        /// Version to remove; every installed version when omitted.
+        #[arg(long = "version")]
+        engine_version: Option<String>,
+        /// Variant to remove; every installed variant when omitted.
+        #[arg(long)]
+        variant: Option<String>,
+    },
+    /// Show an engine's versions, variants, requirements and what is installed.
+    Info {
+        /// Engine id.
+        engine: String,
     },
 }
 
