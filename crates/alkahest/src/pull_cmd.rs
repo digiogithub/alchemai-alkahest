@@ -10,15 +10,10 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use alkahest_api::pull::{PullOptions, PullService, PullSummary};
 use alkahest_core::config::Loaded;
-use alkahest_core::paths::process_env;
-use alkahest_fetch::FetchConfig;
-use alkahest_hf::pull::pull_hf;
-use alkahest_hf::{HfClient, KeyringStore};
-use alkahest_ollama::{PullOptions, PullOutcome, RegistryClient, pull_ollama};
-use alkahest_pull::{PullEvent, Transfer};
-use alkahest_store::{AlkahestStore, ModelOverlays, ModelRef, OllamaStore, ScopedRef};
-use anyhow::{Context, Result, bail};
+use alkahest_pull::{PullEvent, PullProgress};
+use anyhow::{Context, Result};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -34,31 +29,26 @@ pub fn run(
     loaded: &Loaded,
     json: bool,
 ) -> Result<ExitCode> {
-    let reference: ScopedRef = model
-        .parse()
-        .with_context(|| format!("invalid model reference `{model}`"))?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("starting the async runtime")?;
     runtime.block_on(run_async(
-        reference.reference,
-        insecure,
-        force,
+        model,
+        PullOptions { insecure, force },
         loaded,
         json,
     ))
 }
 
 async fn run_async(
-    reference: ModelRef,
-    insecure: bool,
-    force: bool,
+    reference: &str,
+    opts: PullOptions,
     loaded: &Loaded,
     json: bool,
 ) -> Result<ExitCode> {
     let paths = loaded.config.resolve_paths(&loaded.paths);
-    let store = AlkahestStore::open_resolved(&paths).context("opening the model store")?;
+    let service = PullService::new(loaded.config.clone(), paths);
     let cancel = CancellationToken::new();
     let ctrl_c = cancel.clone();
     tokio::spawn(async move {
@@ -66,99 +56,66 @@ async fn run_async(
             ctrl_c.cancel();
         }
     });
-    // `[pull] max_bytes_per_sec` / `ALKAHEST_PULL_MAX_BPS`.
-    let fetch_config = FetchConfig {
-        max_bytes_per_sec: loaded.config.pull.bandwidth_cap(),
-        ..FetchConfig::default()
-    };
     let renderer = Arc::new(Renderer::new(json));
-    let progress = {
+    let progress: PullProgress = {
         let r = renderer.clone();
         Arc::new(move |e: PullEvent| r.handle(&e))
     };
-
+    let outcome = service.pull(reference, opts, Some(progress), cancel).await;
+    renderer.finish();
     let mut out = std::io::stdout().lock();
-    match reference {
-        ModelRef::Name { name, .. } => {
-            let registry = RegistryClient::for_name(&name, insecure)?;
-            let transfer = Transfer::new(store, registry.http().clone(), fetch_config, cancel)
-                .with_progress(progress);
-            let ollama = OllamaStore::discover(&paths).context("opening the Ollama store")?;
-            let outcome = pull_ollama(
-                &transfer,
-                &registry,
-                ollama.as_ref(),
-                &name,
-                PullOptions { force },
-            )
-            .await
-            .with_context(|| format!("pulling {}", name.display_short()))?;
-            renderer.finish();
-            match outcome {
-                PullOutcome::Installed {
-                    name,
-                    manifest_digest,
-                    downloaded,
-                } => report(
-                    &mut out,
-                    json,
-                    json!({"event":"done","outcome":"installed","name":name.to_string(),
-                           "manifest":manifest_digest.to_string(),"downloaded":downloaded}),
-                    &format!(
-                        "pulled {} ({})",
-                        name.display_short(),
-                        manifest_digest.short()
-                    ),
-                )?,
-                PullOutcome::ReusedOllama { name } => report(
-                    &mut out,
-                    json,
-                    json!({"event":"done","outcome":"reused_ollama","name":name.to_string()}),
-                    &format!(
-                        "{} is already in the Ollama store and is used from there; \
-                         nothing to download (pass --force to copy it into the Alkahest store)",
-                        name.display_short()
-                    ),
-                )?,
-            }
-        }
-        ModelRef::HuggingFace(hf) => {
-            let client = HfClient::from_config(&loaded.config.hf, &process_env, &KeyringStore)?;
-            let transfer = Transfer::new(store, reqwest_client()?, fetch_config, cancel)
-                .with_progress(progress);
-            let overlays = ModelOverlays::in_data_dir(&paths.data_dir);
-            let outcome = pull_hf(&transfer, &client, &hf, Some(&overlays))
-                .await
-                .with_context(|| format!("pulling {hf}"))?;
-            renderer.finish();
-            report(
-                &mut out,
-                json,
-                json!({"event":"done","outcome":"installed","name":outcome.name.to_string(),
-                       "manifest":outcome.manifest_digest.to_string(),
-                       "revision":outcome.revision,"files":outcome.files,
-                       "downloaded":outcome.downloaded}),
-                &format!(
-                    "pulled {} ({}, revision {})",
-                    outcome.name,
-                    outcome.manifest_digest.short(),
-                    outcome.revision.get(..12).unwrap_or(&outcome.revision)
-                ),
-            )?;
-        }
-        ModelRef::Digest(d) => bail!("`{d}` is a digest, not a model name; nothing to pull"),
+    match outcome? {
+        PullSummary::Installed {
+            name,
+            short_name,
+            manifest_digest,
+            downloaded,
+            revision: None,
+            ..
+        } => report(
+            &mut out,
+            json,
+            json!({"event":"done","outcome":"installed","name":name,
+                   "manifest":manifest_digest,"downloaded":downloaded}),
+            &format!("pulled {short_name} ({})", short_digest(&manifest_digest)),
+        )?,
+        PullSummary::Installed {
+            name,
+            manifest_digest,
+            downloaded,
+            revision: Some(revision),
+            files,
+            ..
+        } => report(
+            &mut out,
+            json,
+            json!({"event":"done","outcome":"installed","name":name,
+                   "manifest":manifest_digest,"revision":revision,"files":files,
+                   "downloaded":downloaded}),
+            &format!(
+                "pulled {name} ({}, revision {})",
+                short_digest(&manifest_digest),
+                revision.get(..12).unwrap_or(&revision)
+            ),
+        )?,
+        PullSummary::ReusedOllama { name, short_name } => report(
+            &mut out,
+            json,
+            json!({"event":"done","outcome":"reused_ollama","name":name}),
+            &format!(
+                "{short_name} is already in the Ollama store and is used from there; \
+                 nothing to download (pass --force to copy it into the Alkahest store)"
+            ),
+        )?,
     }
     out.flush()?;
     Ok(ExitCode::SUCCESS)
 }
 
-/// A plain redirect-following client for Hub downloads (the downloader sets the headers).
-fn reqwest_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent(concat!("alkahest/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(15))
-        .build()
-        .context("building the HTTP client")
+/// The `ID`-column form of a manifest digest (first 12 hex characters).
+fn short_digest(digest: &str) -> &str {
+    let hex = digest.strip_prefix("sha256:").unwrap_or(digest);
+    hex.get(..12).unwrap_or(hex)
 }
 
 /// Prints the final line: JSON object, or human text.
