@@ -23,6 +23,6 @@ pub use memory::{
     estimate_gguf,
 };
 pub use scheduler::{
-    DEFAULT_CONTEXT_LENGTH, DEFAULT_LOAD_TIMEOUT, Lease, Scheduler, SchedulerOptions, StopReason,
-    context_length, launch_request,
+    DEFAULT_CONTEXT_LENGTH, DEFAULT_LOAD_TIMEOUT, Lease, QueueStatus, Scheduler, SchedulerOptions,
+    StopReason, context_length, launch_request,
 };

@@ -48,7 +48,14 @@ async fn single_load() {
     // engine and all three are served.
     let b = FakeBackend::with_models(&["m"]);
     *b.launch_delay.lock() = Duration::from_secs(2);
-    let s = sched(&b);
+    // Three slots, so all three requests run at once.
+    let s = sched_with(
+        &b,
+        SchedulerOptions {
+            num_parallel: 3,
+            ..SchedulerOptions::default()
+        },
+    );
     let n = none();
     let (l1, l2, l3) = tokio::join!(
         s.acquire("m", &n, None),
@@ -200,12 +207,14 @@ async fn sampling_changes_do_not_reload() {
     let b = FakeBackend::with_models(&["m"]);
     let s = sched(&b);
     let a = s.acquire("m", &none(), None).await.unwrap();
+    let port = a.port();
+    drop(a);
     let hot = ModelSettings {
         temperature: Some(1.5),
         ..ModelSettings::default()
     };
     let c = s.acquire("m", &hot, None).await.unwrap();
-    assert_eq!(a.port(), c.port());
+    assert_eq!(port, c.port());
     assert_eq!(b.launches(), 1);
 }
 

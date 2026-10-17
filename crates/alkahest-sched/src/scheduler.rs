@@ -28,8 +28,11 @@ use alkahest_engine::{
 use alkahest_store::ModelSettings;
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tokio::runtime::Handle;
-use tokio::sync::{Notify, mpsc, watch};
+
+use serde::Serialize;
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
@@ -215,6 +218,10 @@ struct Runner {
     status: watch::Sender<RunnerStatus>,
     engine: OnceLock<Arc<dyn EngineInstance>>,
     load_task: Mutex<Option<AbortHandle>>,
+    /// Request slots (`num_parallel`); FIFO, closed when the runner goes away.
+    slots: Arc<Semaphore>,
+    /// Leases granted over the runner's life.
+    requests_total: AtomicU64,
 }
 
 impl Runner {
@@ -231,6 +238,7 @@ impl Runner {
         if let Some(task) = self.load_task.lock().take() {
             task.abort();
         }
+        self.slots.close();
         tracing::info!(model = %self.model.name, ?reason, "unloading model");
         self.engine.get().map(|e| e.stop())
     }
@@ -268,7 +276,7 @@ struct Entry {
     phase: Phase,
     /// Leases held.
     active: usize,
-    /// Requests waiting for this runner (load in progress).
+    /// Requests waiting for this runner: for its load or for a free slot.
     waiting: usize,
     /// Keep-alive of the latest request (sticky until the next one).
     keep_alive: KeepAlive,
@@ -361,6 +369,10 @@ impl State {
 
 #[derive(Debug)]
 struct Inner {
+    /// Requests inside `acquire` without a lease yet, across all models.
+    queued: AtomicUsize,
+    /// Requests refused with "server busy".
+    rejected: AtomicU64,
     backend: Arc<dyn ModelBackend>,
     probe: Arc<dyn MemoryProbe>,
     opts: SchedulerOptions,
@@ -451,6 +463,7 @@ impl Inner {
                 }
             }
         }
+        runner.slots.close();
         runner.status.send_if_modified(|s| {
             if matches!(s, RunnerStatus::Ready | RunnerStatus::Loading) {
                 *s = if exit.crashed() {
@@ -771,6 +784,50 @@ impl Drop for WaitGuard {
     }
 }
 
+/// Counts a request against `max_queue` while it has no lease.
+#[derive(Debug)]
+struct QueueTicket<'a> {
+    inner: &'a Inner,
+}
+
+impl<'a> QueueTicket<'a> {
+    /// Enters the queue, or refuses with "server busy" when it is full (ALK-SP-0004.R4).
+    fn take(inner: &'a Inner) -> Result<Self> {
+        let max = inner.opts.max_queue.max(1) as usize;
+        let before = inner.queued.fetch_add(1, Ordering::SeqCst);
+        if before >= max {
+            inner.queued.fetch_sub(1, Ordering::SeqCst);
+            inner.rejected.fetch_add(1, Ordering::Relaxed);
+            return Err(SchedError::ServerBusy {
+                queued: before,
+                max,
+            });
+        }
+        Ok(Self { inner })
+    }
+}
+
+impl Drop for QueueTicket<'_> {
+    fn drop(&mut self) {
+        self.inner.queued.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Concurrency of one loaded model (ALK-SP-0004.R4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct QueueStatus {
+    /// Model name.
+    pub model: String,
+    /// Parallel request slots.
+    pub slots: usize,
+    /// Requests holding a slot.
+    pub active: usize,
+    /// Requests waiting for the load or for a slot.
+    pub queued: usize,
+    /// Requests served by this instance since it was loaded.
+    pub requests_total: u64,
+}
+
 /// The scheduler service. Cheap to clone; all clones share one state.
 ///
 /// Create it inside a tokio runtime with [`Scheduler::new`], call [`Scheduler::acquire`] for
@@ -797,6 +854,8 @@ impl Scheduler {
         let rt = Handle::try_current().map_err(|_| SchedError::NoRuntime)?;
         let (tx, rx) = mpsc::channel(1);
         let inner = Arc::new(Inner {
+            queued: AtomicUsize::new(0),
+            rejected: AtomicU64::new(0),
             backend,
             probe,
             load_gate: tokio::sync::Mutex::new(()),
@@ -833,15 +892,19 @@ impl Scheduler {
         if inner.state.lock().shutting_down {
             return Err(SchedError::ShuttingDown);
         }
+        let _ticket = QueueTicket::take(inner)?;
         let resolved = inner.backend.resolve(model, request).await?;
         let fingerprint = LoadFingerprint::new(&resolved, &inner.opts);
         let keep_alive = keep_alive
             .or(resolved.request.settings.keep_alive)
             .unwrap_or(inner.opts.keep_alive);
         let mut guard: Option<WaitGuard> = None;
+        // A slot granted while queued, with the id of the runner it belongs to.
+        let mut granted: Option<(u64, OwnedSemaphorePermit)> = None;
 
         enum Next {
             Status(watch::Receiver<RunnerStatus>),
+            Slot(Arc<Runner>),
             Changed,
             Stop(BoxFuture<'static, ExitInfo>),
         }
@@ -877,18 +940,41 @@ impl Scheduler {
                                 let Some(engine) = runner.engine.get().cloned() else {
                                     continue;
                                 };
-                                e.active += 1;
-                                e.expires_at = None;
-                                e.keep_alive = keep_alive;
-                                e.last_used = now;
-                                if let Some(mut g) = guard.take() {
-                                    g.release_locked(st);
+                                let permit = match granted.take() {
+                                    Some((id, p)) if id == runner.id => Some(p),
+                                    _ => Arc::clone(&runner.slots).try_acquire_owned().ok(),
+                                };
+                                match permit {
+                                    Some(permit) => {
+                                        e.active += 1;
+                                        e.expires_at = None;
+                                        e.keep_alive = keep_alive;
+                                        e.last_used = now;
+                                        runner.requests_total.fetch_add(1, Ordering::Relaxed);
+                                        if let Some(mut g) = guard.take() {
+                                            g.release_locked(st);
+                                        }
+                                        return Ok(Lease {
+                                            inner: Arc::clone(inner),
+                                            runner,
+                                            engine,
+                                            _slot: permit,
+                                        });
+                                    }
+                                    None => {
+                                        // Every slot is busy: queue (FIFO) for one.
+                                        if guard.is_none() {
+                                            e.waiting += 1;
+                                            e.expires_at = None;
+                                            guard = Some(WaitGuard {
+                                                inner: Arc::clone(inner),
+                                                runner: Arc::clone(&runner),
+                                                armed: true,
+                                            });
+                                        }
+                                        Next::Slot(runner)
+                                    }
                                 }
-                                return Ok(Lease {
-                                    inner: Arc::clone(inner),
-                                    runner,
-                                    engine,
-                                });
                             }
                             Phase::Loading => {
                                 if guard.is_none() {
@@ -930,6 +1016,8 @@ impl Scheduler {
                             status: watch::Sender::new(RunnerStatus::Loading),
                             engine: OnceLock::new(),
                             load_task: Mutex::new(None),
+                            slots: Arc::new(Semaphore::new(inner.opts.parallel() as usize)),
+                            requests_total: AtomicU64::new(0),
                         });
                         st.entries.insert(
                             key,
@@ -986,12 +1074,57 @@ impl Scheduler {
                         | RunnerStatus::Crashed(_) => break,
                     }
                 },
+                Next::Slot(runner) => {
+                    match Arc::clone(&runner.slots).acquire_owned().await {
+                        Ok(permit) => granted = Some((runner.id, permit)),
+                        // Closed: the runner went away while we queued.
+                        Err(_) => {
+                            if let RunnerStatus::Stopped(
+                                reason @ (StopReason::Requested | StopReason::Shutdown),
+                            ) = *runner.status.borrow()
+                            {
+                                return Err(SchedError::Unloaded {
+                                    model: resolved.name.clone(),
+                                    reason,
+                                });
+                            }
+                        }
+                    }
+                }
                 Next::Changed => notified.await,
                 Next::Stop(stop) => {
                     stop.await;
                 }
             }
         }
+    }
+
+    /// Requests waiting for a model (load or slot) across all models.
+    pub fn queued(&self) -> usize {
+        self.inner.queued.load(Ordering::Relaxed)
+    }
+
+    /// Requests refused with "server busy" since start.
+    pub fn rejected(&self) -> u64 {
+        self.inner.rejected.load(Ordering::Relaxed)
+    }
+
+    /// Per-model concurrency and queue depth, sorted by model name.
+    pub fn queues(&self) -> Vec<QueueStatus> {
+        let st = self.inner.state.lock();
+        let mut out: Vec<QueueStatus> = st
+            .entries
+            .values()
+            .map(|e| QueueStatus {
+                model: e.runner.model.name.clone(),
+                slots: self.inner.opts.parallel() as usize,
+                active: e.active,
+                queued: e.waiting,
+                requests_total: e.runner.requests_total.load(Ordering::Relaxed),
+            })
+            .collect();
+        out.sort_by(|a, b| a.model.cmp(&b.model));
+        out
     }
 
     /// Unloads `model` now (ALK-SP-0004.R5): `alkahest stop`, `keep_alive: 0` without a prompt
@@ -1057,6 +1190,8 @@ pub struct Lease {
     inner: Arc<Inner>,
     runner: Arc<Runner>,
     engine: Arc<dyn EngineInstance>,
+    /// The request slot; released after the bookkeeping in `drop`.
+    _slot: OwnedSemaphorePermit,
 }
 
 impl Lease {
