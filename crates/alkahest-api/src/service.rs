@@ -307,3 +307,23 @@ pub fn now_rfc3339() -> String {
 pub fn now_unix() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
+
+/// `prefix` followed by 18 random alphanumeric characters from the OS RNG (response and
+/// message ids). Falls back to the clock when the RNG fails: the id only has to tell
+/// responses apart.
+pub fn random_id(prefix: &str) -> String {
+    use rand::TryRng;
+    let mut bytes = [0u8; 18];
+    if rand::rngs::SysRng.try_fill_bytes(&mut bytes).is_err() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        bytes[..16].copy_from_slice(&nanos.to_le_bytes());
+    }
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let s: String = bytes
+        .iter()
+        .map(|b| ALPHABET[usize::from(*b) % ALPHABET.len()] as char)
+        .collect();
+    format!("{prefix}{s}")
+}

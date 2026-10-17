@@ -61,23 +61,9 @@ fn model_of(body: &Map<String, Value>) -> Result<String, HttpError> {
     }
 }
 
-/// A fresh `msg_...` id (24 random base62-ish characters from the OS RNG).
+/// A fresh `msg_...` id.
 fn message_id() -> String {
-    use rand::TryRng;
-    let mut bytes = [0u8; 18];
-    if rand::rngs::SysRng.try_fill_bytes(&mut bytes).is_err() {
-        // The id only has to be unique enough to tell messages apart in logs.
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
-        bytes[..16].copy_from_slice(&nanos.to_le_bytes());
-    }
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let s: String = bytes
-        .iter()
-        .map(|b| ALPHABET[usize::from(*b) % ALPHABET.len()] as char)
-        .collect();
-    format!("msg_{s}")
+    service::random_id("msg_")
 }
 
 /// A leased model and the translated request, ready to send.

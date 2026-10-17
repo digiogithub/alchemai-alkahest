@@ -87,7 +87,69 @@ def main():
     except openai.NotFoundError as e:
         check("unknown route status", e.status_code == 404, e.status_code)
 
+    responses_checks(client, chat_model)
     print("openai-python conformance: all checks passed", flush=True)
+
+
+def responses_checks(client, chat_model):
+    """The Responses API (ALK-US-0036)."""
+    r = client.responses.create(
+        model=chat_model, input="Say hi.", instructions="Be brief.", max_output_tokens=32
+    )
+    check("responses.create", r.object == "response" and r.output_text, r)
+    check("responses.create status", r.status in ("completed", "incomplete"), r.status)
+    check("responses.create usage", r.usage is not None and r.usage.input_tokens > 0, r.usage)
+
+    with client.responses.stream(model=chat_model, input="Say hi.", max_output_tokens=32) as s:
+        deltas = [e.delta for e in s if e.type == "response.output_text.delta"]
+        final = s.get_final_response()
+    check("responses.stream deltas", "".join(deltas), deltas)
+    check("responses.stream final", final.output_text == "".join(deltas), final)
+
+    follow = client.responses.create(
+        model=chat_model, previous_response_id=r.id, input="Again.", max_output_tokens=16
+    )
+    check("responses previous_response_id", follow.previous_response_id == r.id, follow)
+    got = client.responses.retrieve(r.id)
+    check("responses.retrieve", got.id == r.id, got)
+
+    tools = [
+        {
+            "type": "function",
+            "name": "get_weather",
+            "description": "Current weather of a city",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+            },
+        }
+    ]
+    t = client.responses.create(
+        model=chat_model,
+        input="What is the weather in Paris?",
+        tools=tools,
+        tool_choice="required",
+        max_output_tokens=64,
+    )
+    calls = [o for o in t.output if o.type == "function_call"]
+    if os.environ.get("ALKAHEST_CONFORMANCE_TOOLS", "1") == "0":
+        check("responses tools parse", t.object == "response", t)
+    else:
+        check("responses function_call", calls and calls[0].name == "get_weather", t)
+        out = client.responses.create(
+            model=chat_model,
+            previous_response_id=t.id,
+            input=[{"type": "function_call_output", "call_id": calls[0].call_id, "output": "sunny"}],
+            max_output_tokens=32,
+        )
+        check("responses function_call_output", out.object == "response", out)
+
+    try:
+        client.responses.create(model=chat_model, previous_response_id="resp_nope", input="x")
+        check("responses unknown previous raises", False, "no error")
+    except openai.BadRequestError as e:
+        check("responses unknown previous", e.status_code == 400, e.body)
 
 
 if __name__ == "__main__":

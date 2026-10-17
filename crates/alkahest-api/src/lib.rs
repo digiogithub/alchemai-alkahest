@@ -9,7 +9,7 @@
 //! * [`keys`]: API key generation, hashed storage and verification.
 //! * [`server`]: [`bind`], [`serve`] and [`serve_with`] (drain timeout, shutdown hooks).
 //! * [`shutdown`]: [`ShutdownHooks`] and the OS [`stop_signal`].
-//! * [`ollama`], [`openai`], [`anthropic`], [`admin`]: the API families, proxied to the engines the
+//! * [`ollama`], [`openai`], [`responses`], [`anthropic`], [`admin`]: the API families, proxied to the engines the
 //!   scheduler leases; [`inference_routes`] merges all of them.
 //! * [`service`]: services handlers fetch from the state ([`alkahest_sched::Scheduler`],
 //!   `Arc<Catalog>`, [`pull::PullService`], [`service::UpstreamClient`]) and [`HttpError`].
@@ -28,6 +28,7 @@ pub mod keys;
 pub mod ollama;
 pub mod openai;
 pub mod pull;
+pub mod responses;
 pub mod router;
 pub mod sampling;
 pub mod server;
@@ -44,6 +45,7 @@ pub fn inference_routes() -> axum::Router<AppState> {
     ollama::routes()
         .merge(openai::routes())
         .merge(anthropic::routes())
+        .merge(responses::routes())
         .merge(decisions::routes())
         .merge(admin::routes())
 }
