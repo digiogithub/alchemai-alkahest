@@ -163,6 +163,8 @@ fn variant(id: &str, variant: &str, installed: bool) -> EngineVariant {
         cuda: None,
         notes: String::new(),
         path: installed.then(|| PathBuf::from("/e/llama-server")),
+        bundled: false,
+        download_bytes: Some(12_000_000),
     }
 }
 
@@ -1222,4 +1224,94 @@ async fn engine_removal_is_refused_while_a_loaded_model_uses_it() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{doc}");
+}
+
+/// ALK-US-0107: install job log tail, recipe reload, per-engine override saved to the config
+/// file (applied on restart), listing flags.
+#[tokio::test]
+async fn engine_admin_log_reload_and_override() {
+    let a = admin_ctx(Config::default(), false);
+    let h = harness(&a).await;
+    let (status, doc) = send(
+        &h,
+        "POST",
+        "/alkahest/v1/engines/install",
+        Some(json!({"engine": "llama-cpp", "variant": "cpu"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{doc}");
+    let id = doc["job"]["id"].as_str().unwrap().to_string();
+    wait_job(&h, &id).await;
+    let (status, log) = send(
+        &h,
+        "GET",
+        &format!("/alkahest/v1/jobs/{id}/log?lines=10"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{log}");
+    let lines: Vec<&str> = log["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_str().unwrap())
+        .collect();
+    assert_eq!(lines.first(), Some(&"downloading"), "{log}");
+    assert_eq!(lines.last(), Some(&"done"), "{log}");
+    assert!(lines.iter().any(|l| l.starts_with("installed ")), "{log}");
+    let (status, _) = send(&h, "GET", "/alkahest/v1/jobs/job_nope/log", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (_, listing) = send(&h, "GET", "/alkahest/v1/engines", None).await;
+    let row = &listing["engines"][0];
+    assert_eq!(row["bundled"], false);
+    assert_eq!(row["download_bytes"], 12_000_000);
+
+    let (status, doc) = send(&h, "POST", "/alkahest/v1/engines/reload", None).await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert!(doc["issues"].as_array().unwrap().is_empty());
+
+    let (status, doc) = send(&h, "GET", "/alkahest/v1/engines/llama.cpp/override", None).await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["engine"], "llama-cpp");
+    assert_eq!(doc["restart_required"], false);
+    let (status, doc) = send(
+        &h,
+        "PUT",
+        "/alkahest/v1/engines/llama-cpp/override",
+        Some(json!({"path": "/opt/llama/llama-server", "extra_args": ["--mlock"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["saved"]["path"], "/opt/llama/llama-server");
+    assert_eq!(doc["saved"]["extra_args"], json!(["--mlock"]));
+    assert_eq!(doc["running"]["path"], Value::Null);
+    assert_eq!(doc["restart_required"], true);
+    let text = std::fs::read_to_string(a.tmp.path().join("config.toml")).unwrap();
+    let c = Config::from_toml_str(&text).unwrap();
+    assert_eq!(c.engines.overrides["llama-cpp"].extra_args, ["--mlock"]);
+    for bad in [
+        json!({"path": "relative/llama-server"}),
+        json!({"unknown": 1}),
+    ] {
+        let (status, _) = send(
+            &h,
+            "PUT",
+            "/alkahest/v1/engines/llama-cpp/override",
+            Some(bad),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    let (status, _) = send(&h, "GET", "/alkahest/v1/engines/nope/override", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Both empty removes it.
+    let (_, doc) = send(
+        &h,
+        "PUT",
+        "/alkahest/v1/engines/llama-cpp/override",
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(doc["restart_required"], false, "{doc}");
 }

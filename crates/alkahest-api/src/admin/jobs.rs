@@ -7,7 +7,9 @@
 //! the event stream. Finished jobs are kept for listing until [`KEEP_FINISHED`] newer ones
 //! push them out or a client deletes them.
 
+use std::collections::VecDeque;
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -24,6 +26,9 @@ pub const PUBLISH_INTERVAL: Duration = Duration::from_millis(200);
 
 /// Finished jobs kept for listing.
 pub const KEEP_FINISHED: usize = 50;
+
+/// Lines of job output kept in memory per job (the oldest are dropped first).
+pub const LOG_LINES: usize = 2000;
 
 /// Capacity of the event channel; a subscriber that lags further loses the oldest events
 /// (the next one carries the full job state again, so nothing is permanently lost).
@@ -87,12 +92,28 @@ pub struct Job {
     /// Outcome of a completed job (what was installed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
+    /// File holding the job's full output (a source build log), when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_path: Option<String>,
+}
+
+/// The tail of a job's output (`GET /alkahest/v1/jobs/{id}/log`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobLog {
+    /// The job id.
+    pub id: String,
+    /// Last lines, oldest first: the log file's when the job has one, else the lines the job
+    /// reported (phases, outcome).
+    pub lines: Vec<String>,
+    /// The log file, when there is one.
+    pub log_path: Option<String>,
 }
 
 struct Slot {
     job: Job,
     cancel: CancellationToken,
     last_publish: Instant,
+    log: VecDeque<String>,
 }
 
 struct Inner {
@@ -188,12 +209,14 @@ impl JobManager {
                 updated_at: now,
                 error: None,
                 result: None,
+                log_path: None,
             };
             let cancel = CancellationToken::new();
             slots.push(Slot {
                 job: job.clone(),
                 cancel: cancel.clone(),
                 last_publish: Instant::now(),
+                log: VecDeque::new(),
             });
             let handle = JobHandle {
                 id: job.id.clone(),
@@ -209,6 +232,37 @@ impl JobManager {
             handle.finish(outcome);
         });
         (job, true)
+    }
+
+    /// The last `lines` lines of job `id`'s output, `None` for an unknown id. Reads the log
+    /// file (blocking) when the job has one and it exists.
+    pub fn log(&self, id: &str, lines: usize) -> Option<JobLog> {
+        let (memory, path) = {
+            let slots = self.inner.slots.lock();
+            let slot = slots.iter().find(|s| s.job.id == id)?;
+            let skip = slot.log.len().saturating_sub(lines);
+            let memory: Vec<String> = slot.log.iter().skip(skip).cloned().collect();
+            (memory, slot.job.log_path.clone())
+        };
+        let from_file = path
+            .as_deref()
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|bytes| tail_lines(&String::from_utf8_lossy(&bytes), lines));
+        Some(JobLog {
+            id: id.to_string(),
+            lines: from_file.unwrap_or(memory),
+            log_path: path,
+        })
+    }
+
+    fn push_log(&self, id: &str, line: &str) {
+        let mut slots = self.inner.slots.lock();
+        if let Some(slot) = slots.iter_mut().find(|s| s.job.id == id) {
+            if slot.log.len() >= LOG_LINES {
+                slot.log.pop_front();
+            }
+            slot.log.push_back(line.to_string());
+        }
     }
 
     /// Asks a running job to stop. The job turns `cancelled` once its work has wound down.
@@ -267,6 +321,15 @@ impl JobManager {
     }
 }
 
+/// The last `n` lines of `text`.
+fn tail_lines(text: &str, n: usize) -> Vec<String> {
+    let all: Vec<&str> = text.lines().collect();
+    all[all.len().saturating_sub(n)..]
+        .iter()
+        .map(|l| (*l).to_string())
+        .collect()
+}
+
 /// Drops the oldest finished jobs beyond [`KEEP_FINISHED`].
 fn prune(slots: &mut Vec<Slot>) {
     let finished = slots.iter().filter(|s| s.job.state.is_finished()).count();
@@ -306,10 +369,23 @@ impl JobHandle {
         self.cancel.clone()
     }
 
-    /// Sets the current step.
+    /// Sets the current step (also recorded as a log line).
     pub fn phase(&self, phase: &str) {
+        self.log(phase);
         self.jobs
             .update(&self.id, false, |j| phase.clone_into(&mut j.phase));
+    }
+
+    /// Appends a line to the job's in-memory output.
+    pub fn log(&self, line: &str) {
+        self.jobs.push_log(&self.id, line);
+    }
+
+    /// Names the file holding the job's full output (a build log); `GET .../log` reads it.
+    pub fn set_log_path(&self, path: PathBuf) {
+        let text = path.display().to_string();
+        self.jobs
+            .update(&self.id, true, |j| j.log_path = Some(text));
     }
 
     /// Reports byte progress, optionally with a new step.
@@ -326,6 +402,11 @@ impl JobHandle {
     /// Records the outcome: a failure after a cancellation request counts as cancelled.
     fn finish(&self, outcome: Result<Value, String>) {
         let cancelled = self.cancel.is_cancelled();
+        match &outcome {
+            Ok(_) => self.log("done"),
+            Err(_) if cancelled => self.log("cancelled"),
+            Err(e) => self.log(&format!("failed: {e}")),
+        }
         self.jobs.update(&self.id, true, |j| match outcome {
             Ok(result) => {
                 j.state = JobState::Completed;
@@ -444,6 +525,40 @@ mod tests {
             m.get(&job.id).is_none(),
             "the oldest finished job was dropped"
         );
+    }
+
+    #[tokio::test]
+    async fn job_logs_keep_phases_and_prefer_the_log_file() {
+        let m = JobManager::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("build.log");
+        let (job, _) = m.start(JobKind::EngineInstall, "e", |h| async move {
+            h.phase("downloading");
+            h.log("unpacked 12 files");
+            Err("disk full".to_string())
+        });
+        wait_finished(&m, &job.id).await;
+        let log = m.log(&job.id, 10).unwrap();
+        assert_eq!(
+            log.lines,
+            ["downloading", "unpacked 12 files", "failed: disk full"]
+        );
+        assert_eq!(m.log(&job.id, 1).unwrap().lines, ["failed: disk full"]);
+        assert!(m.log("nope", 5).is_none());
+
+        std::fs::write(&file, "cmake ...\nninja: [1/2]\nninja: [2/2]\n").unwrap();
+        let f = file.clone();
+        let (job, _) = m.start(JobKind::EngineInstall, "src", |h| async move {
+            h.set_log_path(f);
+            Ok(Value::Null)
+        });
+        let done = wait_finished(&m, &job.id).await;
+        assert_eq!(
+            done.log_path.as_deref(),
+            Some(file.display().to_string().as_str())
+        );
+        let log = m.log(&job.id, 2).unwrap();
+        assert_eq!(log.lines, ["ninja: [1/2]", "ninja: [2/2]"]);
     }
 
     #[tokio::test]

@@ -24,10 +24,12 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+mod engine_admin;
 mod library;
 mod library_tags;
 mod rest;
 
+pub use engine_admin::{EngineOverride, EngineOverrideDoc, JobLog};
 pub use library::{LibraryModel, OpenAiModel, OpenAiModels};
 pub use library_tags::LibraryTag;
 

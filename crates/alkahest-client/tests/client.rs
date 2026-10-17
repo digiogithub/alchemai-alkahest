@@ -214,3 +214,48 @@ async fn ollama_tags_and_load_progress() {
     assert_eq!(ps.models[0].load_progress, Some(0.4));
     assert_eq!(ps.models[0].executable.as_deref(), Some("/e/llama-server"));
 }
+
+/// ALK-US-0107: job log tail, recipe reload and engine overrides.
+#[tokio::test]
+async fn job_log_reload_and_engine_override() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/jobs/job_1/log"))
+        .and(wiremock::matchers::query_param("lines", "5"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"id": "job_1", "lines": ["building", "ninja: [2/2]"], "log_path": "/e/.logs/x.log"}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/alkahest/v1/engines/reload"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"variants": 9, "issues": []})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/alkahest/v1/engines/llama-cpp/override"))
+        .and(body_partial_json(json!({"extra_args": ["--mlock"]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "engine": "llama-cpp", "running": {"path": null, "extra_args": []},
+            "saved": {"path": null, "extra_args": ["--mlock"]}, "restart_required": true})))
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    let log = c.job_log("job_1", Some(5)).await.unwrap();
+    assert_eq!(log.lines.last().map(String::as_str), Some("ninja: [2/2]"));
+    assert_eq!(c.reload_recipes().await.unwrap()["variants"], 9);
+    let doc = c
+        .set_engine_override(
+            "llama-cpp",
+            &alkahest_client::EngineOverride {
+                path: None,
+                extra_args: vec!["--mlock".into()],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(doc.restart_required);
+    assert_eq!(doc.saved.extra_args, ["--mlock"]);
+}
