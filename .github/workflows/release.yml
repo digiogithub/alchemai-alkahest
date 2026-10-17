@@ -191,7 +191,10 @@ jobs:
             hdiutil info | grep -E '^/dev/disk[0-9]+' | awk '{print $1}' | sort -u | while read -r d; do
               hdiutil detach -force "$d" || true
             done
-            rm -f target/packager/rw.*.dmg
+            # The failed attempt leaves a half-built Alkahest.app that cargo-packager would
+            # reuse without its resources; start packaging from scratch (engines stay staged
+            # in target/bundle).
+            rm -rf target/packager
             sleep 10
             cargo xtask bundle
           fi
