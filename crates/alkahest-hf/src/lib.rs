@@ -11,6 +11,8 @@
 //!   split models and finds `mmproj` projectors.
 //!
 //! - [`ggml`] lists the whisper.cpp models (`ggml-*.bin`) of a repository.
+//! - [`remote_gguf`] reads the GGUF header of a Hub file with range requests (memory
+//!   estimates before a download).
 //! - [`RecommendedParams`] derives the recommended sampling, context and template settings from
 //!   `generation_config.json`, the model card and GGUF metadata ([`HfClient::recommended_params`]).
 //!
@@ -23,6 +25,7 @@ pub mod ggml;
 pub mod gguf;
 pub mod pull;
 mod recommended;
+pub mod remote_gguf;
 pub mod safetensors;
 mod token;
 mod types;

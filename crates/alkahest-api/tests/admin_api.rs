@@ -1315,3 +1315,110 @@ async fn engine_admin_log_reload_and_override() {
     .await;
     assert_eq!(doc["restart_required"], false, "{doc}");
 }
+
+/// A tiny GGUF v3 header with the metadata the memory profile needs and one block tensor.
+fn profile_gguf() -> Vec<u8> {
+    fn put_str(o: &mut Vec<u8>, s: &str) {
+        o.extend((s.len() as u64).to_le_bytes());
+        o.extend(s.as_bytes());
+    }
+    let u32s = [
+        ("llama.block_count", 1u32),
+        ("llama.context_length", 2048),
+        ("llama.embedding_length", 64),
+        ("llama.attention.head_count", 4),
+        ("llama.attention.head_count_kv", 4),
+    ];
+    let mut o = b"GGUF".to_vec();
+    o.extend(3u32.to_le_bytes());
+    o.extend(1u64.to_le_bytes());
+    o.extend(((u32s.len() + 1) as u64).to_le_bytes());
+    put_str(&mut o, "general.architecture");
+    o.extend(8u32.to_le_bytes());
+    put_str(&mut o, "llama");
+    for (k, v) in u32s {
+        put_str(&mut o, k);
+        o.extend(4u32.to_le_bytes());
+        o.extend(v.to_le_bytes());
+    }
+    put_str(&mut o, "blk.0.attn_q.weight");
+    o.extend(2u32.to_le_bytes());
+    o.extend(256u64.to_le_bytes());
+    o.extend(64u64.to_le_bytes());
+    o.extend(12u32.to_le_bytes());
+    o.extend(0u64.to_le_bytes());
+    while !o.len().is_multiple_of(32) {
+        o.push(0);
+    }
+    o.extend(vec![0u8; 144 * 64]);
+    o
+}
+
+/// ALK-US-0104: memory estimate of a Hub quant before download (header read remotely).
+#[tokio::test]
+async fn hf_estimate_reads_the_remote_header() {
+    let hub = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/models/org/tiny"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "org/tiny", "sha": "abc",
+            "siblings": [
+                {"rfilename": "tiny-Q4_K_M.gguf", "size": 9600},
+                {"rfilename": "tiny-Q8_0.gguf", "size": 12000},
+                {"rfilename": "README.md", "size": 10}
+            ]
+        })))
+        .mount(&hub)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/org/tiny/resolve/main/tiny-Q4_K_M.gguf"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(profile_gguf()))
+        .mount(&hub)
+        .await;
+    let mut config = Config::default();
+    config.hf.endpoint = hub.uri();
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = AdminContext::builder(config, paths(tmp.path()), tmp.path().join("c.toml"))
+        .hf_token_store(Arc::new(MemTokens::default()))
+        .env(Arc::new(|_: &str| None))
+        .ollama_library("http://127.0.0.1:9")
+        .system(system())
+        .build();
+    let h = Harness::start_with(&[], ApiSettings::default(), move |b| b.service(ctx)).await;
+
+    let (status, doc) = send(
+        &h,
+        "GET",
+        "/alkahest/v1/hf/estimate?repo=org/tiny&quant=Q4_K_M&context_length=1024&kv_cache_type_k=q5_1&kv_cache_type_v=iq4_nl",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["model"], "hf.co/org/tiny:Q4_K_M");
+    assert_eq!(doc["context_length"], 1024);
+    assert_eq!(doc["files"], json!(["tiny-Q4_K_M.gguf"]));
+    assert_eq!(doc["download_bytes"], 9600);
+    assert!(doc["estimate"]["ram_bytes"].as_u64().unwrap() > 0, "{doc}");
+    assert_eq!(doc["fits"], true, "{doc}");
+    // By file name too.
+    let (status, doc) = send(
+        &h,
+        "GET",
+        "/alkahest/v1/hf/estimate?repo=org/tiny&file=tiny-Q4_K_M.gguf",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    for (q, want) in [
+        ("repo=org/tiny&quant=Q2_K", StatusCode::NOT_FOUND),
+        ("repo=org/tiny&file=nope.gguf", StatusCode::NOT_FOUND),
+        ("repo=../x", StatusCode::BAD_REQUEST),
+        (
+            "repo=org/tiny&quant=Q4_K_M&kv_cache_type_k=q3_0",
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        let (status, doc) = send(&h, "GET", &format!("/alkahest/v1/hf/estimate?{q}"), None).await;
+        assert_eq!(status, want, "{q}: {doc}");
+    }
+}

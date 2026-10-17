@@ -66,6 +66,11 @@ impl HfClient {
         Self::new(&resolve_endpoint(config, env), resolve_token(env, store))
     }
 
+    /// The HTTP client (range requests in [`crate::remote_gguf`]).
+    pub(crate) fn http(&self) -> &Client {
+        &self.http
+    }
+
     /// The Hub endpoint this client talks to.
     pub fn endpoint(&self) -> &str {
         self.endpoint.as_str().trim_end_matches('/')
@@ -297,7 +302,7 @@ impl HfClient {
 }
 
 /// Maps Hub statuses to typed errors.
-fn map_status(resp: Response, target: &str) -> Result<Response> {
+pub(crate) fn map_status(resp: Response, target: &str) -> Result<Response> {
     let status = resp.status();
     if status.is_success() {
         return Ok(resp);

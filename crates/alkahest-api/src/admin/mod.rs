@@ -105,6 +105,7 @@ routes! {
     get "/alkahest/v1/jobs/{id}/log" "jobs" "Tail of a job's output: phases, outcome, the source build log (lines)" => pulls::job_log;
     get "/alkahest/v1/hf/search" "discover" "Search Hugging Face (q, format, task, sort, author, limit)" => discover::hf_search;
     get "/alkahest/v1/hf/model" "discover" "Hugging Face model info, card and recommended parameters (repo, revision, readme)" => discover::hf_model;
+    get "/alkahest/v1/hf/estimate" "discover" "Memory estimate of a Hub GGUF before download, from its header read with range requests (repo, file or quant, context_length, num_parallel, kv_cache_type_k/v, flash_attention, gpu_layers)" => discover::hf_estimate;
     get "/alkahest/v1/hf/files" "discover" "Hugging Face GGUF quantisations, projectors and safetensors weights (repo, revision)" => discover::hf_files;
     get "/alkahest/v1/hf/token" "discover" "Hugging Face token presence and account (verify)" => discover::hf_token_status;
     put "/alkahest/v1/hf/token" "discover" "Store the Hugging Face token in the server keyring" => discover::hf_token_set;

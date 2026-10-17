@@ -52,6 +52,9 @@ pub enum HfError {
     /// The OS keyring failed.
     #[error("keyring error: {0}")]
     Keyring(String),
+    /// A remote file is not a readable GGUF (or its header is implausibly large).
+    #[error("invalid GGUF: {0}")]
+    InvalidGguf(String),
 }
 
 /// Result alias of this crate.

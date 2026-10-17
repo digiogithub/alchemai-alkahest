@@ -25,12 +25,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 mod engine_admin;
+mod hf_estimate;
 mod library;
 mod library_tags;
 mod monitor;
 mod rest;
 
 pub use engine_admin::{EngineOverride, EngineOverrideDoc, JobLog};
+pub use hf_estimate::HfQuant;
 pub use library::{LibraryModel, OpenAiModel, OpenAiModels};
 pub use library_tags::LibraryTag;
 pub use monitor::{CpuLoad, GpuLoad, ModelCpu, RequestRecord, Utilization};

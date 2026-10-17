@@ -12,7 +12,7 @@
 
 use alkahest_hf::{
     HfClient, HfError, RepoFile, SearchQuery, SortKey, Token, gguf_variants, mmproj_files,
-    resolve_token,
+    pick_mmproj, pick_variant, resolve_token,
 };
 use alkahest_ollama::{LibraryError, OllamaLibrary};
 use axum::Json;
@@ -391,6 +391,104 @@ pub(super) async fn ollama_search(
             .await
             .map_err(|e| library_error(&e))?;
         Ok(Json(json!({ "models": models })).into_response())
+    }
+    .await;
+    reply(&state, r)
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct HfEstimateParams {
+    #[serde(default)]
+    repo: String,
+    file: Option<String>,
+    quant: Option<String>,
+    revision: Option<String>,
+    context_length: Option<u64>,
+    num_parallel: Option<u32>,
+    kv_cache_type_k: Option<String>,
+    kv_cache_type_v: Option<String>,
+    flash_attention: Option<bool>,
+    gpu_layers: Option<i32>,
+}
+
+/// `GET /alkahest/v1/hf/estimate?repo=&file=|quant=&context_length=&num_parallel=
+/// &kv_cache_type_k=&kv_cache_type_v=&flash_attention=&gpu_layers=`: the memory estimate of
+/// a Hub GGUF before it is downloaded. The header is read with HTTP range requests (every
+/// shard of a split model); the repository's projector, when it has one, counts as the pull
+/// would download it. Same answer shape as `GET /alkahest/v1/models/{name}/estimate`.
+pub(super) async fn hf_estimate(
+    State(state): State<AppState>,
+    Query(p): Query<HfEstimateParams>,
+) -> Response {
+    let r = async {
+        let repo = check_repo(&p.repo)?.to_string();
+        let ctx = admin(&state)?;
+        let client = hf_client(&ctx)?;
+        let rev = p.revision.as_deref().filter(|r| !r.is_empty());
+        let files = client
+            .repo_files(&repo, rev)
+            .await
+            .map_err(|e| hf_error(&e))?;
+        let variants = gguf_variants(&files);
+        let variant = match p.file.as_deref().filter(|f| !f.is_empty()) {
+            Some(file) => variants
+                .iter()
+                .find(|v| v.files.iter().any(|f| f.path == file))
+                .ok_or_else(|| {
+                    HttpError::new(
+                        ErrorKind::NotFound,
+                        format!("{repo} has no GGUF file `{file}`"),
+                    )
+                })?,
+            None => pick_variant(&variants, p.quant.as_deref().filter(|q| !q.is_empty()))
+                .ok_or_else(|| {
+                    HttpError::new(
+                        ErrorKind::NotFound,
+                        match p.quant.as_deref() {
+                            Some(q) => format!("{repo} has no {q} GGUF"),
+                            None => format!("{repo} has no GGUF file"),
+                        },
+                    )
+                })?,
+        };
+        let paths: Vec<&str> = variant.files.iter().map(|f| f.path.as_str()).collect();
+        let gguf = client
+            .gguf_header_split(&repo, rev, &paths)
+            .await
+            .map_err(|e| hf_error(&e))?;
+        let projector = pick_mmproj(&mmproj_files(&files)).and_then(|f| f.size);
+        let label = format!(
+            "hf.co/{repo}:{}",
+            variant
+                .quant
+                .clone()
+                .unwrap_or_else(|| paths[0].to_string())
+        );
+        let params = super::models::EstimateParams {
+            context_length: p.context_length,
+            num_parallel: p.num_parallel,
+            kv_cache_type_k: p.kv_cache_type_k.clone(),
+            kv_cache_type_v: p.kv_cache_type_v.clone(),
+            flash_attention: p.flash_attention,
+            gpu_layers: p.gpu_layers,
+        };
+        let size = variant.size();
+        let files_doc: Vec<String> = paths.iter().map(|s| (*s).to_string()).collect();
+        let mut doc = blocking(move || {
+            let system = ctx.system();
+            super::models::estimate_document(
+                &label,
+                &gguf,
+                &params,
+                &alkahest_store::ModelSettings::default(),
+                Some(&system),
+                projector,
+            )
+        })
+        .await?;
+        doc["files"] = json!(files_doc);
+        doc["download_bytes"] = json!(size.map(|s| s + projector.unwrap_or(0)));
+        Ok(Json(doc).into_response())
     }
     .await;
     reply(&state, r)

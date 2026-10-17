@@ -305,3 +305,32 @@ async fn monitor_feed_utilization_and_kill() {
     assert_eq!(ev.request().unwrap().unwrap().route, "/v1/messages");
     assert!(ev.status().is_none());
 }
+
+/// ALK-US-0104: remote quant estimate.
+#[tokio::test]
+async fn hf_estimate_sends_the_quant_and_overrides() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/hf/estimate"))
+        .and(wiremock::matchers::query_param("repo", "org/tiny"))
+        .and(wiremock::matchers::query_param("quant", "Q4_K_M"))
+        .and(wiremock::matchers::query_param("context_length", "8192"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "model": "hf.co/org/tiny:Q4_K_M", "fits": true, "download_bytes": 9600,
+            "estimate": {"ram_bytes": 1000, "vram_bytes": 0}})))
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    let v = c
+        .hf_estimate(
+            alkahest_client::HfQuant {
+                repo: "org/tiny",
+                quant: Some("Q4_K_M"),
+                ..Default::default()
+            },
+            &[("context_length", "8192".into())],
+        )
+        .await
+        .unwrap();
+    assert_eq!(v["fits"], true);
+}

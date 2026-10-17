@@ -47,33 +47,75 @@ pub enum EstimateError {
 /// Storage type of the KV cache (`--cache-type-k` / `--cache-type-v`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum KvCacheType {
+    /// 32-bit float.
+    F32,
     /// 16-bit float (llama.cpp default).
     #[default]
     F16,
+    /// bfloat16.
+    Bf16,
     /// 8-bit block quantisation (`q8_0`, 8.5 bits per element).
     Q8_0,
+    /// 5-bit block quantisation with a scale and a minimum (`q5_1`, 6 bits per element).
+    Q5_1,
+    /// 5-bit block quantisation (`q5_0`, 5.5 bits per element).
+    Q5_0,
+    /// 4-bit block quantisation with a scale and a minimum (`q4_1`, 5 bits per element).
+    Q4_1,
     /// 4-bit block quantisation (`q4_0`, 4.5 bits per element).
     Q4_0,
+    /// 4-bit non-linear quantisation (`iq4_nl`, 4.5 bits per element).
+    Iq4Nl,
 }
 
 impl KvCacheType {
-    /// Bits per cached element including block scales.
+    /// Every type, in the order llama-server lists `--cache-type-k` values.
+    pub const ALL: [KvCacheType; 9] = [
+        KvCacheType::F32,
+        KvCacheType::F16,
+        KvCacheType::Bf16,
+        KvCacheType::Q8_0,
+        KvCacheType::Q4_0,
+        KvCacheType::Q4_1,
+        KvCacheType::Iq4Nl,
+        KvCacheType::Q5_0,
+        KvCacheType::Q5_1,
+    ];
+
+    /// Bits per cached element including block scales (ggml block sizes: 32 elements per
+    /// block, plus an f16 scale and, for `_1` types, an f16 minimum).
     pub fn bits_per_element(self) -> f64 {
         match self {
-            KvCacheType::F16 => 16.0,
+            KvCacheType::F32 => 32.0,
+            KvCacheType::F16 | KvCacheType::Bf16 => 16.0,
             KvCacheType::Q8_0 => 8.5,
-            KvCacheType::Q4_0 => 4.5,
+            KvCacheType::Q5_1 => 6.0,
+            KvCacheType::Q5_0 => 5.5,
+            KvCacheType::Q4_1 => 5.0,
+            KvCacheType::Q4_0 | KvCacheType::Iq4Nl => 4.5,
         }
     }
 
-    /// Parses the llama.cpp flag spelling (`f16`, `q8_0`, `q4_0`).
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.to_ascii_lowercase().as_str() {
-            "f16" => Some(Self::F16),
-            "q8_0" => Some(Self::Q8_0),
-            "q4_0" => Some(Self::Q4_0),
-            _ => None,
+    /// The llama.cpp flag spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            KvCacheType::F32 => "f32",
+            KvCacheType::F16 => "f16",
+            KvCacheType::Bf16 => "bf16",
+            KvCacheType::Q8_0 => "q8_0",
+            KvCacheType::Q5_1 => "q5_1",
+            KvCacheType::Q5_0 => "q5_0",
+            KvCacheType::Q4_1 => "q4_1",
+            KvCacheType::Q4_0 => "q4_0",
+            KvCacheType::Iq4Nl => "iq4_nl",
         }
+    }
+
+    /// Parses the llama.cpp flag spelling (the values `--cache-type-k` accepts: `f32`,
+    /// `f16`, `bf16`, `q8_0`, `q4_0`, `q4_1`, `iq4_nl`, `q5_0`, `q5_1`).
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.to_ascii_lowercase();
+        Self::ALL.into_iter().find(|t| t.as_str() == s)
     }
 }
 
