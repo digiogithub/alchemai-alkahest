@@ -2,14 +2,15 @@
 id: ALK-T-0126
 type: task
 title: Auth middleware with peer address policy
-status: backlog
+status: done
 priority: critical
 parent: ALK-US-0042
 milestone: ALK-M-0003
 labels: [security]
 effort: 3
 created: 2026-10-16T22:41:12Z
-updated: 2026-10-16T22:41:12Z
+updated: 2026-10-17T00:38:40Z
+closed: 2026-10-17T00:38:40Z
 ---
 
 ## Description
