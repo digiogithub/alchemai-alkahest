@@ -337,6 +337,20 @@ fn bundled_roots_sit_next_to_the_binary() {
     assert!(roots.iter().any(|r| r.ends_with("lib/alkahest/engines")));
 }
 
+/// Inside a macOS `.app` the binary is in `Contents/MacOS` and the engines in
+/// `Contents/Resources/engines` (ALK-US-0075).
+#[test]
+fn bundled_roots_include_the_app_bundle_resources() {
+    let roots = bundled_roots(Path::new(
+        "/Applications/alkahest.app/Contents/MacOS/alkahest",
+    ));
+    assert!(
+        roots
+            .iter()
+            .any(|r| r.ends_with("MacOS/../Resources/engines"))
+    );
+}
+
 /// Downloads the real pinned CPU asset and runs `llama-server --version`. Opt in with
 /// `ALKAHEST_TEST_NET=1`; about 18 MB on Linux x86-64.
 #[tokio::test]

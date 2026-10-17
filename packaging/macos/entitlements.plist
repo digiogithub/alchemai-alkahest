@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements (ALK-US-0075). cargo-packager signs every Mach-O file of the
+  bundle (the app binary, the bundled llama-server and its ggml backend libraries) with this file
+  and the hardened runtime option, which notarisation requires.
+
+  disable-library-validation: llama-server loads its ggml backends (libggml-*.so/.dylib) with
+  dlopen at run time. They are re-signed with our identity, so validation would pass today; the
+  entitlement keeps an engine refresh (a new upstream layout, a backend signed differently) from
+  turning into a crash on launch. Security review item: drop it once a notarised build has been
+  seen starting the engine without it. No JIT, no sandbox, no camera or microphone: the app only
+  opens network sockets and reads and writes the model store.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

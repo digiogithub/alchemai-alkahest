@@ -133,6 +133,9 @@ walkdir = "=2.5.0"
 flate2 = "=1.1.9"
 tar = { version = "=0.4.45", default-features = false }
 zip = { version = "=9.0.3", default-features = false, features = ["deflate"] }
+# Pure-Rust rpm writer for `cargo xtask bundle` (cargo-packager has no rpm target, ALK-US-0105).
+# No PGP signing, zstd or xz: packages are gzip-compressed and unsigned (the release has SHA256SUMS).
+rpm = { version = "=0.30.2", default-features = false, features = ["payload", "gzip-compression"] }
 
 # Concurrency
 parking_lot = "=0.12.5"

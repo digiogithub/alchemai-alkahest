@@ -1,15 +1,30 @@
-# Tag-driven Linux release (ALK-US-0074). Pushing `vX.Y.Z` (or `vX.Y.Z-rc.N`) builds:
+# Tag-driven release (ALK-US-0074, 0075, 0076, 0105). Pushing `vX.Y.Z` (or `vX.Y.Z-rc.N`) builds:
 #
-#   headless tar.gz  x86_64 and aarch64: `alkahest-<version>-<target>.tar.gz` with the binary,
-#                    the bundled CPU llama.cpp (engines/), systemd unit templates, licences.
-#                    This is the archive scripts/setup/install.sh downloads.
-#   desktop          x86_64: .deb and .AppImage (cargo-packager).
-#   SHA256SUMS       over every artefact, in the `<hash>  <file>` format install.sh checks.
+#   Linux    headless tar.gz (x86_64, aarch64: `alkahest-<version>-<target>.tar.gz` with the
+#            binary, the bundled CPU llama.cpp in engines/, systemd unit templates, licences; the
+#            archive scripts/setup/install.sh downloads) and its rpm; on x86_64 also the desktop
+#            .deb, .AppImage and rpm (cargo-packager, and `cargo xtask bundle` for the rpm).
+#   macOS    aarch64 and x86_64: Alkahest.app in a .dmg (signed and notarised when the Apple
+#            secrets are set) and the headless tar.gz.
+#   Windows  x86_64: NSIS installer `alkahest_<version>_x64-setup.exe` (signed when a
+#            certificate is configured) and the headless .zip that install.ps1 downloads.
+#   SHA256SUMS over every artefact, in the `<hash>  <file>` format install.sh checks, and the
+#            Homebrew formula `alkahest.rb` rendered from it (a maintainer copies it to the tap).
 #
-# The final job creates a DRAFT release; a maintainer reviews and publishes it. Nothing is
-# signed yet (Linux has no gatekeeper; integrity is SHA256SUMS). macOS and Windows artefacts
-# belong to their own stories. Not run on the development machine: the first real run is the
-# first tag.
+# The final job creates a DRAFT release; a maintainer reviews and publishes it. Signing is
+# opt-in: without the secrets below the macOS and Windows artefacts are built unsigned
+# (Gatekeeper and SmartScreen will warn), which is how a fork or a release candidate runs.
+#
+#   macOS    APPLE_CERTIFICATE (base64 .p12 of a Developer ID Application certificate),
+#            APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY ("Developer ID Application: ..."),
+#            and for notarisation either APPLE_ID + APPLE_PASSWORD (app-specific) + APPLE_TEAM_ID
+#            or APPLE_API_KEY + APPLE_API_ISSUER + APPLE_API_KEY_P8 (base64 .p8).
+#   Windows  WINDOWS_CERTIFICATE (base64 .pfx of a code signing certificate) and
+#            WINDOWS_CERTIFICATE_PASSWORD.
+#
+# Not run yet: the first real run is the first tag. The macOS and Windows jobs were written
+# without access to such machines; the change records 2026-10-17-macos-packages and
+# 2026-10-17-windows-installer list what was and was not verified.
 name: release
 
 on:
@@ -99,12 +114,12 @@ jobs:
         with:
           tool: cargo-packager@0.11.8
 
-      - name: Bundle (headless tar.gz, and .deb + .AppImage on x86_64)
+      - name: Bundle (headless tar.gz + rpm; on x86_64 also .deb, .AppImage and the desktop rpm)
         run: |
           if [ "${{ matrix.desktop }}" = "true" ]; then
-            cargo xtask bundle --formats deb,appimage
+            cargo xtask bundle --formats deb,appimage,rpm
           else
-            cargo xtask bundle --flavour headless
+            cargo xtask bundle --flavour headless --formats rpm
           fi
           ls -la target/packager
 
@@ -114,16 +129,193 @@ jobs:
           path: |
             target/packager/*.tar.gz
             target/packager/*.deb
+            target/packager/*.rpm
             target/packager/*.AppImage
+          if-no-files-found: error
+
+  macos:
+    name: macos (${{ matrix.target }})
+    needs: meta
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+    env:
+      # Empty without the secrets; xtask and cargo-packager then skip signing and notarising.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@0.11.8
+
+      - name: Notarisation key file
+        if: env.APPLE_API_KEY != ''
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/private_keys"
+          echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/private_keys/AuthKey_${APPLE_API_KEY}.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/private_keys/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
+
+      # Headless tar.gz, then Alkahest.app and the dmg. cargo-packager signs every Mach-O file in
+      # the bundle (including the bundled llama-server) with the hardened runtime and
+      # packaging/macos/entitlements.plist, notarises and staples the .app, and signs the dmg.
+      - name: Bundle (tar.gz, .app, .dmg)
+        run: |
+          cargo xtask bundle
+          ls -la target/packager
+
+      - name: Smoke test the bundle
+        run: |
+          set -euo pipefail
+          app="target/packager/Alkahest.app"
+          test -x "$app/Contents/MacOS/alkahest"
+          "$app/Contents/MacOS/alkahest" --version
+          ls "$app/Contents/Resources/engines/llama-cpp"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" | grep -qx es.digio.alkahest
+
+      # The .app is stapled by the packager; the dmg is notarised and stapled here.
+      - name: Notarise and staple the dmg
+        if: env.APPLE_SIGNING_IDENTITY != '' && (env.APPLE_ID != '' || env.APPLE_API_KEY != '')
+        run: |
+          set -euo pipefail
+          dmg="$(ls target/packager/*.dmg)"
+          if [ -n "${APPLE_API_KEY:-}" ]; then
+            xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" \
+              --issuer "$APPLE_API_ISSUER" --wait
+          else
+            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" --wait
+          fi
+          xcrun stapler staple "$dmg"
+
+      - name: Verify the signatures
+        if: env.APPLE_SIGNING_IDENTITY != ''
+        run: |
+          set -euo pipefail
+          app="target/packager/Alkahest.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          xcrun stapler validate target/packager/*.dmg || echo "::warning::the dmg is not stapled (no notarisation credentials)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos-${{ matrix.target }}
+          path: |
+            target/packager/*.tar.gz
+            target/packager/*.dmg
+          if-no-files-found: error
+
+  windows:
+    name: windows (x86_64-pc-windows-msvc)
+    needs: meta
+    runs-on: windows-latest
+    env:
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Install toolchain from rust-toolchain.toml
+        run: |
+          rustup show active-toolchain
+          if ($LASTEXITCODE -ne 0) { rustup toolchain install }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-x86_64-pc-windows-msvc
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@0.11.8
+
+      # The certificate goes into the user store; cargo-packager then runs signtool with its
+      # thumbprint (xtask reads ALKAHEST_WINDOWS_CERT_THUMBPRINT), SHA-256 and an RFC 3161
+      # timestamp, on alkahest.exe, the uninstaller and the installer.
+      - name: Import the code signing certificate
+        if: env.WINDOWS_CERTIFICATE != ''
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          "ALKAHEST_WINDOWS_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Bundle (zip, NSIS installer)
+        run: |
+          cargo xtask bundle
+          Get-ChildItem target/packager | Format-Table Name, Length
+
+      - name: Check the signatures
+        if: env.WINDOWS_CERTIFICATE != ''
+        run: |
+          Get-ChildItem target/packager/*-setup.exe | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            if ($sig.Status -ne 'Valid') { throw "$($_.Name): $($sig.Status)" }
+          }
+
+      # Install silently into a scratch directory with the components the runner can exercise
+      # (PATH and the service; the CUDA download is skipped), look at the result, then uninstall
+      # and check nothing is left behind: the service, the PATH entry and the files.
+      - name: Install, check and uninstall silently
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = (Get-ChildItem target/packager/*-setup.exe).FullName
+          $dir = 'C:\AlkahestSmoke'
+          $p = Start-Process -FilePath $installer -ArgumentList '/S', '/SERVICE', "/D=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
+          & "$dir\alkahest.exe" --version
+          if (-not (Test-Path "$dir\engines\llama-cpp")) { throw 'bundled engine missing' }
+          if (-not (Test-Path "$dir\alkahest.ico")) { throw 'icon missing' }
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          if ($machinePath -notlike "*$dir*") { throw 'PATH entry missing' }
+          if ((Get-Service alkahest -ErrorAction Stop).Status -ne 'Running') { throw 'service is not running' }
+          $p = Start-Process -FilePath "$dir\uninstall.exe" -ArgumentList '/S', "_?=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstaller exit code $($p.ExitCode)" }
+          Start-Sleep -Seconds 3
+          if (Get-Service alkahest -ErrorAction SilentlyContinue) { throw 'service survived the uninstall' }
+          if ([Environment]::GetEnvironmentVariable('Path', 'Machine') -like "*$dir*") { throw 'PATH entry survived' }
+          if (Test-Path "$dir\alkahest.exe") { throw 'files survived the uninstall' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows-x86_64
+          path: |
+            target/packager/*.zip
+            target/packager/*-setup.exe
           if-no-files-found: error
 
   release:
     name: draft release
-    needs: [meta, linux]
+    needs: [meta, linux, macos, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - uses: actions/download-artifact@v4
         with:
           pattern: dist-*
@@ -134,6 +326,11 @@ jobs:
         run: |
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
+      # Rendered after SHA256SUMS on purpose: the formula is not an artefact install.sh verifies.
+      - name: Homebrew formula
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: scripts/release/homebrew-formula.sh "$VERSION" dist/SHA256SUMS > dist/alkahest.rb
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -55,23 +55,59 @@ DLLs; see [[ALK-US-0086]] (`engines install --with-runtime`).
 
 Related: [[plan/alkahest-v1-plan]].
 
-## Release packages (Linux)
+## Release packages
 
 Tagged releases (`.github/workflows/release.yml`, built with `cargo xtask bundle`) publish, next
 to `SHA256SUMS`:
 
 | File | Content |
 |---|---|
-| `alkahest-<version>-<target>.tar.gz` | headless binary (no GUI libraries), bundled CPU llama.cpp under `engines/`, systemd unit templates under `systemd/`, `LICENSE`, `NOTICE`, `THIRD_PARTY_LICENSES`, `licenses/`. What `install.sh` downloads. Targets: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`. |
+| `alkahest-<version>-<target>.tar.gz` | headless binary (no GUI libraries), bundled CPU llama.cpp under `engines/`, systemd unit templates under `systemd/` (Linux), `LICENSE`, `NOTICE`, `THIRD_PARTY_LICENSES`, `licenses/`. What `install.sh` downloads. Targets: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin`. |
+| `alkahest-<version>-x86_64-pc-windows-msvc.zip` | the same for Windows (`alkahest.exe`); what `install.ps1` downloads. |
 | `alkahest_<version>_amd64.deb` | desktop build (`alkahest desktop`, menu entry, icons), CLI and server in `/usr/bin/alkahest`, engine and licences in `/usr/lib/alkahest/`. |
+| `alkahest-<version>-<release>.x86_64.rpm` | the same layout as the `.deb` for Fedora, RHEL and openSUSE (`Requires`: `vulkan-loader`, `libxkbcommon-x11`, `fontconfig`, `libwayland-client`, `alsa-lib`). |
+| `alkahest-headless-<version>-<release>.<arch>.rpm` | CLI and server only, no GUI libraries; conflicts with `alkahest`. `x86_64` and `aarch64`. |
 | `alkahest_<version>_x86_64.AppImage` | the same desktop build, self-contained. |
+| `Alkahest_<version>_aarch64.dmg`, `Alkahest_<version>_x64.dmg` | macOS app (`Alkahest.app`, Apple Silicon and Intel, macOS 12+). |
+| `alkahest_<version>_x64-setup.exe` | Windows installer (NSIS). |
+| `alkahest.rb` | Homebrew formula for the CLI, to be copied into the tap. |
 
-The packages never run maintainer scripts and create no user or service. To run the server as a
-system service after installing the `.deb` or the archive, ask for it explicitly:
-`sudo alkahest service install` (system user `alkahest`, ALK-SP-0009.R2) or
+The Linux packages never run maintainer scripts and create no user or service. To run the server
+as a system service after installing the `.deb`, the `.rpm` or the archive, ask for it
+explicitly: `sudo alkahest service install` (system user `alkahest`, ALK-SP-0009.R2) or
 `alkahest service install --user`. The bundled engine in `/usr/lib/alkahest/engines` (or
 `engines/` next to the binary) is found automatically; `alkahest engines install` still adds GPU
 builds into the data directory, which win over the bundled copy.
+
+### macOS
+
+Open the `.dmg` and drag `Alkahest.app` to Applications. Opening the app starts the desktop
+(Dock icon plus a menu bar icon); its bundled llama.cpp (Metal on Apple Silicon) lives in
+`Alkahest.app/Contents/Resources/engines`. The command line is inside the bundle:
+`/Applications/Alkahest.app/Contents/MacOS/alkahest`, or link it with
+`ln -s /Applications/Alkahest.app/Contents/MacOS/alkahest /usr/local/bin/alkahest`. Releases are
+signed with a Developer ID and notarised when the maintainers' Apple secrets are configured; an
+unsigned build (a fork, a release candidate) needs right-click, Open the first time.
+
+For the CLI alone, `brew install digiogithub/tap/alkahest` (the formula `alkahest.rb` attached to
+the release) installs the headless archive; `brew services start alkahest` runs the server at
+login.
+
+### Windows
+
+Run `alkahest_<version>_x64-setup.exe` (administrator: it installs for all users into
+`C:\Program Files\Alkahest`). The components page offers:
+
+| Component | Default | What it does |
+|---|---|---|
+| Alkahest | required | `alkahest.exe` (CLI, server and desktop), bundled CPU llama.cpp, licences, Start menu shortcut that runs `alkahest.exe desktop` |
+| Add to PATH | on | adds the install folder to the machine `PATH` (open a new terminal) |
+| Windows service | off | runs `alkahest service install`: service `alkahest`, started at boot |
+| CUDA 12 engine | off | downloads llama.cpp for CUDA 12 with its runtime DLLs (about 650 MB) into `engines\` |
+
+Silent install: `alkahest_<version>_x64-setup.exe /S [/SERVICE] [/CUDA] [/NOPATH] [/D=C:\dir]`.
+The uninstaller removes the service, the PATH entry and the files; models and settings in the data
+directories are kept. Upgrading stops the service, replaces the files and starts it again.
 
 ## HTTPS
 

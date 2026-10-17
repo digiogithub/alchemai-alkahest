@@ -38,7 +38,10 @@ use crate::cli::{Cli, Command, ConfigAction, GlobalArgs};
 const EXIT_NOT_IMPLEMENTED: u8 = 2;
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(effective_args(
+        std::env::args_os().collect(),
+        std::env::current_exe().ok().as_deref(),
+    ));
     // Completions need no configuration or logging.
     if let Command::Completions { shell } = &cli.command {
         write_completions(*shell, &mut std::io::stdout());
@@ -51,6 +54,35 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The command line to parse. Double-clicking `Alkahest.app` starts the bundle executable with
+/// no arguments (older macOS releases add a `-psn_<serial>` process-serial-number argument), and
+/// a bare `alkahest` would only print the usage text, so inside an app bundle that case means
+/// `alkahest desktop` (ALK-US-0075). Every other invocation is passed through unchanged.
+fn effective_args(
+    mut args: Vec<std::ffi::OsString>,
+    exe: Option<&std::path::Path>,
+) -> Vec<std::ffi::OsString> {
+    let only_psn = args
+        .iter()
+        .skip(1)
+        .all(|a| a.to_string_lossy().starts_with("-psn_"));
+    if only_psn && exe.is_some_and(in_app_bundle) {
+        args.truncate(1);
+        args.push("desktop".into());
+    }
+    args
+}
+
+/// True when `exe` is `<name>.app/Contents/MacOS/<binary>`.
+fn in_app_bundle(exe: &std::path::Path) -> bool {
+    let mut dirs = exe.ancestors().skip(1);
+    dirs.next().is_some_and(|d| d.ends_with("Contents/MacOS"))
+        && dirs
+            .next()
+            .and_then(|d| d.parent())
+            .is_some_and(|d| d.extension().is_some_and(|e| e == "app"))
 }
 
 /// Writes the completion script for `shell` to `out`.
@@ -147,6 +179,8 @@ fn not_implemented(command: &Command) -> ExitCode {
 /// a local server with this very executable (`alkahest [--config <file>] [--host <h>] serve`).
 #[cfg(feature = "desktop")]
 fn desktop(args: &cli::DesktopArgs, global: &GlobalArgs, loaded: &Loaded) -> Result<ExitCode> {
+    #[cfg(windows)]
+    detach_own_console();
     let server = &loaded.config.server;
     let client = alkahest_client::Client::for_bind(&server.host, server.port)?;
     let mut serve_args = Vec::new();
@@ -168,6 +202,23 @@ fn desktop(args: &cli::DesktopArgs, global: &GlobalArgs, loaded: &Loaded) -> Res
     };
     alkahest_desktop::run(options)?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// Closes the console window Windows opens for a console-subsystem program started from a
+/// shortcut or Explorer (ALK-US-0076). When another process shares the console (a terminal, a
+/// script), it is left alone so `alkahest desktop` run from a shell keeps its output.
+#[cfg(all(windows, feature = "desktop"))]
+#[allow(unsafe_code)]
+fn detach_own_console() {
+    use windows_sys::Win32::System::Console::{FreeConsole, GetConsoleProcessList};
+    let mut pids = [0u32; 2];
+    // SAFETY: `pids` is a valid writable buffer of the length passed; the call only reads
+    // process state. `FreeConsole` takes no arguments and only detaches this process.
+    unsafe {
+        if GetConsoleProcessList(pids.as_mut_ptr(), pids.len() as u32) == 1 {
+            FreeConsole();
+        }
+    }
 }
 
 /// `alkahest desktop` in a build without the `desktop` feature: explains how to get the app
@@ -236,6 +287,44 @@ fn config_command(action: &ConfigAction, global: &GlobalArgs, loaded: &Loaded) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn args(list: &[&str]) -> Vec<std::ffi::OsString> {
+        list.iter().map(Into::into).collect()
+    }
+
+    #[test]
+    fn a_bare_launch_inside_an_app_bundle_opens_the_desktop() {
+        let exe = std::path::Path::new("/Applications/alkahest.app/Contents/MacOS/alkahest");
+        assert_eq!(
+            effective_args(args(&["alkahest"]), Some(exe)),
+            args(&["alkahest", "desktop"])
+        );
+        assert_eq!(
+            effective_args(args(&["alkahest", "-psn_0_12345"]), Some(exe)),
+            args(&["alkahest", "desktop"])
+        );
+    }
+
+    #[test]
+    fn explicit_commands_and_plain_installs_are_left_alone() {
+        let app = std::path::Path::new("/Applications/alkahest.app/Contents/MacOS/alkahest");
+        let plain = std::path::Path::new("/usr/local/bin/alkahest");
+        assert_eq!(
+            effective_args(args(&["alkahest", "serve"]), Some(app)),
+            args(&["alkahest", "serve"])
+        );
+        assert_eq!(
+            effective_args(args(&["alkahest"]), Some(plain)),
+            args(&["alkahest"])
+        );
+        assert_eq!(
+            effective_args(args(&["alkahest"]), None),
+            args(&["alkahest"])
+        );
+        assert!(!in_app_bundle(std::path::Path::new(
+            "/opt/Contents/MacOS/alkahest"
+        )));
+    }
 
     #[test]
     fn completions_for_every_shell_mention_the_binary() {

@@ -15,10 +15,14 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 cargo_metadata.workspace = true
+flate2.workspace = true
 resvg.workspace = true
+rpm.workspace = true
 serde_json.workspace = true
+tar.workspace = true
 toml.workspace = true
 walkdir.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
