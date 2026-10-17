@@ -242,12 +242,21 @@ impl Pill {
         Self::from_template(PillKind::Off, 0, 0)
     }
 
-    /// The pill of a model being loaded (the server does not report progress yet, so the
-    /// percentage is left out of the label).
+    /// The pill of a model being loaded.
     pub fn loading() -> Self {
+        Self::loading_at(None)
+    }
+
+    /// The pill of a model being loaded, with the server's progress estimate (0..=1) when it
+    /// sent one (`Loading 42 %`).
+    pub fn loading_at(progress: Option<f32>) -> Self {
+        let label = match progress {
+            Some(p) => format!("Loading {:.0} %", p.clamp(0.0, 1.0) * 100.0),
+            None => "Loading\u{2026}".into(),
+        };
         Self {
             kind: PillKind::Loading,
-            label: "Loading\u{2026}".into(),
+            label,
         }
     }
 
@@ -264,7 +273,7 @@ impl Pill {
     /// when the server only sent the label).
     pub fn for_runtime(m: &RuntimeModel) -> Self {
         if m.state == "loading" {
-            return Self::loading();
+            return Self::loading_at(m.load_progress);
         }
         let (cpu, gpu) = match m.processor {
             Some(p) => (p.cpu_percent, p.gpu_percent),
@@ -404,6 +413,9 @@ mod tests {
         assert_eq!(Pill::for_runtime(&r).label, "CPU");
         r.state = "loading".into();
         assert_eq!(Pill::for_runtime(&r).kind, PillKind::Loading);
+        assert_eq!(Pill::for_runtime(&r).label, "Loading\u{2026}");
+        r.load_progress = Some(0.424);
+        assert_eq!(Pill::for_runtime(&r).label, "Loading 42 %");
         assert_eq!(Pill::off().label, "Not loaded");
     }
 

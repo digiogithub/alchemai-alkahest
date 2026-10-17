@@ -6,10 +6,10 @@
 //! snapshot the connection manager keeps current (SSE `status` events plus a 2 s poll) and the
 //! time it arrived, so countdowns tick locally between snapshots.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
-use alkahest_client::{RuntimeModel, SchedulerStatus};
+use alkahest_client::{RequestRecord, RuntimeModel, SchedulerStatus};
 use alkahest_gguf::ModelKind;
 
 use crate::present::{Pill, engine_label, format_bytes, gigabytes, group_digits, same_model};
@@ -97,6 +97,10 @@ pub struct ModelCard {
     pub slots: Vec<bool>,
     /// Throughput (`84 tok/s`, `—`).
     pub throughput: String,
+    /// Engine CPU use (`cpu 38 %`), when measured.
+    pub cpu: Option<String>,
+    /// Load progress while the model loads (0..=1), an estimate of the server.
+    pub load_progress: Option<f32>,
     /// Keep-alive column.
     pub keep_alive: KeepAlive,
     /// Unload is offered (not while loading).
@@ -196,6 +200,10 @@ pub fn card(m: &RuntimeModel, kind: Option<ModelKind>, elapsed: Duration) -> Mod
         queued: m.queued_requests,
         slots: (0..slot_count).map(|i| i < busy).collect(),
         throughput: throughput(m.tokens_per_second),
+        cpu: m.cpu_percent.map(|c| format!("cpu {c:.0} %")),
+        load_progress: (m.state == "loading")
+            .then(|| m.load_progress.map(|p| p.clamp(0.0, 1.0)))
+            .flatten(),
         keep_alive: keep_alive_of(m, elapsed),
         can_unload: m.state != "loading",
     }
@@ -275,6 +283,25 @@ pub fn tiles(status: &SchedulerStatus) -> Vec<Tile> {
             tone: TileTone::Accent,
         });
     }
+    if let Some(u) = &status.utilization {
+        for g in &u.gpus {
+            let Some(busy) = g.gpu_percent else { continue };
+            out.push(Tile {
+                title: if u.gpus.len() > 1 {
+                    format!("GPU {} load", g.index)
+                } else {
+                    "GPU load".into()
+                },
+                detail: g
+                    .temperature_c
+                    .map_or_else(String::new, |t| format!("{t} \u{b0}C")),
+                value: busy.to_string(),
+                suffix: "%".into(),
+                ratio: Some((busy as f32 / 100.0).clamp(0.0, 1.0)),
+                tone: TileTone::Ok,
+            });
+        }
+    }
     match mem.filter(|m| m.total_ram > 0) {
         Some(m) => {
             let used = m.total_ram.saturating_sub(m.free_ram);
@@ -295,6 +322,20 @@ pub fn tiles(status: &SchedulerStatus) -> Vec<Tile> {
             ratio: None,
             tone: TileTone::Info,
         }),
+    }
+    if let Some(u) = &status.utilization {
+        let cores = match u.cpu.physical_cores {
+            Some(p) => format!("{p} cores \u{b7} {} threads", u.cpu.logical_cores),
+            None => format!("{} threads", u.cpu.logical_cores),
+        };
+        out.push(Tile {
+            title: "CPU".into(),
+            detail: cores,
+            value: format!("{:.0}", u.cpu.usage_percent),
+            suffix: "%".into(),
+            ratio: Some((u.cpu.usage_percent / 100.0).clamp(0.0, 1.0)),
+            tone: TileTone::Info,
+        });
     }
     let active: u64 = status.models.iter().map(|m| m.active_requests).sum();
     out.push(Tile {
@@ -349,6 +390,8 @@ pub struct RunningState {
     pending: HashSet<String>,
     stopping_all: bool,
     confirm_stop_all: bool,
+    confirm_kill: Option<String>,
+    killing: HashSet<String>,
     notice: Option<String>,
 }
 
@@ -415,6 +458,45 @@ impl RunningState {
         }
     }
 
+    /// The user clicked "Kill" on `name` (opens confirmation 17.11).
+    pub fn ask_kill(&mut self, name: &str) {
+        self.confirm_kill = Some(name.to_string());
+    }
+
+    /// The model whose Kill confirmation is open.
+    pub fn confirming_kill(&self) -> Option<&str> {
+        self.confirm_kill.as_deref()
+    }
+
+    /// The user dismissed the Kill confirmation.
+    pub fn cancel_kill(&mut self) {
+        self.confirm_kill = None;
+    }
+
+    /// The user confirmed: the model to kill, when the caller should send the request.
+    pub fn confirm_kill(&mut self) -> Option<String> {
+        let name = self.confirm_kill.take()?;
+        if self.killing.insert(name.clone()) {
+            self.notice = None;
+            Some(name)
+        } else {
+            None
+        }
+    }
+
+    /// A kill finished.
+    pub fn finish_kill(&mut self, name: &str, error: Option<String>) {
+        self.killing.remove(name);
+        if error.is_some() {
+            self.notice = error;
+        }
+    }
+
+    /// Whether `name` is being killed.
+    pub fn is_killing(&self, name: &str) -> bool {
+        self.killing.contains(name)
+    }
+
     /// The last failure, if any.
     pub fn notice(&self) -> Option<&str> {
         self.notice.as_deref()
@@ -426,9 +508,136 @@ impl RunningState {
     }
 }
 
+/// Rows kept in the live requests table.
+pub const MAX_REQUEST_ROWS: usize = 40;
+
+/// A request slower than this is drawn in cinnabar.
+pub const SLOW_MS: u64 = 30_000;
+
+/// The recent requests, newest last, fed by the initial `recent_requests` call and the SSE
+/// `request` events (an event already in the initial list is ignored).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RequestLog {
+    records: VecDeque<RequestRecord>,
+}
+
+impl RequestLog {
+    /// Replaces the log with an initial list (oldest first).
+    pub fn replace(&mut self, records: Vec<RequestRecord>) {
+        self.records.clear();
+        for r in records {
+            self.push(r);
+        }
+    }
+
+    /// Adds a finished request; `false` when its id is already known or it is a metadata call.
+    pub fn push(&mut self, record: RequestRecord) -> bool {
+        // The Library polls `/api/show` for every row; those are not inference calls.
+        if record.route == "/api/show" || self.records.iter().any(|r| r.id == record.id) {
+            return false;
+        }
+        self.records.push_back(record);
+        while self.records.len() > MAX_REQUEST_ROWS {
+            self.records.pop_front();
+        }
+        true
+    }
+
+    /// Forgets everything (the connection was lost).
+    pub fn clear(&mut self) {
+        self.records.clear();
+    }
+
+    /// The table rows, newest first.
+    pub fn rows(&self) -> Vec<RequestRow> {
+        self.records.iter().rev().map(request_row).collect()
+    }
+
+    /// Whether nothing has been recorded.
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
+}
+
+/// One row of the live requests table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestRow {
+    /// Request id.
+    pub id: u64,
+    /// Arrival time of day (`14:03:22`).
+    pub time: String,
+    /// Caller: key name, `localhost` or `anonymous`.
+    pub client: String,
+    /// Route (`/v1/chat/completions`).
+    pub route: String,
+    /// Model, `—` when the request named none.
+    pub model: String,
+    /// `prompt / generated` tokens.
+    pub tokens: String,
+    /// Duration (`840 ms`, `12.4 s`).
+    pub duration: String,
+    /// Slower than [`SLOW_MS`]: drawn in cinnabar.
+    pub slow: bool,
+    /// Status text (`200`, `503`, `aborted`).
+    pub status: String,
+    /// Status below 400 and not aborted.
+    pub ok: bool,
+}
+
+fn time_of_day(rfc3339: &str) -> String {
+    use time::format_description::well_known::Rfc3339;
+    match time::OffsetDateTime::parse(rfc3339, &Rfc3339) {
+        Ok(t) => format!("{:02}:{:02}:{:02}", t.hour(), t.minute(), t.second()),
+        Err(_) => rfc3339.to_string(),
+    }
+}
+
+/// `840 ms`, `12.4 s`, `3 min 5 s`.
+pub fn duration_label(ms: u64) -> String {
+    match ms {
+        0..1000 => format!("{ms} ms"),
+        1000..60_000 => format!("{:.1} s", ms as f64 / 1000.0),
+        _ => format!("{} min {} s", ms / 60_000, (ms / 1000) % 60),
+    }
+}
+
+/// The table row of `r`.
+pub fn request_row(r: &RequestRecord) -> RequestRow {
+    let client = match r.caller.as_str() {
+        "key" => match (&r.key_name, &r.key_id) {
+            (Some(n), _) if !n.is_empty() => n.clone(),
+            (_, Some(id)) => id.clone(),
+            _ => "key".into(),
+        },
+        "local" => "localhost".into(),
+        "" => "\u{2014}".into(),
+        other => other.to_string(),
+    };
+    RequestRow {
+        id: r.id,
+        time: time_of_day(&r.at),
+        client,
+        route: r.route.clone(),
+        model: r.model.clone().unwrap_or_else(|| "\u{2014}".into()),
+        tokens: format!(
+            "{} / {}",
+            group_digits(r.prompt_tokens),
+            group_digits(r.completion_tokens)
+        ),
+        duration: duration_label(r.duration_ms),
+        slow: r.duration_ms >= SLOW_MS,
+        status: if r.aborted {
+            "aborted".into()
+        } else {
+            r.status.to_string()
+        },
+        ok: r.status < 400 && !r.aborted,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use alkahest_client::{MemoryStatus, ProcessorSplit};
+    use alkahest_client::{CpuLoad, GpuLoad, MemoryStatus, ProcessorSplit, Utilization};
 
     use super::*;
     use crate::present::PillKind;
@@ -592,5 +801,103 @@ mod tests {
         assert!(s.is_unloading("busy"));
         s.finish_stop_all(None);
         assert!(!s.is_unloading("busy"));
+    }
+
+    #[test]
+    fn utilization_adds_gpu_and_cpu_tiles() {
+        let status = SchedulerStatus {
+            utilization: Some(Utilization {
+                cpu: CpuLoad {
+                    usage_percent: 37.6,
+                    logical_cores: 32,
+                    physical_cores: Some(16),
+                },
+                gpus: vec![GpuLoad {
+                    gpu_percent: Some(81),
+                    temperature_c: Some(64),
+                    ..GpuLoad::default()
+                }],
+                models: Vec::new(),
+            }),
+            ..SchedulerStatus::default()
+        };
+        let t = tiles(&status);
+        let gpu = t.iter().find(|t| t.title == "GPU load").unwrap();
+        assert_eq!(
+            (gpu.value.as_str(), gpu.detail.as_str()),
+            ("81", "64 \u{b0}C")
+        );
+        let cpu = t.iter().find(|t| t.title == "CPU").unwrap();
+        assert_eq!(cpu.value, "38");
+        assert_eq!(cpu.detail, "16 cores \u{b7} 32 threads");
+    }
+
+    #[test]
+    fn cards_show_cpu_and_load_progress() {
+        let mut m = model("a");
+        m.cpu_percent = Some(212.4);
+        m.state = "loading".into();
+        m.load_progress = Some(0.42);
+        let c = card(&m, None, Duration::ZERO);
+        assert_eq!(c.cpu.as_deref(), Some("cpu 212 %"));
+        assert_eq!(c.load_progress, Some(0.42));
+        m.state = "ready".into();
+        assert_eq!(card(&m, None, Duration::ZERO).load_progress, None);
+    }
+
+    #[test]
+    fn request_log_dedupes_and_formats_rows() {
+        let rec = |id, status, ms| RequestRecord {
+            id,
+            at: "2026-10-17T14:03:22.123Z".into(),
+            route: "/v1/chat/completions".into(),
+            model: Some("qwen3:8b".into()),
+            caller: "key".into(),
+            key_name: Some("ci".into()),
+            prompt_tokens: 1200,
+            completion_tokens: 85,
+            status,
+            duration_ms: ms,
+            ..RequestRecord::default()
+        };
+        let mut log = RequestLog::default();
+        log.replace(vec![rec(1, 200, 840), rec(2, 503, 40_000)]);
+        assert!(
+            !log.push(rec(2, 503, 40_000)),
+            "already in the initial list"
+        );
+        assert!(log.push(rec(3, 200, 12_400)));
+        let mut show = rec(4, 200, 1);
+        show.route = "/api/show".into();
+        assert!(!log.push(show), "metadata lookups are not listed");
+        let rows = log.rows();
+        assert_eq!(rows[0].id, 3, "newest first");
+        assert_eq!(rows[0].duration, "12.4 s");
+        assert_eq!(rows[1].status, "503");
+        assert!(!rows[1].ok && rows[1].slow);
+        assert_eq!(rows[2].time, "14:03:22");
+        assert_eq!(rows[2].client, "ci");
+        assert_eq!(rows[2].tokens, "1 200 / 85");
+        assert_eq!(rows[2].duration, "840 ms");
+        for id in 10..80 {
+            log.push(rec(id, 200, 1));
+        }
+        assert_eq!(log.rows().len(), MAX_REQUEST_ROWS);
+    }
+
+    #[test]
+    fn kill_asks_first_and_runs_once() {
+        let mut s = RunningState::default();
+        assert_eq!(s.confirm_kill(), None, "nothing to confirm yet");
+        s.ask_kill("a");
+        assert_eq!(s.confirming_kill(), Some("a"));
+        s.cancel_kill();
+        assert_eq!(s.confirming_kill(), None);
+        s.ask_kill("a");
+        assert_eq!(s.confirm_kill().as_deref(), Some("a"));
+        assert!(s.is_killing("a"));
+        s.finish_kill("a", Some("Killing a failed".into()));
+        assert!(!s.is_killing("a"));
+        assert_eq!(s.notice(), Some("Killing a failed"));
     }
 }

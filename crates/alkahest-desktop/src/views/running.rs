@@ -8,18 +8,21 @@
 
 use std::time::{Duration, Instant};
 
-use alkahest_client::Client;
+use alkahest_client::{Client, RequestRecord};
+use futures::StreamExt as _;
 
 use crate::connection::{ConnectionState, RuntimeSnapshot, Snapshot};
 use crate::nav::Screen;
 use crate::ops::{self, ModelOp};
-use crate::running::{ModelCard, RunningState, Tile, TileTone, cards, summary, tiles};
+use crate::running::{
+    ModelCard, RequestLog, RequestRow, RunningState, Tile, TileTone, cards, summary, tiles,
+};
 use crate::theme::tokens::{Palette, radius, size, space, text};
 use crate::tokio_bridge;
 use crate::ui::{
-    AnyElement, Context, Div, Entity, EventEmitter, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Task, Window, div,
-    h_flex, px, v_flex,
+    AnyElement, Context, Div, Entity, EventEmitter, FontWeight, Hsla, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Task,
+    Window, div, h_flex, px, v_flex,
 };
 use crate::views::icons;
 use crate::views::library::LibraryView;
@@ -37,6 +40,15 @@ const COL_PROCESSOR: f32 = 190.0;
 const COL_MEMORY: f32 = 150.0;
 const COL_REQUESTS: f32 = 170.0;
 const COL_THROUGHPUT: f32 = 120.0;
+/// Wait before the request feed reconnects after the stream ended.
+const FEED_RETRY: Duration = Duration::from_secs(3);
+/// Column widths of the live requests table (px).
+const REQ_TIME: f32 = 80.0;
+const REQ_CLIENT: f32 = 150.0;
+const REQ_ROUTE: f32 = 230.0;
+const REQ_MODEL: f32 = 190.0;
+const REQ_TOKENS: f32 = 120.0;
+const REQ_LATENCY: f32 = 110.0;
 /// Thin meters inside cards (the token meter is for tiles).
 const THIN_METER: f32 = 4.0;
 
@@ -47,6 +59,14 @@ pub enum RunningEvent {
     Navigate(Screen),
 }
 
+/// What the request feed task sends to the view.
+enum Feed {
+    /// The initial list (oldest first).
+    List(Vec<RequestRecord>),
+    /// One finished request.
+    Request(Box<RequestRecord>),
+}
+
 /// The Running view.
 pub struct RunningView {
     client: Client,
@@ -54,6 +74,9 @@ pub struct RunningView {
     runtime: Option<RuntimeSnapshot>,
     connected: bool,
     state: RunningState,
+    requests: RequestLog,
+    /// The request feed while connected (dropping it aborts the tokio task).
+    feed: Option<Task<()>>,
     _ticker: Task<()>,
 }
 
@@ -96,6 +119,8 @@ impl RunningView {
             runtime: None,
             connected: false,
             state: RunningState::default(),
+            requests: RequestLog::default(),
+            feed: None,
             _ticker: ticker,
         }
     }
@@ -108,6 +133,60 @@ impl RunningView {
             self.runtime = snapshot.runtime.clone();
             cx.notify();
         }
+        if connected && self.feed.is_none() {
+            self.follow_requests(cx);
+        } else if !connected && self.feed.is_some() {
+            self.feed = None;
+            self.requests.clear();
+            cx.notify();
+        }
+    }
+
+    /// Loads the recent requests, then follows the SSE `request` events; reconnects when the
+    /// stream ends. Keys without the admin scope get 401/403 and the table stays empty.
+    fn follow_requests(&mut self, cx: &mut Context<Self>) {
+        let client = self.client.clone();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Feed>();
+        let pump = tokio_bridge::spawn(cx, async move {
+            loop {
+                if let Ok(list) = client.recent_requests(Some("10m"), Some(40)).await
+                    && tx.send(Feed::List(list)).is_err()
+                {
+                    return;
+                }
+                if let Ok(mut events) = client.events().await {
+                    while let Some(ev) = events.next().await {
+                        let Ok(ev) = ev else { break };
+                        if let Some(Ok(r)) = ev.request()
+                            && tx.send(Feed::Request(Box::new(r))).is_err()
+                        {
+                            return;
+                        }
+                    }
+                }
+                if tx.is_closed() {
+                    return;
+                }
+                tokio::time::sleep(FEED_RETRY).await;
+            }
+        });
+        self.feed = Some(cx.spawn(async move |this, cx| {
+            let _pump = pump;
+            while let Some(msg) = rx.recv().await {
+                let ok = this.update(cx, |v, cx| {
+                    match msg {
+                        Feed::List(list) => v.requests.replace(list),
+                        Feed::Request(r) => {
+                            v.requests.push(*r);
+                        }
+                    }
+                    cx.notify();
+                });
+                if ok.is_err() {
+                    return;
+                }
+            }
+        }));
     }
 
     fn cards(&self, cx: &Context<Self>) -> Vec<ModelCard> {
@@ -143,6 +222,29 @@ impl RunningView {
             };
             let _ = this.update(cx, |view, cx| {
                 view.state.finish_unload(&name, error);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn kill(&mut self, cx: &mut Context<Self>) {
+        let Some(name) = self.state.confirm_kill() else {
+            cx.notify();
+            return;
+        };
+        cx.notify();
+        let client = self.client.clone();
+        let op = ModelOp::Kill(name.clone());
+        let call = tokio_bridge::spawn(cx, async move { ops::run(&client, &op).await });
+        cx.spawn(async move |this, cx| {
+            let error = match call.await {
+                Ok(Ok(())) => None,
+                Ok(Err(f)) => Some(f.message),
+                Err(e) => Some(format!("the request was cancelled: {e}")),
+            };
+            let _ = this.update(cx, |view, cx| {
+                view.state.finish_kill(&name, error);
                 cx.notify();
             });
         })
@@ -241,7 +343,7 @@ impl RunningView {
         };
         let mut el = v_flex()
             .flex_1()
-            .min_w(px(180.0))
+            .min_w(px(150.0))
             .p(px(size::CARD_PADDING))
             .gap(px(space::S3))
             .rounded(px(radius::XL))
@@ -253,13 +355,17 @@ impl RunningView {
                     .gap(px(space::S2))
                     .child(
                         div()
-                            .flex_1()
+                            .flex_none()
                             .type_style(text::SMALL)
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(SharedString::from(tile.title.clone())),
                     )
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_right()
                             .type_style(text::CAPTION)
                             .text_color(c(p.text_muted))
                             .child(SharedString::from(tile.detail.clone())),
@@ -375,6 +481,22 @@ impl RunningView {
                 this.unload(name.clone(), cx);
             }));
         }
+        let killing = self.state.is_killing(&card.name);
+        let mut kill = button(
+            SharedString::from(format!("running-kill-{}", card.name)),
+            if killing { "Killing\u{2026}" } else { "Kill" },
+            ButtonKind::Danger,
+            size::CONTROL_SMALL,
+            killing,
+            p,
+        );
+        if !killing {
+            let name = card.name.clone();
+            kill = kill.on_click(cx.listener(move |this, _, _, cx| {
+                this.state.ask_kill(&name);
+                cx.notify();
+            }));
+        }
         v_flex()
             .p(px(size::CARD_PADDING))
             .gap(px(space::S3))
@@ -400,9 +522,20 @@ impl RunningView {
                             .child(requests)
                             .child(slots),
                     )
-                    .child(
-                        column("Throughput", COL_THROUGHPUT).child(mono(card.throughput.clone())),
-                    )
+                    .child({
+                        let mut col = column("Throughput", COL_THROUGHPUT)
+                            .child(mono(card.throughput.clone()));
+                        if let Some(cpu) = &card.cpu {
+                            col = col.child(
+                                div()
+                                    .type_style(text::MONO)
+                                    .text_size(px(text::CAPTION.size))
+                                    .text_color(c(p.text_muted))
+                                    .child(SharedString::from(cpu.clone())),
+                            );
+                        }
+                        col
+                    })
                     .child(
                         column("Keep alive", COL_THROUGHPUT).child(
                             div()
@@ -412,7 +545,100 @@ impl RunningView {
                         ),
                     ),
             )
-            .child(h_flex().justify_end().child(unload))
+            .children(card.load_progress.map(|ratio| {
+                h_flex()
+                    .items_center()
+                    .gap(px(space::S3))
+                    .child(
+                        div()
+                            .type_style(text::CAPTION)
+                            .text_color(c(p.info_text))
+                            .child(format!("Loading {:.0} %", ratio * 100.0)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(meter(ratio, c(p.info_default), THIN_METER, p)),
+                    )
+            }))
+            .child(
+                h_flex()
+                    .justify_end()
+                    .gap(px(space::S2))
+                    .child(kill)
+                    .child(unload),
+            )
+    }
+
+    /// The live requests table (screen 13): newest first, no content, only metadata.
+    fn requests_table(&self, p: &Palette) -> Div {
+        let head =
+            |label: &str, w: f32| div().w(px(w)).flex_shrink_0().child(column_label(label, p));
+        let mut table = v_flex().gap(px(space::S1)).child(
+            h_flex()
+                .gap(px(space::S3))
+                .pb(px(space::S1))
+                .child(head("Time", REQ_TIME))
+                .child(head("Client", REQ_CLIENT))
+                .child(head("Endpoint", REQ_ROUTE))
+                .child(head("Model", REQ_MODEL))
+                .child(head("Tokens in / out", REQ_TOKENS))
+                .child(head("Latency", REQ_LATENCY))
+                .child(head("Status", 80.0)),
+        );
+        let rows: Vec<RequestRow> = self.requests.rows();
+        if rows.is_empty() {
+            table = table.child(
+                div()
+                    .py(px(space::S3))
+                    .type_style(text::SMALL)
+                    .text_color(c(p.text_muted))
+                    .child(
+                        "No requests yet. Calls to the inference APIs appear here as they finish.",
+                    ),
+            );
+        }
+        for r in rows {
+            let cell = |s: String, w: f32, color: Hsla| {
+                div()
+                    .w(px(w))
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .type_style(text::MONO)
+                    .text_size(px(text::CAPTION.size))
+                    .text_color(color)
+                    .child(SharedString::from(s))
+            };
+            let latency = if r.slow {
+                p.danger_text
+            } else {
+                p.text_secondary
+            };
+            let status = if r.ok { p.ok_text } else { p.danger_text };
+            table = table.child(
+                h_flex()
+                    .id(SharedString::from(format!("request-{}", r.id)))
+                    .gap(px(space::S3))
+                    .py(px(2.0))
+                    .child(cell(r.time, REQ_TIME, c(p.text_muted)))
+                    .child(cell(r.client, REQ_CLIENT, c(p.text_primary)))
+                    .child(cell(r.route, REQ_ROUTE, c(p.text_secondary)))
+                    .child(cell(r.model, REQ_MODEL, c(p.text_primary)))
+                    .child(cell(r.tokens, REQ_TOKENS, c(p.text_secondary)))
+                    .child(cell(r.duration, REQ_LATENCY, c(latency)))
+                    .child(cell(r.status, 80.0, c(status))),
+            );
+        }
+        v_flex()
+            .p(px(size::CARD_PADDING))
+            .gap(px(space::S3))
+            .rounded(px(radius::XL))
+            .border_1()
+            .border_color(c(p.line_default))
+            .bg(c(p.bg_raised))
+            .child(div().type_style(text::H2).child("Live requests"))
+            .child(table)
     }
 
     /// Empty states (17.2): hardware tiles stay live above; nothing to do here, so no brass.
@@ -505,7 +731,9 @@ impl Render for RunningView {
             );
         }
         if cards.is_empty() {
-            content = content.child(self.empty(p, cx));
+            content = content
+                .child(self.empty(p, cx))
+                .child(self.requests_table(p));
         } else {
             let mut list = v_flex().gap(px(space::S3));
             for card in &cards {
@@ -517,7 +745,7 @@ impl Render for RunningView {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .child(list),
+                    .child(list.child(self.requests_table(p))),
             );
         }
         let mut root = div().relative().size_full().child(content);
@@ -579,6 +807,70 @@ impl Render for RunningView {
                 scrim,
                 cx.listener(|this, _: &(), _, cx| {
                     this.state.cancel_stop_all();
+                    cx.notify();
+                }),
+                window,
+                cx,
+            ));
+        }
+        if let Some(name) = self.state.confirming_kill().map(str::to_string) {
+            let card = cards.iter().find(|c| c.name == name);
+            let cancel = button(
+                "kill-cancel",
+                "Cancel",
+                ButtonKind::Secondary,
+                size::CONTROL_SMALL,
+                false,
+                p,
+            )
+            .border_color(c(p.accent_default))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.state.cancel_kill();
+                cx.notify();
+            }));
+            // The safer alternative (17.11): let in-flight requests finish.
+            let unload_name = name.clone();
+            let unload = button(
+                "kill-unload-instead",
+                "Unload instead",
+                ButtonKind::Secondary,
+                size::CONTROL_SMALL,
+                false,
+                p,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.state.cancel_kill();
+                this.unload(unload_name.clone(), cx);
+                cx.notify();
+            }));
+            let confirm = button(
+                "kill-confirm",
+                "Kill engine",
+                ButtonKind::Danger,
+                size::CONTROL_SMALL,
+                false,
+                p,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.kill(cx)));
+            let facts = card.map(|c| {
+                SharedString::from(format!(
+                    "{} \u{b7} {} active \u{b7} {} queued",
+                    c.engine_line, c.active, c.queued
+                ))
+            });
+            let scrim = dialog(
+                format!("Kill the engine of {name}?"),
+                facts,
+                "The engine process is killed at once (SIGKILL). Active requests fail with an \
+                 error and queued ones are dropped. Use Unload instead to let them finish.",
+                None,
+                vec![cancel, unload, confirm],
+                p,
+            );
+            root = root.child(dismissable(
+                scrim,
+                cx.listener(|this, _: &(), _, cx| {
+                    this.state.cancel_kill();
                     cx.notify();
                 }),
                 window,
@@ -663,5 +955,16 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(view.read_with(cx, |v, _| v.state.confirming_stop_all()));
+        // Kill asks first too (17.11), and the live requests table renders without rows.
+        view.update(cx, |v, cx| {
+            v.state.cancel_stop_all();
+            v.state.ask_kill("busy:1");
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            view.read_with(cx, |v, _| v.state.confirming_kill().map(str::to_string)),
+            Some("busy:1".to_string())
+        );
     }
 }

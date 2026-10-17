@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use crate::ui::{
     AnyElement, App, BoxShadow, Div, ElementId, FontWeight, Hsla, InteractiveElement, KeyDownEvent,
-    MouseButton, ParentElement, SharedString, Stateful, StatefulInteractiveElement, Styled, Window,
-    div, h_flex, point, px, svg_icon, v_flex,
+    MouseButton, ParentElement, SharedString, Stateful, Styled, Window, div, h_flex, point, px,
+    svg_icon, v_flex,
 };
 use crate::views::style::{TextStyleExt, c};
 
@@ -432,13 +432,27 @@ pub fn dialog(
     buttons: Vec<Stateful<Div>>,
     p: &Palette,
 ) -> Stateful<Div> {
+    dialog_sized(380.0, title, facts, body, extra, buttons, p)
+}
+
+/// A [`dialog`] of `width` px: sheets that hold a log tail or a form are wider than the
+/// 380 px confirmations.
+pub fn dialog_sized(
+    width: f32,
+    title: impl Into<SharedString>,
+    facts: Option<SharedString>,
+    body: impl Into<SharedString>,
+    extra: Option<AnyElement>,
+    buttons: Vec<Stateful<Div>>,
+    p: &Palette,
+) -> Stateful<Div> {
     let mut actions = h_flex().gap(px(space::S2)).justify_end().pt(px(space::S2));
     for b in buttons {
         actions = actions.child(b);
     }
     let mut card = v_flex()
         .id("dialog")
-        .w(px(380.0))
+        .w(px(width))
         .p(px(size::CARD_PADDING))
         .gap(px(space::S3))
         .rounded(px(radius::XL))
@@ -478,12 +492,6 @@ pub fn dialog(
         .bg(c(p.bg_code).opacity(0.72))
         .occlude()
         .child(card.child(actions))
-}
-
-/// Adds a hover tooltip to `el` (why a disabled button is disabled).
-pub fn with_tooltip(el: Stateful<Div>, text: impl Into<SharedString>) -> Stateful<Div> {
-    let text: SharedString = text.into();
-    el.tooltip(move |window, cx| crate::ui::text_tooltip(text.clone(), window, cx))
 }
 
 /// Whether `key` (a GPUI key name) dismisses a dialog: Escape anywhere, Enter only while the

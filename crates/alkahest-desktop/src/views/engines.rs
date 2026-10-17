@@ -8,31 +8,64 @@
 use std::time::Duration;
 
 use alkahest_client::admin::{EngineInstall, EngineListing, Job};
-use alkahest_client::{Client, ClientError};
+use alkahest_client::{Client, ClientError, EngineOverrideDoc};
 use futures::StreamExt as _;
 use serde_json::{Map, Value};
 
 use crate::connection::{ConnectionState, Snapshot};
 use crate::engines::{
-    ChipState, EngineCard, InstalledBuild, JobCard, JobLog, PREFERENCE, RemoveAsk, VariantChip,
-    cards, job_cards, machine_facts, recommended_installs,
+    ChipState, EngineCard, InstalledBuild, JobCard, JobLog, OverrideForm, PREFERENCE, RemoveAsk,
+    VariantChip, cards, job_cards, machine_facts, recommended_installs, reload_summary,
 };
 use crate::theme::tokens::{Palette, radius, size, space, text};
 use crate::tokio_bridge;
+use crate::ui::AppContext as _;
+use crate::ui::input::{Input, InputState};
 use crate::ui::{
-    AnyElement, Context, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, Stateful, StatefulInteractiveElement, Styled, Task, Window, div, h_flex, px,
-    v_flex,
+    AnyElement, Context, Div, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement,
+    Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Task, Window, div, h_flex,
+    px, v_flex,
 };
 use crate::views::icons;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
-    ButtonKind, button, checkbox, column_label, dialog, dismissable, dot, empty_block, meter,
-    mono_caption, notice_line, tag, with_tooltip,
+    ButtonKind, button, checkbox, column_label, dialog, dialog_sized, dismissable, dot,
+    empty_block, field_frame, field_label, meter, mono_caption, notice_line, tag,
 };
 
 /// Pause before re-subscribing to the job events after the stream broke.
 const FEED_RETRY: Duration = Duration::from_secs(3);
+
+/// Poll interval of an open job log while its job runs.
+const LOG_POLL: Duration = Duration::from_millis(1500);
+/// Lines requested for the log sheet and shown at its bottom.
+const LOG_LINES: usize = 200;
+const LOG_SHOWN: usize = 24;
+
+/// The "View log" sheet of an install job: the tail the server keeps, refreshed while the job
+/// runs.
+struct LogSheet {
+    job_id: String,
+    target: String,
+    lines: Vec<String>,
+    log_path: Option<String>,
+    error: Option<String>,
+    _poll: Task<()>,
+}
+
+/// The "Override..." sheet of an engine (`engines.overrides.<id>`).
+struct OverrideSheet {
+    engine: String,
+    name: String,
+    path: Entity<InputState>,
+    args: Entity<InputState>,
+    /// The saved override has been read into the fields.
+    loaded: bool,
+    saving: bool,
+    error: Option<String>,
+    /// What the server said after a save (restart hint).
+    saved: Option<EngineOverrideDoc>,
+}
 
 enum Feed {
     List(Vec<Job>),
@@ -55,6 +88,9 @@ pub struct EnginesView {
     remove: Option<RemoveAsk>,
     notice: Option<(bool, String)>,
     feed: Option<Task<()>>,
+    log_sheet: Option<LogSheet>,
+    override_sheet: Option<OverrideSheet>,
+    reloading: bool,
 }
 
 impl std::fmt::Debug for EnginesView {
@@ -84,6 +120,9 @@ impl EnginesView {
             remove: None,
             notice: None,
             feed: None,
+            log_sheet: None,
+            override_sheet: None,
+            reloading: false,
         }
     }
 
@@ -227,6 +266,186 @@ impl EnginesView {
         cx.notify();
     }
 
+    /// "Reload recipes": the server re-reads its recipe directories and says what it ignored;
+    /// the listing follows.
+    fn reload_recipes(&mut self, cx: &mut Context<Self>) {
+        if self.reloading {
+            return;
+        }
+        self.reloading = true;
+        let c = self.client.clone();
+        self.call(cx, async move { c.reload_recipes().await }, |v, r, cx| {
+            v.reloading = false;
+            match r {
+                Ok(doc) => {
+                    let (line, warn) = reload_summary(&doc);
+                    v.notice = Some((warn, line));
+                    v.reload(cx);
+                }
+                Err(e) => v.notice = Some((true, format!("Cannot reload the recipes: {e}"))),
+            }
+        });
+    }
+
+    /// Opens the log sheet of `job_id` and keeps its tail current while the job runs.
+    fn open_log(&mut self, job_id: String, target: String, cx: &mut Context<Self>) {
+        let client = self.client.clone();
+        let id = job_id.clone();
+        let poll = cx.spawn(async move |this, cx| {
+            loop {
+                let c = client.clone();
+                let jid = id.clone();
+                let Ok(call) = this.update(cx, |_, cx| {
+                    tokio_bridge::spawn(cx, async move { c.job_log(&jid, Some(LOG_LINES)).await })
+                }) else {
+                    return;
+                };
+                let result = match call.await {
+                    Ok(r) => r.map_err(|e| e.to_string()),
+                    Err(e) => Err(format!("the request was cancelled: {e}")),
+                };
+                let jid = id.clone();
+                let more = this
+                    .update(cx, |v, cx| {
+                        let running = v.jobs.iter().any(|j| j.id == jid && j.state == "running");
+                        if let Some(sheet) = v.log_sheet.as_mut().filter(|s| s.job_id == jid) {
+                            match result {
+                                Ok(log) => {
+                                    sheet.lines = log.lines;
+                                    sheet.log_path = log.log_path;
+                                    sheet.error = None;
+                                }
+                                Err(e) => sheet.error = Some(e),
+                            }
+                        }
+                        cx.notify();
+                        running
+                    })
+                    .unwrap_or(false);
+                if !more {
+                    return;
+                }
+                cx.background_executor().timer(LOG_POLL).await;
+            }
+        });
+        self.log_sheet = Some(LogSheet {
+            job_id,
+            target,
+            lines: Vec::new(),
+            log_path: None,
+            error: None,
+            _poll: poll,
+        });
+        cx.notify();
+    }
+
+    /// Opens the override sheet of `engine` and reads the saved override into its fields.
+    fn open_override(
+        &mut self,
+        engine: String,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = cx.new(|cx| InputState::new(window, cx).placeholder("/opt/llama/llama-server"));
+        let args = cx.new(|cx| InputState::new(window, cx).placeholder("--mlock --no-mmap"));
+        self.override_sheet = Some(OverrideSheet {
+            engine: engine.clone(),
+            name,
+            path,
+            args,
+            loaded: false,
+            saving: false,
+            error: None,
+            saved: None,
+        });
+        let c = self.client.clone();
+        let call = tokio_bridge::spawn(cx, async move { c.engine_override(&engine).await });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = match call.await {
+                Ok(r) => r.map_err(|e| e.to_string()),
+                Err(e) => Err(format!("the request was cancelled: {e}")),
+            };
+            let _ = this.update_in(cx, |v, window, cx| {
+                let Some(sheet) = v.override_sheet.as_mut() else {
+                    return;
+                };
+                match result {
+                    Ok(doc) => {
+                        let form = OverrideForm::from_override(&doc.saved);
+                        sheet
+                            .path
+                            .update(cx, |s, cx| s.set_value(form.path, window, cx));
+                        sheet
+                            .args
+                            .update(cx, |s, cx| s.set_value(form.args, window, cx));
+                        sheet.loaded = true;
+                        if doc.restart_required {
+                            sheet.saved = Some(doc);
+                        }
+                    }
+                    Err(e) => sheet.error = Some(format!("Cannot read the override: {e}")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Saves the override sheet (an empty form removes the override).
+    fn save_override(&mut self, cx: &mut Context<Self>) {
+        let Some(sheet) = self.override_sheet.as_mut() else {
+            return;
+        };
+        if sheet.saving || !sheet.loaded {
+            return;
+        }
+        let form = OverrideForm {
+            path: sheet.path.read(cx).value().to_string(),
+            args: sheet.args.read(cx).value().to_string(),
+        };
+        let o = match form.to_override() {
+            Ok(o) => o,
+            Err(e) => {
+                sheet.error = Some(e);
+                cx.notify();
+                return;
+            }
+        };
+        sheet.saving = true;
+        sheet.error = None;
+        let engine = sheet.engine.clone();
+        let c = self.client.clone();
+        self.call(
+            cx,
+            async move { c.set_engine_override(&engine, &o).await },
+            |v, r, _| {
+                let Some(sheet) = v.override_sheet.as_mut() else {
+                    return;
+                };
+                sheet.saving = false;
+                match r {
+                    Ok(doc) => {
+                        v.notice = Some((
+                            false,
+                            if doc.restart_required {
+                                format!(
+                                    "Override of {} saved; it applies after the server restarts.",
+                                    sheet.name
+                                )
+                            } else {
+                                format!("Override of {} saved.", sheet.name)
+                            },
+                        ));
+                        v.override_sheet = None;
+                    }
+                    Err(e) => sheet.error = Some(format!("Cannot save: {e}")),
+                }
+            },
+        );
+    }
+
     fn install(&mut self, req: EngineInstall, cx: &mut Context<Self>) {
         let c = self.client.clone();
         self.call(
@@ -287,7 +506,12 @@ impl EnginesView {
                     ));
                     v.reload(cx);
                 }
-                Err(e) => v.notice = Some((true, format!("Cannot remove: {e}"))),
+                Err(e) => {
+                    v.notice = Some((
+                        true,
+                        crate::engines::remove_failure(&ask.engine_name, &ask.build.label, &e),
+                    ));
+                }
             },
         );
     }
@@ -355,13 +579,17 @@ impl EnginesView {
             .child(
                 button(
                     "engines-reload",
-                    "Refresh",
+                    if self.reloading {
+                        "Reloading\u{2026}"
+                    } else {
+                        "Reload recipes"
+                    },
                     ButtonKind::Secondary,
                     size::CONTROL,
-                    !self.connected,
+                    !self.connected || self.reloading,
                     p,
                 )
-                .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+                .on_click(cx.listener(|this, _, _, cx| this.reload_recipes(cx))),
             )
             .child(primary)
     }
@@ -489,21 +717,21 @@ impl EnginesView {
                 })),
             );
         }
-        if job.error.is_some() {
-            // The server keeps no build log to open yet (inbox item); the card's own tail
-            // above is what the server reported.
-            recovery = recovery.child(with_tooltip(
+        {
+            let (jid, target) = (id.clone(), job.target.clone());
+            recovery = recovery.child(
                 button(
                     ("engines-job-log", i),
                     "View log",
                     ButtonKind::Secondary,
                     size::CONTROL_SMALL,
-                    true,
+                    false,
                     p,
-                ),
-                "The server does not expose build logs yet (ALK-US-0110); the last lines are \
-                 shown below.",
-            ));
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_log(jid.clone(), target.clone(), cx);
+                })),
+            );
         }
         let action = if job.running {
             button(
@@ -662,6 +890,22 @@ impl EnginesView {
         if let Some(r) = &card.recipe {
             head = head.child(tag(r.clone(), p));
         }
+        {
+            let (engine, name) = (card.id.clone(), card.name.clone());
+            head = head.child(
+                button(
+                    ("engine-override", ci),
+                    "Override\u{2026}",
+                    ButtonKind::Secondary,
+                    size::CONTROL_SMALL,
+                    !self.connected,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_override(engine.clone(), name.clone(), window, cx);
+                })),
+            );
+        }
         let mut el = v_flex()
             .flex_shrink_0()
             .rounded(px(radius::XL))
@@ -748,8 +992,20 @@ impl EnginesView {
                     .child("in use"),
             );
         }
+        if b.bundled {
+            label = label.child(
+                div()
+                    .px(px(6.0))
+                    .py(px(1.0))
+                    .rounded(px(radius::XS))
+                    .bg(c(p.muted_subtle))
+                    .text_color(c(p.text_secondary))
+                    .type_style(text::CAPTION)
+                    .child("bundled"),
+            );
+        }
         let ask = RemoveAsk::new(card, b);
-        h_flex()
+        let mut row = h_flex()
             .px(px(size::CARD_PADDING))
             .py(px(space::S3))
             .gap(px(space::S3))
@@ -767,8 +1023,10 @@ impl EnginesView {
                             .child(SharedString::from(b.origin.clone())),
                     )
                     .child(mono_caption(b.path.clone(), p)),
-            )
-            .child(
+            );
+        // The bundled CPU build ships with the binary: there is nothing to remove.
+        if !b.bundled {
+            row = row.child(
                 button(
                     ("engine-remove", key.0 * 100 + key.1),
                     "Remove",
@@ -781,7 +1039,187 @@ impl EnginesView {
                     this.remove = Some(ask.clone());
                     cx.notify();
                 })),
+            );
+        }
+        row
+    }
+
+    fn log_dialog(
+        &self,
+        window: &mut Window,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let sheet = self.log_sheet.as_ref()?;
+        let running = self
+            .jobs
+            .iter()
+            .any(|j| j.id == sheet.job_id && j.state == "running");
+        let mut block = v_flex()
+            .p(px(space::S3))
+            .gap(px(1.0))
+            .max_h(px(420.0))
+            .overflow_hidden()
+            .rounded(px(radius::MD))
+            .bg(c(p.bg_code))
+            .type_style(text::CODE)
+            .text_color(c(p.text_secondary));
+        if sheet.lines.is_empty() {
+            block = block.child(if sheet.error.is_some() {
+                "No output."
+            } else {
+                "Waiting for output\u{2026}"
+            });
+        }
+        let skip = sheet.lines.len().saturating_sub(LOG_SHOWN);
+        for line in sheet.lines.iter().skip(skip) {
+            block = block.child(div().truncate().child(SharedString::from(line.clone())));
+        }
+        let mut extra = v_flex().gap(px(space::S2)).child(block);
+        if let Some(path) = &sheet.log_path {
+            extra = extra.child(mono_caption(format!("Full log: {path}"), p));
+        }
+        if let Some(e) = &sheet.error {
+            extra = extra.child(notice_line(format!("Cannot read the log: {e}"), true, p));
+        }
+        let close = button(
+            "engines-log-close",
+            "Close",
+            ButtonKind::Secondary,
+            size::CONTROL_SMALL,
+            false,
+            p,
+        )
+        .border_color(c(p.accent_default))
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.log_sheet = None;
+            cx.notify();
+        }));
+        let scrim = dialog_sized(
+            760.0,
+            format!("Install log of {}", sheet.target),
+            None,
+            if running {
+                "Live: the last lines of the install, refreshed while it runs."
+            } else {
+                "The last lines of the install."
+            },
+            Some(extra.into_any_element()),
+            vec![close],
+            p,
+        );
+        Some(
+            dismissable(
+                scrim,
+                cx.listener(|this, _: &(), _, cx| {
+                    this.log_sheet = None;
+                    cx.notify();
+                }),
+                window,
+                cx,
             )
+            .into_any_element(),
+        )
+    }
+
+    fn override_dialog(
+        &self,
+        window: &mut Window,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let sheet = self.override_sheet.as_ref()?;
+        let field = |label: &str, input: &Entity<InputState>, hint: &str| {
+            v_flex()
+                .gap(px(space::S1))
+                .child(field_label(label, p))
+                .child(
+                    field_frame(false, p)
+                        .child(div().flex_1().child(Input::new(input).appearance(false))),
+                )
+                .child(
+                    div()
+                        .type_style(text::CAPTION)
+                        .text_color(c(p.text_muted))
+                        .child(SharedString::from(hint.to_string())),
+                )
+        };
+        let mut extra = v_flex()
+            .gap(px(space::S3))
+            .child(field(
+                "Executable",
+                &sheet.path,
+                "Absolute path used instead of the installed build; empty keeps the installed build.",
+            ))
+            .child(field(
+                "Extra arguments",
+                &sheet.args,
+                "Appended to every launch; quote an argument that holds spaces.",
+            ));
+        if let Some(e) = &sheet.error {
+            extra = extra.child(notice_line(e.clone(), true, p));
+        }
+        if sheet.saved.as_ref().is_some_and(|d| d.restart_required) {
+            extra = extra.child(notice_line(
+                "A saved override is waiting for the next server start.",
+                false,
+                p,
+            ));
+        }
+        let cancel = button(
+            "engines-override-cancel",
+            "Cancel",
+            ButtonKind::Secondary,
+            size::CONTROL_SMALL,
+            false,
+            p,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.override_sheet = None;
+            cx.notify();
+        }));
+        let busy = sheet.saving || !sheet.loaded;
+        let mut save = button(
+            "engines-override-save",
+            if sheet.saving {
+                "Saving\u{2026}"
+            } else {
+                "Save override"
+            },
+            ButtonKind::Primary,
+            size::CONTROL_SMALL,
+            busy,
+            p,
+        );
+        if !busy {
+            save = save.on_click(cx.listener(|this, _, _, cx| this.save_override(cx)));
+        }
+        let scrim = dialog_sized(
+            520.0,
+            format!("Override {}", sheet.name),
+            Some(SharedString::from(format!(
+                "engines.overrides.{}",
+                sheet.engine
+            ))),
+            "Use your own executable or add launch arguments. An empty form removes the override. \
+             The engine registry is built when the server starts, so a change applies after a \
+             restart.",
+            Some(extra.into_any_element()),
+            vec![cancel, save],
+            p,
+        );
+        Some(
+            dismissable(
+                scrim,
+                cx.listener(|this, _: &(), _, cx| {
+                    this.override_sheet = None;
+                    cx.notify();
+                }),
+                window,
+                cx,
+            )
+            .into_any_element(),
+        )
     }
 
     fn remove_dialog(
@@ -902,6 +1340,12 @@ impl Render for EnginesView {
         );
         let mut root = div().relative().size_full().child(content);
         if let Some(d) = self.remove_dialog(window, p, cx) {
+            root = root.child(d);
+        }
+        if let Some(d) = self.log_dialog(window, p, cx) {
+            root = root.child(d);
+        }
+        if let Some(d) = self.override_dialog(window, p, cx) {
             root = root.child(d);
         }
         root

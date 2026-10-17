@@ -9,10 +9,13 @@
 //! filters, the fetch states and the selection, with request generations so a slow answer
 //! for an old query never overwrites a newer one.
 
+use alkahest_client::LibraryTag;
 use alkahest_client::admin::{
     HfFiles, HfModel, HfModelInfo, HfSearch, HfTokenStatus, LibraryModel as OllamaModel,
     PullRequest,
 };
+use std::collections::HashMap;
+
 use alkahest_gguf::ModelKind;
 use serde_json::Value;
 
@@ -365,6 +368,62 @@ pub fn fit_for(size: Option<u64>, hw: &Hardware) -> Fit {
     }
 }
 
+/// The fit the server's remote estimate (`GET /alkahest/v1/hf/estimate`, ALK-US-0104) implies:
+/// weights, KV cache and compute graph for the quant's real GGUF header against the free memory.
+/// `None` when the document lacks the figures.
+pub fn fit_from_estimate(doc: &Value) -> Option<Fit> {
+    let est = doc.get("estimate")?;
+    let vram = est.get("vram_bytes")?.as_u64()?;
+    let ram = est.get("ram_bytes")?.as_u64()?;
+    let needed = vram.saturating_add(ram);
+    if !doc.get("fits")?.as_bool()? {
+        return Some(Fit::TooLarge { needed });
+    }
+    Some(if vram == 0 {
+        Fit::Ram { needed }
+    } else {
+        let layers = est.get("total_layers").and_then(Value::as_u64).unwrap_or(0);
+        let on_gpu = est.get("gpu_layers").and_then(Value::as_u64).unwrap_or(0);
+        let all =
+            on_gpu >= layers && est.get("output_on_gpu").and_then(Value::as_bool) == Some(true);
+        if all || ram == 0 {
+            Fit::Gpu { needed }
+        } else {
+            let pct = (vram as f64 / needed as f64 * 100.0).clamp(1.0, 99.0);
+            Fit::Partial {
+                gpu_percent: pct as u8,
+            }
+        }
+    })
+}
+
+/// A remote estimate of one quant of the selected repository.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EstimateState {
+    /// Requested, not answered.
+    Loading,
+    /// The server's figures as a fit.
+    Ready(Fit),
+    /// The server could not estimate it (the heuristic stays).
+    Failed,
+}
+
+/// What to ask `GET /alkahest/v1/hf/estimate` for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EstimateTarget {
+    /// Repository id.
+    pub repo: String,
+    /// Picker row label (the cache key).
+    pub label: String,
+    /// Quantisation to estimate.
+    pub quant: Option<String>,
+    /// File to estimate when the file has no quant name.
+    pub file: Option<String>,
+}
+
+/// Most quants estimated per repository (each one reads a GGUF header over the network).
+pub const MAX_ESTIMATES: usize = 24;
+
 /// `1_234_567` -> `1.2M`, `864_000` -> `864k`, `999` -> `999`.
 pub fn format_count(n: u64) -> String {
     if n >= 1_000_000 {
@@ -598,6 +657,8 @@ pub struct QuantRow {
     pub recommended: bool,
     /// What to send to `POST /alkahest/v1/pulls`.
     pub pull: PullRequest,
+    /// The fit comes from the server's estimate of the real GGUF header, not the size rule.
+    pub precise: bool,
     /// Ternary quant (prism engine).
     pub ternary: bool,
     /// Shard count when split.
@@ -627,16 +688,27 @@ const QUANT_PREFERENCE: [&str; 14] = [
 /// when there is one), each with its fit hint; the recommended row is the first of
 /// [`QUANT_PREFERENCE`] that fits on one device, else the smallest that runs.
 pub fn quant_rows(files: &HfFiles, hw: &Hardware) -> Vec<QuantRow> {
+    quant_rows_with(files, hw, &|_| None)
+}
+
+/// [`quant_rows`] with `precise` fits (by row label) replacing the size rule where available.
+pub fn quant_rows_with(
+    files: &HfFiles,
+    hw: &Hardware,
+    precise: &dyn Fn(&str) -> Option<Fit>,
+) -> Vec<QuantRow> {
     let mut rows: Vec<QuantRow> = files
         .gguf
         .iter()
         .map(|q| {
             let label = q.quant.clone().unwrap_or_else(|| file_label(q));
+            let exact = precise(&label);
             QuantRow {
                 ternary: is_ternary(&label),
                 size: q.size.map_or_else(|| "\u{2014}".to_string(), format_bytes),
                 bytes: q.size,
-                fit: fit_for(q.size, hw),
+                precise: exact.is_some(),
+                fit: exact.unwrap_or_else(|| fit_for(q.size, hw)),
                 recommended: false,
                 pull: PullRequest {
                     model: q.pull.clone(),
@@ -662,6 +734,7 @@ pub fn quant_rows(files: &HfFiles, hw: &Hardware) -> Vec<QuantRow> {
                 .map_or_else(|| "\u{2014}".to_string(), format_bytes),
             bytes: files.safetensors.size,
             fit: fit_for(files.safetensors.size, hw),
+            precise: false,
             recommended: false,
             pull: PullRequest {
                 model: pull.clone(),
@@ -909,6 +982,61 @@ pub fn ollama_row(m: &OllamaModel) -> OllamaRow {
     }
 }
 
+/// One tag of an Ollama library model (`GET /alkahest/v1/ollama/tags`), ready to draw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagRow {
+    /// Pullable reference (`qwen3:8b-q4_K_M`).
+    pub name: String,
+    /// The tag alone (`8b-q4_K_M`).
+    pub tag: String,
+    /// Download size (`5.2 GB`), `—` when the site shows none.
+    pub size: String,
+    /// Quantisation named by the tag, `—` when none.
+    pub quant: String,
+    /// Context window (`40K`), `—` when unknown.
+    pub context: String,
+    /// Relative update time (`3 months ago`).
+    pub updated: String,
+    /// Image input (`vision`) badge.
+    pub vision: bool,
+    /// The earlier tag with the same digest, when this one is an alias of it.
+    pub alias_of: Option<String>,
+}
+
+/// The rows of `tags`, in the site's order; tags sharing a digest name the first one.
+pub fn tag_rows(tags: &[LibraryTag]) -> Vec<TagRow> {
+    let dash = || "\u{2014}".to_string();
+    let mut first: HashMap<&str, &str> = HashMap::new();
+    tags.iter()
+        .map(|t| {
+            let alias_of = match t.digest.as_deref() {
+                Some(d) => match first.get(d) {
+                    Some(f) => Some((*f).to_string()),
+                    None => {
+                        first.insert(d, t.tag.as_str());
+                        None
+                    }
+                },
+                None => None,
+            };
+            TagRow {
+                name: t.name.clone(),
+                tag: t.tag.clone(),
+                size: t
+                    .size_bytes
+                    .map(format_bytes)
+                    .or_else(|| t.size.clone())
+                    .unwrap_or_else(dash),
+                quant: t.quantization.clone().unwrap_or_else(dash),
+                context: t.context.clone().unwrap_or_else(dash),
+                updated: t.updated.clone().unwrap_or_else(dash),
+                vision: t.inputs.iter().any(|i| i == "image"),
+                alias_of,
+            }
+        })
+        .collect()
+}
+
 /// What the "Paste repo / URL" field names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PasteTarget {
@@ -1055,6 +1183,12 @@ pub struct DiscoverState {
     pub ollama_selected: Option<String>,
     /// Tag chosen for it.
     pub ollama_tag: Option<String>,
+    /// Remote estimates by (repository, row label), filled lazily for the picker rows.
+    pub estimates: HashMap<(String, String), EstimateState>,
+    /// Every tag of the selected library model (`ollama_tags_for`).
+    pub ollama_tags: Fetch<Vec<LibraryTag>>,
+    /// The model `ollama_tags` belongs to.
+    pub ollama_tags_for: Option<String>,
     /// Paste field value and its parse error.
     pub paste: String,
     /// Detected memory.
@@ -1071,6 +1205,7 @@ pub struct DiscoverState {
     pub notice: Option<String>,
     generation: u64,
     detail_generation: u64,
+    tags_generation: u64,
 }
 
 impl DiscoverState {
@@ -1143,6 +1278,9 @@ impl DiscoverState {
             return None;
         }
         self.selected = Some(repo.to_string());
+        // Requests in flight are aborted with the view's tasks; forget them so they are asked
+        // again when the repository comes back.
+        self.estimates.retain(|_, v| *v != EstimateState::Loading);
         self.chosen_quant = None;
         self.detail = Fetch::Loading;
         self.files = Fetch::Loading;
@@ -1175,12 +1313,59 @@ impl DiscoverState {
         let Some(files) = self.files.ready() else {
             return Vec::new();
         };
-        let rows = quant_rows(files, &self.hardware);
+        let repo = self.selected.clone().unwrap_or_default();
+        let rows = quant_rows_with(files, &self.hardware, &|label| match self
+            .estimates
+            .get(&(repo.clone(), label.to_string()))
+        {
+            Some(EstimateState::Ready(fit)) => Some(*fit),
+            _ => None,
+        });
         if self.hf.fits_only {
             rows.into_iter().filter(|r| r.fit.fits()).collect()
         } else {
             rows
         }
+    }
+
+    /// The quants of the selected repository whose remote estimate was not asked yet (marked
+    /// as loading), at most [`MAX_ESTIMATES`] per repository. Safetensors need none.
+    pub fn estimates_wanted(&mut self) -> Vec<EstimateTarget> {
+        let (Some(repo), Some(files)) = (self.selected.clone(), self.files.ready()) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for q in files.gguf.iter().take(MAX_ESTIMATES) {
+            let label = q.quant.clone().unwrap_or_else(|| file_label(q));
+            if self.estimates.contains_key(&(repo.clone(), label.clone())) {
+                continue;
+            }
+            out.push(EstimateTarget {
+                repo: repo.clone(),
+                quant: q.quant.clone(),
+                file: q
+                    .quant
+                    .is_none()
+                    .then(|| q.files.first().map(|f| f.path.clone()))
+                    .flatten(),
+                label,
+            });
+        }
+        for t in &out {
+            self.estimates
+                .insert((t.repo.clone(), t.label.clone()), EstimateState::Loading);
+        }
+        out
+    }
+
+    /// Stores the server's answer for one quant.
+    pub fn finish_estimate(&mut self, repo: &str, label: &str, result: Result<Value, String>) {
+        let state = match result.ok().as_ref().and_then(fit_from_estimate) {
+            Some(fit) => EstimateState::Ready(fit),
+            None => EstimateState::Failed,
+        };
+        self.estimates
+            .insert((repo.to_string(), label.to_string()), state);
     }
 
     /// The row the download button pulls: the chosen one, else the recommended one, else
@@ -1205,6 +1390,33 @@ impl DiscoverState {
         gated && !self.token.as_ref().is_some_and(|t| t.present)
     }
 
+    /// The model whose tags must be fetched now: the selected one, unless its tags were asked
+    /// already. Cloud-only models have nothing to pull.
+    pub fn ollama_tags_wanted(&self) -> Option<String> {
+        let row = self.ollama_row()?;
+        (!row.cloud && self.ollama_tags_for.as_deref() != Some(row.name.as_str()))
+            .then_some(row.name)
+    }
+
+    /// Starts fetching the tags of `name`; returns the request generation.
+    pub fn begin_ollama_tags(&mut self, name: &str) -> u64 {
+        self.tags_generation += 1;
+        self.ollama_tags_for = Some(name.to_string());
+        self.ollama_tags = Fetch::Loading;
+        self.tags_generation
+    }
+
+    /// Applies the tags of request `generation` (ignored when a newer one started).
+    pub fn finish_ollama_tags(&mut self, generation: u64, result: Result<Vec<LibraryTag>, String>) {
+        if generation != self.tags_generation {
+            return;
+        }
+        self.ollama_tags = match result {
+            Ok(tags) => Fetch::Ready(tags),
+            Err(e) => Fetch::Failed(e),
+        };
+    }
+
     /// The selected Ollama model row.
     pub fn ollama_row(&self) -> Option<OllamaRow> {
         let name = self.ollama_selected.as_deref()?;
@@ -1221,11 +1433,21 @@ impl DiscoverState {
         if row.cloud {
             return None;
         }
-        let tag = self
-            .ollama_tag
-            .clone()
-            .filter(|t| row.tags.contains(t))
-            .or_else(|| row.tags.first().cloned())?;
+        let listed = self.ollama_tags.ready().filter(|t| {
+            !t.is_empty() && self.ollama_tags_for.as_deref() == Some(row.name.as_str())
+        });
+        let known = |t: &String| {
+            row.tags.contains(t) || listed.is_some_and(|l| l.iter().any(|x| &x.name == t))
+        };
+        let default = listed
+            .and_then(|l| {
+                l.iter()
+                    .find(|t| t.tag == "latest")
+                    .or_else(|| l.first())
+                    .map(|t| t.name.clone())
+            })
+            .or_else(|| row.tags.first().cloned());
+        let tag = self.ollama_tag.clone().filter(known).or(default)?;
         Some(PullRequest {
             model: tag,
             ..PullRequest::default()
@@ -1351,6 +1573,83 @@ mod tests {
         assert_eq!(rows.iter().find(|r| r.recommended).unwrap().label, "Q4_K_M");
         assert!(matches!(rows[1].fit, Fit::Partial { .. }));
         assert!(matches!(rows[0].fit, Fit::TooLarge { .. }));
+    }
+
+    #[test]
+    fn remote_estimates_replace_the_size_rule_once_they_arrive() {
+        let ok = |vram: u64, ram: u64, fits: bool, on_gpu: u64| {
+            json!({
+                "estimate": {"vram_bytes": vram, "ram_bytes": ram, "total_layers": 36,
+                             "gpu_layers": on_gpu, "output_on_gpu": on_gpu == 36},
+                "fits": fits
+            })
+        };
+        assert_eq!(
+            fit_from_estimate(&ok(6_000_000_000, 400_000_000, true, 36)),
+            Some(Fit::Gpu {
+                needed: 6_400_000_000
+            })
+        );
+        assert!(matches!(
+            fit_from_estimate(&ok(0, 9_000_000_000, true, 0)),
+            Some(Fit::Ram { .. })
+        ));
+        assert!(matches!(
+            fit_from_estimate(&ok(5_000_000_000, 5_000_000_000, true, 20)),
+            Some(Fit::Partial { gpu_percent: 50 })
+        ));
+        assert!(matches!(
+            fit_from_estimate(&ok(30_000_000_000, 0, false, 36)),
+            Some(Fit::TooLarge { .. })
+        ));
+        assert_eq!(fit_from_estimate(&json!({})), None);
+
+        let mut s = DiscoverState {
+            hardware: hw24(),
+            ..DiscoverState::default()
+        };
+        let g = s.select("Qwen/Qwen3-8B-GGUF").unwrap();
+        assert!(
+            s.estimates_wanted().is_empty(),
+            "nothing before the files arrive"
+        );
+        s.finish_detail(g, Err("x".into()), Ok(files()));
+        let wanted = s.estimates_wanted();
+        assert_eq!(wanted.len(), 4);
+        assert!(s.estimates_wanted().is_empty(), "each quant is asked once");
+        assert!(s.quant_rows().iter().all(|r| !r.precise));
+        let t = wanted.iter().find(|t| t.label == "Q4_K_M").unwrap();
+        assert_eq!(t.quant.as_deref(), Some("Q4_K_M"));
+        s.finish_estimate(&t.repo, &t.label, Ok(ok(30_000_000_000, 0, false, 36)));
+        let rows = s.quant_rows();
+        let q4 = rows.iter().find(|r| r.label == "Q4_K_M").unwrap();
+        assert!(q4.precise && matches!(q4.fit, Fit::TooLarge { .. }));
+        assert!(
+            !q4.recommended,
+            "the recommendation follows the precise fit"
+        );
+        // A failed estimate keeps the heuristic.
+        let other = wanted.iter().find(|t| t.label == "Q8_0").unwrap();
+        s.finish_estimate(&other.repo, &other.label, Err("502".into()));
+        assert!(
+            !s.quant_rows()
+                .iter()
+                .find(|r| r.label == "Q8_0")
+                .unwrap()
+                .precise
+        );
+        // In-flight requests are forgotten when the selection moves away.
+        s.estimates
+            .insert(("x".into(), "y".into()), EstimateState::Loading);
+        s.select("other/repo");
+        assert!(
+            !s.estimates
+                .contains_key(&("x".to_string(), "y".to_string()))
+        );
+        assert!(
+            s.estimates
+                .contains_key(&("Qwen/Qwen3-8B-GGUF".to_string(), "Q4_K_M".to_string()))
+        );
     }
 
     #[test]
@@ -1527,6 +1826,63 @@ mod tests {
             .unwrap(),
             "Read the Gemma 3 Technical Report first, please."
         );
+    }
+
+    fn lib_tag(tag: &str, digest: &str, size: u64, quant: Option<&str>) -> LibraryTag {
+        LibraryTag {
+            name: format!("qwen3:{tag}"),
+            tag: tag.into(),
+            digest: Some(digest.into()),
+            size_bytes: Some(size),
+            context: Some("40K".into()),
+            updated: Some("3 months ago".into()),
+            quantization: quant.map(str::to_string),
+            ..LibraryTag::default()
+        }
+    }
+
+    #[test]
+    fn library_tags_become_rows_and_the_default_pull_prefers_latest() {
+        let tags = vec![
+            lib_tag("8b-q8_0", "aaa", 8_700_000_000, Some("Q8_0")),
+            lib_tag("latest", "bbb", 5_200_000_000, Some("Q4_K_M")),
+            lib_tag("8b", "bbb", 5_200_000_000, Some("Q4_K_M")),
+        ];
+        let rows = tag_rows(&tags);
+        assert_eq!(rows[1].size, "5.2 GB");
+        assert_eq!(rows[1].quant, "Q4_K_M");
+        assert_eq!(rows[2].alias_of.as_deref(), Some("latest"));
+        assert_eq!(rows[0].alias_of, None);
+        let none = tag_rows(&[LibraryTag::default()]);
+        assert_eq!(none[0].size, "\u{2014}");
+
+        let m = OllamaModel {
+            name: "qwen3".into(),
+            sizes: vec!["8b".into()],
+            ..OllamaModel::default()
+        };
+        let mut s = DiscoverState {
+            source: Source::Ollama,
+            ..DiscoverState::default()
+        };
+        let g = s.begin_search();
+        s.finish_ollama_search(g, Ok(vec![m]));
+        assert_eq!(s.ollama_tags_wanted().as_deref(), Some("qwen3"));
+        assert_eq!(
+            s.ollama_pull().unwrap().model,
+            "qwen3:8b",
+            "before the tags arrive"
+        );
+        let t = s.begin_ollama_tags("qwen3");
+        assert_eq!(s.ollama_tags_wanted(), None, "asked once");
+        s.finish_ollama_tags(t + 1, Ok(Vec::new()));
+        assert!(s.ollama_tags.is_loading(), "a stale answer is ignored");
+        s.finish_ollama_tags(t, Ok(tags));
+        assert_eq!(s.ollama_pull().unwrap().model, "qwen3:latest");
+        s.ollama_tag = Some("qwen3:8b-q8_0".into());
+        assert_eq!(s.ollama_pull().unwrap().model, "qwen3:8b-q8_0");
+        s.ollama_tag = Some("qwen3:nope".into());
+        assert_eq!(s.ollama_pull().unwrap().model, "qwen3:latest");
     }
 
     #[test]

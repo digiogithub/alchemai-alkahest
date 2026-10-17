@@ -863,7 +863,22 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
 
 impl<C, L> ConnectionManager<C, L> {
     /// Keeps a new scheduler snapshot and updates the loaded counter from it.
-    fn on_runtime(&mut self, status: SchedulerStatus) {
+    fn on_runtime(&mut self, mut status: SchedulerStatus) {
+        // Status events carry no CPU or GPU load (only the `ps` poll measures it): keep the
+        // last measurement until the next poll instead of blinking it away.
+        if let Some(prev) = &self.runtime {
+            if status.utilization.is_none() {
+                status.utilization = prev.status.utilization.clone();
+            }
+            for m in status.models.iter_mut().filter(|m| m.cpu_percent.is_none()) {
+                m.cpu_percent = prev
+                    .status
+                    .models
+                    .iter()
+                    .find(|o| o.name == m.name && o.pid == m.pid)
+                    .and_then(|o| o.cpu_percent);
+            }
+        }
         self.machine.on_status(StatusUpdate::from(&status));
         self.runtime = Some(RuntimeSnapshot {
             status: Arc::new(status),
@@ -1383,5 +1398,40 @@ mod tests {
         assert!(matches!(s.state, ConnectionState::Connected(_)));
         drop(handle);
         task.await.unwrap();
+    }
+
+    /// Status events carry no utilisation: the last poll's CPU and GPU load stays on screen.
+    #[test]
+    fn status_events_keep_the_last_utilization() {
+        use alkahest_client::{CpuLoad, RuntimeModel, Utilization};
+        let (mut manager, _handle) = ConnectionManager::new(
+            PollingServer::default(),
+            None::<FakeLauncher>,
+            "http://127.0.0.1:11435".into(),
+        );
+        let model = |cpu| RuntimeModel {
+            name: "a".into(),
+            pid: Some(7),
+            cpu_percent: cpu,
+            ..RuntimeModel::default()
+        };
+        manager.on_runtime(SchedulerStatus {
+            models: vec![model(Some(55.0))],
+            utilization: Some(Utilization {
+                cpu: CpuLoad {
+                    usage_percent: 12.0,
+                    ..CpuLoad::default()
+                },
+                ..Utilization::default()
+            }),
+            ..SchedulerStatus::default()
+        });
+        manager.on_runtime(SchedulerStatus {
+            models: vec![model(None)],
+            ..SchedulerStatus::default()
+        });
+        let status = &manager.runtime.as_ref().unwrap().status;
+        assert_eq!(status.models[0].cpu_percent, Some(55.0));
+        assert_eq!(status.utilization.as_ref().unwrap().cpu.usage_percent, 12.0);
     }
 }

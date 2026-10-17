@@ -21,6 +21,8 @@ pub enum ModelOp {
     Unload(String),
     /// Delete a model from the Alkahest store.
     Delete(String),
+    /// Kill the model's engine at once (`POST /alkahest/v1/models/{name}/kill`).
+    Kill(String),
     /// Unload every model.
     UnloadAll,
     /// Unload every model, then load this one (retry of a load that did not fit in memory).
@@ -75,6 +77,8 @@ pub trait ModelOps: Send + Sync + 'static {
     fn unload(&self, model: &str) -> impl Future<Output = Result<(), ClientError>> + Send;
     /// Deletes `model` (`DELETE /api/delete`).
     fn delete(&self, model: &str) -> impl Future<Output = Result<(), ClientError>> + Send;
+    /// Kills the engine of `model` at once (`POST /alkahest/v1/models/{name}/kill`).
+    fn kill(&self, model: &str) -> impl Future<Output = Result<(), ClientError>> + Send;
     /// Unloads everything (`POST /alkahest/v1/unload`).
     fn unload_all(&self) -> impl Future<Output = Result<(), ClientError>> + Send;
     /// The model list: the admin catalog (`GET /alkahest/v1/models`, one call), else the
@@ -93,6 +97,10 @@ impl ModelOps for Client {
 
     async fn delete(&self, model: &str) -> Result<(), ClientError> {
         Client::delete(self, model).await
+    }
+
+    async fn kill(&self, model: &str) -> Result<(), ClientError> {
+        self.kill_model(model).await
     }
 
     async fn unload_all(&self) -> Result<(), ClientError> {
@@ -141,6 +149,7 @@ pub async fn run<O: ModelOps>(ops: &O, op: &ModelOp) -> Result<(), OpFailure> {
         ModelOp::Load(m) => ops.load(m).await,
         ModelOp::Unload(m) => ops.unload(m).await,
         ModelOp::Delete(m) => ops.delete(m).await,
+        ModelOp::Kill(m) => ops.kill(m).await,
         ModelOp::UnloadAll => ops.unload_all().await,
         ModelOp::UnloadAllThenLoad(m) => match ops.unload_all().await {
             Ok(()) => ops.load(m).await,
@@ -156,6 +165,12 @@ pub fn failure(op: &ModelOp, err: &ClientError) -> OpFailure {
         // The server refuses to touch the Ollama store (the UI normally refuses first, but the
         // source may have been unknown).
         (ModelOp::Delete(m), ClientError::Api { status: 403, .. }) => read_only_hint(m),
+        (
+            ModelOp::Kill(_),
+            ClientError::Api {
+                status: 401 | 403, ..
+            },
+        ) => "Killing an engine needs an API key with the admin scope.".to_string(),
         (
             ModelOp::UnloadAll,
             ClientError::Api {
@@ -176,6 +191,7 @@ fn describe(op: &ModelOp) -> String {
         ModelOp::Load(m) => format!("Loading {m}"),
         ModelOp::Unload(m) => format!("Unloading {m}"),
         ModelOp::Delete(m) => format!("Deleting {m}"),
+        ModelOp::Kill(m) => format!("Killing {m}"),
         ModelOp::UnloadAll => "Unloading all models".to_string(),
         ModelOp::UnloadAllThenLoad(m) => format!("Unloading all models and loading {m}"),
     }
@@ -216,6 +232,9 @@ mod tests {
         async fn delete(&self, model: &str) -> Result<(), ClientError> {
             self.answer(format!("delete {model}"))
         }
+        async fn kill(&self, model: &str) -> Result<(), ClientError> {
+            self.answer(format!("kill {model}"))
+        }
         async fn unload_all(&self) -> Result<(), ClientError> {
             self.answer("unload all".into())
         }
@@ -230,10 +249,11 @@ mod tests {
         run(&fake, &ModelOp::Load("a".into())).await.unwrap();
         run(&fake, &ModelOp::Unload("a".into())).await.unwrap();
         run(&fake, &ModelOp::Delete("a".into())).await.unwrap();
+        run(&fake, &ModelOp::Kill("a".into())).await.unwrap();
         run(&fake, &ModelOp::UnloadAll).await.unwrap();
         assert_eq!(
             *fake.calls.lock().unwrap(),
-            ["load a", "unload a", "delete a", "unload all"]
+            ["load a", "unload a", "delete a", "kill a", "unload all"]
         );
     }
 
