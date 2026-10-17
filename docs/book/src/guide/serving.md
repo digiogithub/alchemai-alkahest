@@ -82,10 +82,37 @@ Alternatively set `auth.require_on_loopback = true` and give the proxy a key.
 
 ## TLS
 
-Terminate TLS in a reverse proxy (nginx, Caddy, Traefik) in front of Alkahest, and keep Alkahest
-on loopback or on a private network. Native TLS in the server is specified as
-`ALK-SP-0006.R6`; when your build includes it, the keys appear under `server.tls` in the
-[configuration reference](../reference/configuration.md) generated from that build.
+The server can speak HTTPS itself (rustls, TLS 1.2 and 1.3, HTTP/1.1 and HTTP/2). It is off by
+default. For a quick start with a self-signed certificate:
+
+```sh
+alkahest certs generate --name alkahest.lan --name 10.0.0.5   # writes cert, key and CA to <data dir>/tls/
+```
+
+then enable it:
+
+```toml
+[server.tls]
+enabled = true
+# cert = "/etc/alkahest/tls/cert.pem"   # defaults: <data dir>/tls/{cert,key,ca}.pem
+# key  = "/etc/alkahest/tls/key.pem"
+reload_interval_secs = 60
+```
+
+`certs generate` creates a throw-away CA and a server certificate signed by it (valid 397 days
+by default, `--days`; `--force` overwrites). The private key is written readable by its owner
+only and the CA key is never stored. Give clients the CA (`ca.pem`) to trust: the CLI uses the
+`ca.pem` next to the configured certificate, or the file named by `ALKAHEST_CA_CERT`; other
+clients need it in their trust store or option (`curl --cacert ca.pem`, `verify=` in Python).
+
+For a real certificate (an internal CA, Let's Encrypt) put its files at the configured paths. The
+server picks up renewed files without a restart: on `SIGHUP` and when the files change (checked
+every `reload_interval_secs`). A broken new certificate is refused and the old one keeps serving.
+With TLS enabled the server refuses to start if the files are missing, and never falls back to
+plain HTTP. A plain-HTTP server on a network address prints a warning at start.
+
+Alternatively terminate TLS in a reverse proxy (nginx, Caddy, Traefik) and keep Alkahest on
+loopback or a private network.
 
 ## Choosing what is served
 

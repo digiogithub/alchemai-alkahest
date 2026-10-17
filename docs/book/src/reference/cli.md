@@ -42,6 +42,7 @@ Every command accepts these (`serve` binds `--host`, the client commands target 
 | [`hf`](#alkahest-hf) | Manage the Hugging Face token (`login`, `logout`, `whoami`) |
 | [`keys`](#alkahest-keys) | Manage API keys |
 | [`engines`](#alkahest-engines) | Manage inference engines |
+| [`certs`](#alkahest-certs) | Manage TLS certificates for HTTPS (`[server.tls]`) |
 | [`service`](#alkahest-service) | Install or control the background service |
 | [`sysinfo`](#alkahest-sysinfo) | Report CPU, memory and accelerators |
 | [`config`](#alkahest-config) | Inspect the effective configuration |
@@ -479,6 +480,34 @@ Arguments:
   <ENGINE>  Engine id
 ```
 
+## alkahest certs
+
+Manage TLS certificates for HTTPS (`[server.tls]`)
+
+```text
+alkahest certs [OPTIONS] <COMMAND>
+```
+
+| Subcommand | Purpose |
+|---|---|
+| `generate` | Write a self-signed server certificate, its key (owner only) and the CA clients trust to the `[server.tls]` paths (default `<data_dir>/tls/`) |
+
+### alkahest certs generate
+
+Write a self-signed server certificate, its key (owner only) and the CA clients trust to the `[server.tls]` paths (default `<data_dir>/tls/`)
+
+```text
+alkahest certs generate [OPTIONS]
+```
+
+Options (besides the global ones):
+
+```text
+      --name <NAME>         Extra DNS name or IP address the certificate must cover (localhost, the loopback addresses and this host's name are always included). Repeatable
+      --days <DAYS>         Validity in days (at most 825, the limit Apple platforms accept) [default: 397]
+      --force               Replace existing files
+```
+
 ## alkahest service
 
 Install or control the background service
@@ -506,10 +535,23 @@ alkahest service install [OPTIONS]
 Options (besides the global ones):
 
 ```text
-      --user                Manage a per-user service (`systemctl --user`) instead of the system service
-      --dry-run             Print the unit and the commands without writing or running anything
-      --root <DIR>          Write below this directory and run no command (packaging, tests)
-      --bin <PATH>          Binary the unit starts; defaults to the running executable
+      --user
+          Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the system service
+      --dry-run
+          Print the unit and the commands without writing or running anything
+      --root <DIR>
+          Write below this directory and run no command (packaging, tests)
+      --bin <PATH>
+          Binary the unit starts; defaults to the running executable
+      --manager <MANAGER>
+          Service manager to target; defaults to this platform's. Another platform's manager only works with `--dry-run` or `--root` (packaging, review)
+
+          Possible values:
+          - systemd: systemd (Linux)
+          - launchd: launchd (macOS)
+          - windows: The Windows service control manager
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### alkahest service uninstall
@@ -523,10 +565,23 @@ alkahest service uninstall [OPTIONS]
 Options (besides the global ones):
 
 ```text
-      --user                Manage a per-user service (`systemctl --user`) instead of the system service
-      --dry-run             Print the unit and the commands without writing or running anything
-      --root <DIR>          Write below this directory and run no command (packaging, tests)
-      --bin <PATH>          Binary the unit starts; defaults to the running executable
+      --user
+          Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the system service
+      --dry-run
+          Print the unit and the commands without writing or running anything
+      --root <DIR>
+          Write below this directory and run no command (packaging, tests)
+      --bin <PATH>
+          Binary the unit starts; defaults to the running executable
+      --manager <MANAGER>
+          Service manager to target; defaults to this platform's. Another platform's manager only works with `--dry-run` or `--root` (packaging, review)
+
+          Possible values:
+          - systemd: systemd (Linux)
+          - launchd: launchd (macOS)
+          - windows: The Windows service control manager
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### alkahest service start
@@ -540,10 +595,23 @@ alkahest service start [OPTIONS]
 Options (besides the global ones):
 
 ```text
-      --user                Manage a per-user service (`systemctl --user`) instead of the system service
-      --dry-run             Print the unit and the commands without writing or running anything
-      --root <DIR>          Write below this directory and run no command (packaging, tests)
-      --bin <PATH>          Binary the unit starts; defaults to the running executable
+      --user
+          Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the system service
+      --dry-run
+          Print the unit and the commands without writing or running anything
+      --root <DIR>
+          Write below this directory and run no command (packaging, tests)
+      --bin <PATH>
+          Binary the unit starts; defaults to the running executable
+      --manager <MANAGER>
+          Service manager to target; defaults to this platform's. Another platform's manager only works with `--dry-run` or `--root` (packaging, review)
+
+          Possible values:
+          - systemd: systemd (Linux)
+          - launchd: launchd (macOS)
+          - windows: The Windows service control manager
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### alkahest service stop
@@ -557,10 +625,23 @@ alkahest service stop [OPTIONS]
 Options (besides the global ones):
 
 ```text
-      --user                Manage a per-user service (`systemctl --user`) instead of the system service
-      --dry-run             Print the unit and the commands without writing or running anything
-      --root <DIR>          Write below this directory and run no command (packaging, tests)
-      --bin <PATH>          Binary the unit starts; defaults to the running executable
+      --user
+          Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the system service
+      --dry-run
+          Print the unit and the commands without writing or running anything
+      --root <DIR>
+          Write below this directory and run no command (packaging, tests)
+      --bin <PATH>
+          Binary the unit starts; defaults to the running executable
+      --manager <MANAGER>
+          Service manager to target; defaults to this platform's. Another platform's manager only works with `--dry-run` or `--root` (packaging, review)
+
+          Possible values:
+          - systemd: systemd (Linux)
+          - launchd: launchd (macOS)
+          - windows: The Windows service control manager
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### alkahest service status
@@ -574,10 +655,23 @@ alkahest service status [OPTIONS]
 Options (besides the global ones):
 
 ```text
-      --user                Manage a per-user service (`systemctl --user`) instead of the system service
-      --dry-run             Print the unit and the commands without writing or running anything
-      --root <DIR>          Write below this directory and run no command (packaging, tests)
-      --bin <PATH>          Binary the unit starts; defaults to the running executable
+      --user
+          Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the system service
+      --dry-run
+          Print the unit and the commands without writing or running anything
+      --root <DIR>
+          Write below this directory and run no command (packaging, tests)
+      --bin <PATH>
+          Binary the unit starts; defaults to the running executable
+      --manager <MANAGER>
+          Service manager to target; defaults to this platform's. Another platform's manager only works with `--dry-run` or `--root` (packaging, review)
+
+          Possible values:
+          - systemd: systemd (Linux)
+          - launchd: launchd (macOS)
+          - windows: The Windows service control manager
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## alkahest sysinfo

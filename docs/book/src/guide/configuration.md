@@ -63,6 +63,7 @@ directory (`/var/lib/alkahest`).
 | `ALKAHEST_HOME` | relocate all Alkahest directories under one root |
 | `ALKAHEST_CONFIG` | an explicit configuration file |
 | `ALKAHEST_API_KEY` | key the CLI and the desktop app send to a remote server |
+| `ALKAHEST_CA_CERT` | CA certificate (PEM) the CLI trusts, in addition to the system roots, when the server uses TLS |
 | `ALKAHEST_OLLAMA_LIBRARY` | base URL of the Ollama library used by `search` and the desktop browser |
 | `ALKAHEST_IMAGE_FETCH=0` | do not let the server fetch image URLs in vision requests |
 | `ALKAHEST_IMAGE_FETCH_ALLOW_PRIVATE=1` | allow fetching image URLs that resolve to private networks (off by default to prevent server-side request forgery) |

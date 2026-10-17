@@ -22,6 +22,10 @@ Sections are TOML tables: `server.port` is `port` under `[server]`. A key shown 
 | `server.endpoints.openai` | bool | `true` | OpenAI-compatible API, `/v1/*` except the Anthropic and decision routes. |
 | `server.endpoints.anthropic` | bool | `true` | Anthropic Messages API, `/v1/messages`. |
 | `server.endpoints.decisions` | bool | `true` | Decision API, `/v1/systemone` and `/v1/decisions`. |
+| `server.tls.enabled` | bool | `false` | Serve HTTPS instead of plain HTTP. |
+| `server.tls.cert` | optional PathBuf | unset | Certificate chain (PEM, leaf first). Default `<data_dir>/tls/cert.pem`. |
+| `server.tls.key` | optional PathBuf | unset | Private key (PEM: PKCS#8, PKCS#1 or SEC1). Default `<data_dir>/tls/key.pem`. |
+| `server.tls.reload_interval_secs` | u64 | `60` | Seconds between checks of the files for changes; `0` reloads on SIGHUP only. |
 | `store.models_dir` | optional PathBuf | unset | Root of Alkahest's own content-addressed store. Default: `<data_dir>/models`. |
 | `store.ollama.enabled` | bool | `true` | Whether to look for and expose Ollama models. |
 | `store.ollama.path` | optional PathBuf | unset | Explicit store path. Default: `OLLAMA_MODELS`, `~/.ollama/models`, then the Linux service directory, whichever exists first. Alkahest never writes there. |

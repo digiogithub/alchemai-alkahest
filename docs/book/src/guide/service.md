@@ -45,9 +45,23 @@ step.
 
 ## macOS and Windows
 
-The launchd agent (macOS) and the Windows service are part of the same command. Run
-`alkahest service install --help` on your build to see what it supports; the setup scripts call
-`service install --user` when you pass `--service`.
+The same commands work on every platform; the manager is chosen for you (`--manager
+systemd|launchd|windows` overrides it, and another platform's manager is only accepted together
+with `--dry-run` or `--root`).
+
+**macOS (launchd).** `sudo alkahest service install` creates the hidden `_alkahest` account and
+a LaunchDaemon (`es.digio.alkahest`, `RunAtLoad`, `KeepAlive`) with its state in
+`/Library/Application Support/Alkahest`. `alkahest service install --user` installs a
+LaunchAgent in `~/Library/LaunchAgents` that runs as you and needs no root. Logs go to a file in
+`~/Library/Logs/Alkahest` (user) or the service log directory.
+
+**Windows.** Run `alkahest service install` from an elevated prompt: it registers the service
+`alkahest` (delayed automatic start, runs as `LocalService`, restarts after failures) with its
+state in `%ProgramData%\Alkahest`, and an Event Log source `Alkahest` for start, stop and failure
+messages. Per-user services do not exist on Windows (`--user` is refused). Closing the service
+(or killing it) ends its engine processes: they are tied to the server by a job object.
+
+The setup scripts call `service install --user` when you pass `--service`.
 
 ## Changing the address or settings
 
