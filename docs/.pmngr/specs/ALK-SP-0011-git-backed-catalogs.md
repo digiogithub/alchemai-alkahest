@@ -6,7 +6,7 @@ status: backlog
 author: mcp
 labels: [catalog, recipes, models, security]
 created: 2026-10-17T18:38:01Z
-updated: 2026-10-17T19:00:09Z
+updated: 2026-10-17T19:08:59Z
 links:
   - { kind: relates_to, target: ALK-US-0117 }
 requirements:
@@ -28,8 +28,15 @@ requirements:
   R3:
     status: backlog
     trace:
-      code: [xtask/src/catalog.rs#check]
-      tests: [xtask/src/catalog_tests.rs#strict_check_rejects_unknown_keys]
+      code:
+        - xtask/src/catalog.rs#check
+        - crates/alkahest-catalog/src/content.rs#validate
+        - crates/alkahest-catalog/src/schema.rs#strip_unknown
+      tests:
+        - xtask/src/catalog_tests.rs#strict_check_rejects_unknown_keys
+        - crates/alkahest-catalog/tests/sync.rs#unknown_field_ignored_with_a_warning
+        - crates/alkahest-catalog/tests/sync.rs#invalid_file_keeps_the_previous_snapshot
+        - crates/alkahest-catalog/src/content.rs#every_failing_file_is_reported
   R4:
     status: backlog
     trace:
@@ -81,21 +88,91 @@ requirements:
         - xtask/src/catalog.rs#generate_index
         - xtask/src/catalog.rs#check_index
         - catalog/index.toml
+        - crates/alkahest-catalog/src/manifest.rs#Index
+        - crates/alkahest-catalog/src/sync.rs#fetch_raw
+        - crates/alkahest/src/catalog_cmd.rs#index
       tests:
         - xtask/src/catalog_tests.rs#stale_index_rejected_by_the_check
         - xtask/src/catalog_tests.rs#index_generation_is_deterministic
+        - crates/alkahest-catalog/tests/sync.rs#unchanged_files_are_not_downloaded
+        - crates/alkahest-catalog/tests/sync.rs#digest_mismatch_fails_the_sync
+        - crates/alkahest-catalog/tests/sync.rs#index_path_outside_the_layout_fails
   R9:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-core/src/config.rs#CatalogSource
+        - crates/alkahest-catalog/src/edit.rs#add_source
+        - crates/alkahest-catalog/src/edit.rs#remove_source
+        - crates/alkahest/src/catalog_cmd.rs#run
+      tests:
+        - crates/alkahest-core/src/config.rs#default_official_catalog
+        - crates/alkahest-core/src/config.rs#catalog_token_in_a_file_is_refused
+        - crates/alkahest/tests/catalog.rs#default_official_catalog
+        - crates/alkahest/tests/catalog.rs#add_and_remove_a_catalog
+        - crates/alkahest-catalog/tests/sync.rs#pinned_catalog_never_refreshes
   R10:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-catalog/src/snapshot.rs#install
+        - crates/alkahest-catalog/src/sync.rs#sync
+        - crates/alkahest-catalog/src/layers.rs#CatalogState
+        - crates/alkahest/src/catalog_cmd.rs#prepare
+        - crates/alkahest/src/serve_cmd.rs#spawn_catalog_refresh
+      tests:
+        - crates/alkahest-catalog/tests/sync.rs#refresh_skipped_when_the_commit_is_unchanged
+        - crates/alkahest-catalog/tests/sync.rs#offline_uses_the_last_good_snapshot
+        - crates/alkahest-catalog/tests/sync.rs#fresh_install_offline
+        - crates/alkahest-catalog/tests/sync.rs#interrupted_sync_leaves_no_partial_snapshot
+        - crates/alkahest/tests/catalog.rs#fresh_install_offline
   R11:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-catalog/src/refs.rs#resolve
+        - crates/alkahest-catalog/src/hosts.rs#raw_url
+        - crates/alkahest-catalog/src/hosts.rs#archive_url
+        - crates/alkahest-catalog/src/archive.rs#extract_catalog
+        - crates/alkahest-catalog/src/http.rs#HttpClient
+      tests:
+        - crates/alkahest-catalog/tests/sync.rs#ref_resolved_without_git
+        - crates/alkahest-catalog/tests/sync.rs#v0_fallback
+        - crates/alkahest-catalog/tests/sync.rs#archive_fallback_without_index
+        - crates/alkahest-catalog/tests/sync.rs#archive_commit_mismatch_refused
+        - crates/alkahest/tests/catalog.rs#proxy_honoured
+        - crates/alkahest/tests/catalog.rs#official_catalog_syncs_from_github
   R12:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-recipes/src/catalog.rs#RecipeLayer
+        - crates/alkahest-catalog/src/layers.rs#recipe_catalog
+        - crates/alkahest-catalog/src/layers.rs#layered_models
+        - crates/alkahest/src/engines_cmd.rs#load_catalog
+        - crates/alkahest-api/src/admin/engines.rs#RecipeEngineManager
+      tests:
+        - crates/alkahest-catalog/tests/layers.rs#git_catalog_overrides_builtin
+        - crates/alkahest-catalog/tests/layers.rs#user_directory_overrides_catalogs
+        - crates/alkahest-catalog/tests/layers.rs#later_catalog_overrides_earlier
+        - crates/alkahest-catalog/tests/layers.rs#disabled_catalog_contributes_nothing
+        - crates/alkahest/tests/catalog.rs#engines_show_the_catalog_origin
   R13:
     status: backlog
   R14:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-catalog/src/http.rs#KeyringCredentials
+        - crates/alkahest-catalog/src/http.rs#Token
+        - crates/alkahest-catalog/src/archive.rs#extract_catalog
+        - crates/alkahest-catalog/src/sync.rs#Limits
+      tests:
+        - crates/alkahest-catalog/tests/sync.rs#sync_never_executes
+        - crates/alkahest-catalog/tests/sync.rs#token_never_logged
+        - crates/alkahest-catalog/tests/sync.rs#token_not_forwarded_across_hosts
+        - crates/alkahest-catalog/tests/sync.rs#oversized_catalog_refused
+        - crates/alkahest-catalog/tests/sync.rs#path_traversal_refused
 ---
 
 ## Purpose
