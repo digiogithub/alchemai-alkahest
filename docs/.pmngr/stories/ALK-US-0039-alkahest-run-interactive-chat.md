@@ -2,14 +2,15 @@
 id: ALK-US-0039
 type: story
 title: "`alkahest run` interactive chat"
-status: backlog
+status: in_progress
 priority: medium
 parent: ALK-EP-0007
 milestone: ALK-M-0003
 labels: [cli]
 estimate: 3
 created: 2026-10-16T22:41:00Z
-updated: 2026-10-16T22:41:00Z
+updated: 2026-10-17T01:47:30Z
+started: 2026-10-17T01:47:30Z
 ---
 
 ## Description

@@ -2,15 +2,16 @@
 id: ALK-US-0031
 type: story
 title: "`alkahest ps` and `alkahest stop`"
-status: in_progress
+status: done
 priority: critical
 parent: ALK-EP-0006
 milestone: ALK-M-0003
 labels: [sched, cli]
 estimate: 3
 created: 2026-10-16T22:40:23Z
-updated: 2026-10-17T01:11:43Z
+updated: 2026-10-17T01:47:15Z
 started: 2026-10-17T01:11:43Z
+closed: 2026-10-17T01:47:15Z
 links:
   - { kind: implements, target: ALK-SP-0004.R5 }
   - { kind: implements, target: ALK-SP-0004.R7 }

@@ -2,15 +2,16 @@
 id: ALK-US-0035
 type: story
 title: OpenAI chat, completions, embeddings and models
-status: in_progress
+status: done
 priority: critical
 parent: ALK-EP-0007
 milestone: ALK-M-0003
 labels: [api, openai]
 estimate: 5
 created: 2026-10-16T22:40:42Z
-updated: 2026-10-17T01:11:43Z
+updated: 2026-10-17T01:47:16Z
 started: 2026-10-17T01:11:43Z
+closed: 2026-10-17T01:47:16Z
 links:
   - { kind: implements, target: ALK-SP-0005.R2 }
 ---

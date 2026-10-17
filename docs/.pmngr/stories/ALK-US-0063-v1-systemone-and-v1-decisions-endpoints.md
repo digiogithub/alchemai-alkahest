@@ -2,14 +2,15 @@
 id: ALK-US-0063
 type: story
 title: "`/v1/systemone` and `/v1/decisions` endpoints"
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0012
 milestone: ALK-M-0004
 labels: [decision, api]
 estimate: 3
 created: 2026-10-16T22:42:39Z
-updated: 2026-10-16T22:42:42Z
+updated: 2026-10-17T01:47:30Z
+started: 2026-10-17T01:47:30Z
 links:
   - { kind: implements, target: ALK-SP-0007.R1 }
   - { kind: implements, target: ALK-SP-0007.R5 }

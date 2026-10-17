@@ -2,14 +2,15 @@
 id: ALK-US-0020
 type: story
 title: Pull safetensors snapshots for vLLM
-status: backlog
+status: in_progress
 priority: medium
 parent: ALK-EP-0004
 milestone: ALK-M-0004
 labels: [hf, vllm]
 estimate: 3
 created: 2026-10-16T22:39:32Z
-updated: 2026-10-16T22:39:34Z
+updated: 2026-10-17T01:47:30Z
+started: 2026-10-17T01:47:30Z
 links:
   - { kind: implements, target: ALK-SP-0002.R2 }
 ---

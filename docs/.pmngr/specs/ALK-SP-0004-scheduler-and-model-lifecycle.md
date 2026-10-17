@@ -5,7 +5,7 @@ title: Scheduler and model lifecycle
 status: backlog
 labels: [sched]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-17T01:07:46Z
+updated: 2026-10-17T01:44:49Z
 requirements:
   R1:
     status: backlog
@@ -59,10 +59,17 @@ requirements:
   R5:
     status: backlog
     trace:
-      code: [crates/alkahest-sched/src/scheduler.rs#Scheduler]
+      code:
+        - crates/alkahest-sched/src/scheduler.rs#Scheduler
+        - crates/alkahest/src/ps_cmd.rs#stop
+        - crates/alkahest-client/src/lib.rs#Client
+        - crates/alkahest-api/src/admin.rs#unload
       tests:
         - crates/alkahest-sched/tests/scheduler.rs#stop
         - crates/alkahest-sched/tests/queue.rs#stop_fails_requests_queued_for_a_slot
+        - crates/alkahest/tests/ps.rs#ps_lists_nothing_and_stop_refuses_an_idle_model
+        - crates/alkahest/tests/serve_inference.rs#real_engine_answers_generate_chat_completions_and_embeddings
+        - crates/alkahest-api/tests/admin.rs#snapshot_unload_and_metrics
   R6:
     status: backlog
     trace:
@@ -84,10 +91,17 @@ requirements:
         - crates/alkahest-sched/src/metrics.rs#ModelStatus
         - crates/alkahest-sched/src/metrics.rs#render_prometheus
         - crates/alkahest-sched/src/scheduler.rs#Scheduler
+        - crates/alkahest-api/src/ollama/models.rs#ps
+        - crates/alkahest-api/src/admin.rs#events
+        - crates/alkahest/src/ps_cmd.rs#ps
       tests:
         - crates/alkahest-sched/tests/metrics.rs#ps
         - crates/alkahest-sched/tests/metrics.rs#counters_and_prometheus_text
         - crates/alkahest-sched/tests/metrics.rs#usage_and_tokens_per_second
+        - crates/alkahest-api/tests/ollama.rs#ollama_client_list_show_and_ps
+        - crates/alkahest-api/tests/admin.rs#status_events_follow_the_scheduler
+        - crates/alkahest/tests/ps.rs#ps_lists_nothing_and_stop_refuses_an_idle_model
+        - crates/alkahest/tests/serve_inference.rs#real_engine_answers_generate_chat_completions_and_embeddings
 ---
 
 ## Purpose

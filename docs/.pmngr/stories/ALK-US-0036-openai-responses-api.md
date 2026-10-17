@@ -9,9 +9,10 @@ milestone: ALK-M-0004
 labels: [api, openai]
 estimate: 3
 created: 2026-10-16T22:40:48Z
-updated: 2026-10-16T22:40:51Z
+updated: 2026-10-17T01:46:40Z
 links:
   - { kind: implements, target: ALK-SP-0005.R2 }
+  - { kind: duplicated_by, target: ALK-US-0088 }
 ---
 
 ## Description

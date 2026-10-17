@@ -2,14 +2,15 @@
 id: ALK-US-0054
 type: story
 title: vLLM engine
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0011
 milestone: ALK-M-0004
 labels: [engine, vllm]
 estimate: 5
 created: 2026-10-16T22:42:04Z
-updated: 2026-10-16T22:52:01Z
+updated: 2026-10-17T01:47:30Z
+started: 2026-10-17T01:47:30Z
 links:
   - { kind: implements, target: ALK-SP-0003.R2 }
 ---

@@ -5,18 +5,66 @@ title: API compatibility surface
 status: backlog
 labels: [api]
 created: 2026-10-16T22:37:35Z
-updated: 2026-10-16T22:37:35Z
+updated: 2026-10-17T01:44:49Z
 requirements:
   R1:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/ollama/mod.rs#routes
+        - crates/alkahest-api/src/ollama/generate.rs#generate
+        - crates/alkahest-api/src/ollama/generate.rs#chat
+        - crates/alkahest-api/src/ollama/embed.rs#embed
+        - crates/alkahest-api/src/ollama/models.rs#ps
+        - crates/alkahest-api/src/ollama/models.rs#pull
+        - crates/alkahest-api/src/generation.rs#chat_pieces
+        - crates/alkahest-api/src/generation.rs#completion_pieces
+        - crates/alkahest-api/src/sampling.rs#ollama_options
+        - crates/alkahest-api/src/pull.rs#PullService
+        - crates/alkahest/src/serve_cmd.rs#serve
+      tests:
+        - crates/alkahest-api/tests/ollama.rs#ollama_client_chat_streams_ndjson
+        - crates/alkahest-api/tests/ollama.rs#ollama_client_list_show_and_ps
+        - crates/alkahest-api/tests/ollama.rs#ollama_client_pull_streams_progress
+        - crates/alkahest-api/tests/ollama.rs#options_map_to_load_settings_and_sampling
+        - crates/alkahest-api/tests/ollama.rs#tools_pass_through_and_tool_calls_come_back
+        - crates/alkahest-api/tests/ollama.rs#images_become_image_url_parts
+        - crates/alkahest-api/tests/ollama.rs#format_becomes_response_format
+        - crates/alkahest-api/tests/ollama.rs#embed_and_legacy_embeddings
+        - crates/alkahest-api/tests/ollama.rs#empty_prompt_loads_and_keep_alive_zero_unloads
+        - crates/alkahest/tests/serve_inference.rs#real_engine_answers_generate_chat_completions_and_embeddings
   R2:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/openai.rs#routes
+        - crates/alkahest-api/src/openai.rs#proxy
+        - crates/alkahest-api/src/openai.rs#sse_response
+        - crates/alkahest-api/src/openai.rs#embeddings
+        - crates/alkahest-api/src/openai.rs#list_models
+      tests:
+        - crates/alkahest-api/tests/openai.rs#openai_sdk_streams_chunks_and_tool_calls
+        - crates/alkahest-api/tests/openai.rs#include_usage_adds_the_usage_chunk
+        - crates/alkahest-api/tests/openai.rs#non_streamed_chat_records_usage
+        - crates/alkahest-api/tests/openai.rs#response_format_images_and_n
+        - crates/alkahest-api/tests/openai.rs#completions_stream_and_not
+        - crates/alkahest-api/tests/openai.rs#embeddings_float_and_base64
+        - crates/alkahest-api/tests/openai.rs#models_list_and_get
   R3:
     status: backlog
   R4:
     status: backlog
   R5:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/dialect.rs#DefaultErrorRenderer
+        - crates/alkahest-api/src/dialect.rs#ErrorKind
+        - crates/alkahest-api/src/service.rs#respond
+        - crates/alkahest-api/src/service.rs#HttpError
+      tests:
+        - crates/alkahest-api/tests/openai.rs#unknown_model
+        - crates/alkahest-api/tests/ollama.rs#unknown_model_is_404_in_ollama_shape
   R6:
     status: backlog
 ---

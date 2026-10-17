@@ -2,15 +2,16 @@
 id: ALK-US-0034
 type: story
 title: Ollama native API
-status: in_progress
+status: done
 priority: critical
 parent: ALK-EP-0007
 milestone: ALK-M-0003
 labels: [api, ollama]
 estimate: 5
 created: 2026-10-16T22:40:37Z
-updated: 2026-10-17T01:11:43Z
+updated: 2026-10-17T01:47:15Z
 started: 2026-10-17T01:11:43Z
+closed: 2026-10-17T01:47:15Z
 links:
   - { kind: implements, target: ALK-SP-0005.R1 }
 ---

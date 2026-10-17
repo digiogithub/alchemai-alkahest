@@ -2,15 +2,16 @@
 id: ALK-US-0032
 type: story
 title: Runtime metrics
-status: in_review
+status: done
 priority: high
 parent: ALK-EP-0006
 milestone: ALK-M-0003
 labels: [sched, observability]
 estimate: 3
 created: 2026-10-16T22:40:28Z
-updated: 2026-10-17T01:11:43Z
+updated: 2026-10-17T01:47:16Z
 started: 2026-10-17T00:19:24Z
+closed: 2026-10-17T01:47:16Z
 links:
   - { kind: implements, target: ALK-SP-0004.R7 }
 ---
