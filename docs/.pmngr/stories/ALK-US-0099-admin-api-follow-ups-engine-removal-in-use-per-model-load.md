@@ -2,13 +2,14 @@
 id: ALK-US-0099
 type: story
 title: "Admin API follow-ups: engine removal in use, per-model load progress, Ollama library tags"
-status: in_progress
+status: done
 parent: ALK-EP-0007
 author: mcp
 labels: [api, admin]
 created: 2026-10-17T03:48:46Z
-updated: 2026-10-17T06:43:09Z
+updated: 2026-10-17T08:24:13Z
 started: 2026-10-17T06:43:09Z
+closed: 2026-10-17T08:24:13Z
 inbox:
   status: accepted
   source: mcp

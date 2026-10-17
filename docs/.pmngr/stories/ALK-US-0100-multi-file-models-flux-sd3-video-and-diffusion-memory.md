@@ -2,11 +2,11 @@
 id: ALK-US-0100
 type: story
 title: Multi-file models (Flux, SD3, video) and diffusion memory estimates
-status: in_progress
+status: backlog
 parent: ALK-EP-0011
 author: mcp
 created: 2026-10-17T04:18:56Z
-updated: 2026-10-17T06:43:09Z
+updated: 2026-10-17T08:24:13Z
 started: 2026-10-17T06:43:09Z
 inbox:
   status: accepted
