@@ -97,3 +97,72 @@ streamed as SSE, typed client end to end), `tests/catalog_token_logs.rs`,
   returns catalog rows only, so the desktop phase of ALK-US-0122 implements the ordering.
 - CLI edits made while `serve` runs are not seen by the running server's live set until a
   restart (API edits are).
+
+## Security review hardening
+
+An independent review of bb5db5f found six problems. Each is fixed, and each fix has a
+regression test named after the problem:
+
+1. **Token re-targeting** (medium-high). A keyring token was keyed only by the catalog name.
+   Removing a catalog and adding the same name with another URL sent the token to that new
+   host after a 401.
+   - Tokens are now stored as `{"v":1,"host":"<host:port>","token":...}`. A bare legacy
+     value still reads, as an unbound token.
+   - `manage::TokenPolicy` returns a bound token only for its `host:port`.
+   - An environment token, or an unbound legacy one, goes only to the source of that name
+     and host that the server's startup configuration names. In the CLI, that is the
+     configuration file.
+   - `POST catalogs` answers 409 when a token for the name belongs to another host, unless
+     the request sets `replace_token: true`, which deletes that token.
+   - The listing reports `token_source: "mismatch"`.
+   - `CredentialSource::catalog_token` now takes the source.
+   - Tests: `manage.rs#token_retargeting_to_another_host_is_refused`,
+     `#keyring_values_round_trip_and_legacy_values_read_unbound`,
+     `tests/catalogs.rs#token_retargeting_to_another_host_is_refused`,
+     `#environment_token_is_not_given_to_a_runtime_source`.
+2. **CSRF and DNS rebinding on loopback** (medium-high, pre-existing for every admin route).
+   A browser guard now sits in the authentication middleware (`AuthPolicy::browser_guard`).
+   It refuses a keyless caller of an admin route in three cases:
+   - the `Origin` is neither the server's own nor an explicit CORS origin (`*` does not
+     count);
+   - `Sec-Fetch-Site` is `cross-site` or `same-site`;
+   - for a loopback caller, `Host` is not `localhost` (or `*.localhost`), a loopback IP or
+     the configured bind host.
+
+   In addition, admin API bodies must be `application/json`. As an optional hardening,
+   `file://` catalogs can be added only by loopback callers. ALK-SP-0006.R4 was updated
+   with a new scenario.
+   - Tests: `tests/catalogs.rs#csrf_and_dns_rebinding_on_loopback_are_refused`,
+     `#configured_cors_origin_may_call_admin_routes`,
+     `#file_catalogs_are_added_only_from_loopback`.
+3. **Limits without an upper bound** (low). `CatalogLimits::validate` sets ceilings of
+   256 MiB per file, 1 GiB per snapshot and 4 GiB per archive. Both the configuration and
+   the API apply them.
+   - Tests: `config.rs#catalog_limits_have_upper_bounds`,
+     `tests/catalogs.rs#catalog_limits_have_upper_bounds`.
+4. **Removal broke the lock guarantee** (low).
+   - The lock file is no longer unlinked.
+   - `SyncContext::with_source_check` stops a sync once the lock is held if the source is
+     gone or its URL or folder changed. The stopped sync writes nothing, not even an error
+     record.
+   - The server's jobs and its background refresh use this check.
+   - Tests: `alkahest-catalog/tests/sync.rs#removed_source_is_not_synced_after_the_lock`,
+     `tests/catalogs.rs#remove_keeps_the_lock_and_removed_sources_are_not_synced`.
+5. **Token set or delete racing a removal** (low). Both now run under `catalog_edit` and
+   re-check the source against the file.
+   - Test: `#token_set_rechecks_the_source_under_the_edit_lock`.
+6. **CLI edits drifting from the running server** (low). Every API edit first re-reads
+   `[[catalogs]]` from the configuration file (`manage::sources_from_file`) and refreshes
+   the live set.
+   - Tests: `manage.rs#sources_are_reread_from_the_file`,
+     `tests/catalogs.rs#cli_edits_are_kept_by_api_edits`.
+
+Residual risks:
+
+- The CLI trusts its own configuration file for environment and unbound legacy tokens.
+  Someone who rewrites that file through the admin API, with a name whose legacy or
+  environment token exists in the CLI's environment, could still have a later CLI sync send
+  that token. Bound tokens, meaning every token set since this fix, are not affected.
+- The browser guard covers admin routes only. The Content-Type rule applies only to
+  `/alkahest/...`; the Ollama `/api/pull` and similar routes keep accepting any content type
+  from local clients.

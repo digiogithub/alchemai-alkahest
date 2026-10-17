@@ -553,7 +553,10 @@ async fn catalog_token_is_stored_and_never_returned() {
     assert_eq!(doc["token_source"], "keyring");
     assert_eq!(doc["shadowed_by_env"], false);
     assert_eq!(
-        s.tokens.get("fixture").unwrap().map(|t| format!("{t:?}")),
+        s.tokens
+            .get("fixture")
+            .unwrap()
+            .map(|t| format!("{:?}", t.token)),
         Some("Token(<redacted>)".to_string())
     );
 
@@ -592,7 +595,11 @@ async fn catalog_token_is_stored_and_never_returned() {
 
     // Removing the catalog with delete_token clears the token too.
     s.tokens
-        .set("fixture", &Token::new(SECRET).unwrap())
+        .set(
+            "fixture",
+            &Token::new(SECRET).unwrap(),
+            &alkahest_catalog::manage::token_host(&file_url(&s.repo)),
+        )
         .unwrap();
     let (status, doc) = send(
         &s.h,
@@ -1070,4 +1077,458 @@ async fn typed_client_drives_the_catalog_routes() {
     let decoded = ev.catalog().unwrap().unwrap();
     assert_eq!(decoded.catalog, "x");
     assert_eq!(decoded.retry_after_secs, 900);
+}
+
+// ----------------------------------------------------------------------------------------
+// Security review of ALK-US-0124 (regressions, named after the findings)
+// ----------------------------------------------------------------------------------------
+
+/// A host that answers 401 to everything and records what it received.
+async fn private_host() -> wiremock::MockServer {
+    let host = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::any())
+        .respond_with(wiremock::ResponseTemplate::new(401))
+        .mount(&host)
+        .await;
+    host
+}
+
+async fn authorization_seen(host: &wiremock::MockServer) -> bool {
+    host.received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .any(|r| r.headers.get("authorization").is_some())
+}
+
+async fn run_sync(s: &Setup, name: &str) -> Value {
+    let (status, doc) = send(
+        &s.h,
+        "POST",
+        &format!("/alkahest/v1/catalogs/{name}/sync"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{doc}");
+    wait_job(&s.h, doc["job"]["id"].as_str().unwrap()).await
+}
+
+/// Finding 1: a token kept after removing its catalog is never re-targeted by re-adding the
+/// name with another URL (409 unless `replace_token`), and a source re-pointed in the file
+/// does not receive it either.
+#[tokio::test]
+async fn token_retargeting_to_another_host_is_refused() {
+    let good = private_host().await;
+    let evil = private_host().await;
+    let good_url = format!("{}/acme/catalog", good.uri());
+    let evil_url = format!("{}/acme/catalog", evil.uri());
+    let s = setup_with(|_| Vec::new(), Vec::new()).await;
+    let (status, doc) = send(
+        &s.h,
+        "POST",
+        "/alkahest/v1/catalogs",
+        Some(json!({"name": "private", "url": good_url})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{doc}");
+    let (status, _) = send(
+        &s.h,
+        "PUT",
+        "/alkahest/v1/catalogs/private/token",
+        Some(json!({ "token": SECRET })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    run_sync(&s, "private").await;
+    assert!(
+        authorization_seen(&good).await,
+        "the bound host gets the token"
+    );
+
+    // Remove without deleting the token, then re-add the name at another host.
+    let (status, doc) = send(&s.h, "DELETE", "/alkahest/v1/catalogs/private", None).await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["token_deleted"], false);
+    let (status, doc) = send(
+        &s.h,
+        "POST",
+        "/alkahest/v1/catalogs",
+        Some(json!({"name": "private", "url": evil_url, "sync": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{doc}");
+    assert!(doc.to_string().contains("replace_token"), "{doc}");
+
+    // Even a source re-pointed behind the API's back (configuration file) gets no token.
+    let cfg = s.config_file();
+    let text = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(
+        &cfg,
+        format!("{text}\n[[catalogs]]\nname = \"private\"\nurl = \"{evil_url}\"\n"),
+    )
+    .unwrap();
+    let (status, doc) = send(&s.h, "GET", "/alkahest/v1/catalogs", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let _ = doc;
+    let (status, _) = send(
+        &s.h,
+        "PATCH",
+        "/alkahest/v1/catalogs/private",
+        Some(json!({"refresh_interval": "1h"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "the file's source is picked up");
+    let (_, doc) = send(&s.h, "GET", "/alkahest/v1/catalogs", None).await;
+    assert_eq!(row(&doc, "private")["token_source"], "mismatch", "{doc}");
+    assert_eq!(row(&doc, "private")["token_present"], false);
+    let job = run_sync(&s, "private").await;
+    assert_eq!(job["state"], "failed");
+    assert!(
+        !authorization_seen(&evil).await,
+        "the token never reaches another host"
+    );
+
+    // Explicit replacement deletes the foreign token.
+    let (status, _) = send(&s.h, "DELETE", "/alkahest/v1/catalogs/private", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, doc) = send(
+        &s.h,
+        "POST",
+        "/alkahest/v1/catalogs",
+        Some(json!({"name": "private", "url": evil_url, "replace_token": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{doc}");
+    assert!(s.tokens.get("private").unwrap().is_none());
+}
+
+/// Finding 1 (environment): `ALKAHEST_CATALOG_TOKEN_<NAME>` serves only the source of that
+/// name configured when the server started, never one added at runtime at another host.
+#[tokio::test]
+async fn environment_token_is_not_given_to_a_runtime_source() {
+    let evil = private_host().await;
+    let evil_url = format!("{}/acme/catalog", evil.uri());
+    let s = setup_with(
+        |_| {
+            vec![CatalogSource::new(
+                "private",
+                "https://git.example.org/acme/catalog",
+            )]
+        },
+        vec![("ALKAHEST_CATALOG_TOKEN_PRIVATE", "env-secret-value")],
+    )
+    .await;
+    let (_, doc) = send(&s.h, "GET", "/alkahest/v1/catalogs", None).await;
+    assert_eq!(row(&doc, "private")["token_source"], "env");
+    let (status, _) = send(&s.h, "DELETE", "/alkahest/v1/catalogs/private", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, doc) = send(
+        &s.h,
+        "POST",
+        "/alkahest/v1/catalogs",
+        Some(json!({"name": "private", "url": evil_url})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{doc}");
+    assert_eq!(doc["catalog"]["token_source"], "mismatch", "{doc}");
+    let job = run_sync(&s, "private").await;
+    assert_eq!(job["state"], "failed");
+    assert!(!authorization_seen(&evil).await);
+}
+
+/// Finding 2: cross-site browser requests and DNS rebinding cannot drive admin routes from
+/// a keyless loopback context; JSON is required for admin bodies; the client and plain
+/// local tools keep working.
+#[tokio::test]
+async fn csrf_and_dns_rebinding_on_loopback_are_refused() {
+    let s = setup().await;
+    let url = s.h.url("/alkahest/v1/catalogs");
+    let body = json!({"name": "evil", "url": "https://evil.example/c"}).to_string();
+    let http = reqwest::Client::new();
+    let post = |headers: &[(&str, &str)]| {
+        let mut r = http.post(&url).body(body.clone());
+        for (k, v) in headers {
+            r = r.header(*k, *v);
+        }
+        r
+    };
+    // A text/plain "simple request" from a form or fetch.
+    let resp = post(&[("content-type", "text/plain")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+    let resp = post(&[]).send().await.unwrap();
+    assert_eq!(resp.status(), 400, "no content type");
+    // Foreign Origin, cross-site fetch metadata, rebinding Host.
+    for headers in [
+        vec![
+            ("content-type", "application/json"),
+            ("origin", "https://evil.example"),
+        ],
+        vec![
+            ("content-type", "application/json"),
+            ("sec-fetch-site", "cross-site"),
+        ],
+        vec![
+            ("content-type", "application/json"),
+            ("sec-fetch-site", "same-site"),
+        ],
+        vec![
+            ("content-type", "application/json"),
+            ("host", "evil.example:11435"),
+        ],
+    ] {
+        let resp = post(&headers).send().await.unwrap();
+        assert_eq!(resp.status(), 403, "{headers:?}");
+    }
+    // Body-less unsafe requests are guarded too.
+    for (m, p) in [
+        ("POST", "/alkahest/v1/catalogs/sync"),
+        ("DELETE", "/alkahest/v1/catalogs/fixture"),
+    ] {
+        let resp = http
+            .request(m.parse().unwrap(), s.h.url(p))
+            .header("origin", "http://attacker.example")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403, "{m} {p}");
+        let resp = http
+            .request(m.parse().unwrap(), s.h.url(p))
+            .header("host", "rebind.attacker.example")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403, "{m} {p}");
+    }
+    let (_, doc) = send(&s.h, "GET", "/alkahest/v1/catalogs", None).await;
+    assert!(
+        doc["catalogs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["name"] != "evil"),
+        "nothing was added: {doc}"
+    );
+    assert!(s.data().join("catalogs/fixture").parent().is_some());
+
+    // Same-origin and fetch metadata `same-origin`/`none` pass; so does the typed client.
+    let host = s.h.addr.to_string();
+    for headers in [
+        vec![("origin", format!("http://{host}"))],
+        vec![("sec-fetch-site", "same-origin".to_string())],
+        vec![("sec-fetch-site", "none".to_string())],
+        vec![("host", format!("localhost:{}", s.h.addr.port()))],
+    ] {
+        let mut r = http
+            .patch(s.h.url("/alkahest/v1/catalogs/fixture"))
+            .header("content-type", "application/json")
+            .body(json!({"refresh_interval": "6h"}).to_string());
+        for (k, v) in &headers {
+            r = r.header(*k, v.as_str());
+        }
+        let resp = r.send().await.unwrap();
+        assert_eq!(resp.status(), 200, "{headers:?}");
+    }
+    let client = alkahest_client::Client::new(&s.h.url("")).unwrap();
+    client.catalogs().await.unwrap();
+    client
+        .update_catalog(
+            "fixture",
+            &alkahest_client::CatalogPatch {
+                enabled: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    // Inference routes are not affected by the admin guard.
+    let resp = http
+        .get(s.h.url("/api/tags"))
+        .header("origin", "https://some.site")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+/// Finding 2 (configured CORS origin): an explicit `server.cors_origins` entry may call admin
+/// routes; `*` does not open them to keyless browser calls.
+#[tokio::test]
+async fn configured_cors_origin_may_call_admin_routes() {
+    let mut config = Config::default();
+    config.server.cors_origins = vec!["https://console.example".into(), "*".into()];
+    let policy = alkahest_api::AuthPolicy::from_config(&config);
+    let mut h = axum::http::HeaderMap::new();
+    h.insert("origin", "https://console.example".parse().unwrap());
+    h.insert("host", "127.0.0.1:11435".parse().unwrap());
+    let m = axum::http::Method::DELETE;
+    assert!(
+        policy
+            .browser_guard(&m, "/alkahest/v1/catalogs/x", &h, true, true)
+            .is_none()
+    );
+    h.insert("origin", "https://other.example".parse().unwrap());
+    assert!(
+        policy
+            .browser_guard(&m, "/alkahest/v1/catalogs/x", &h, true, true)
+            .is_some()
+    );
+    // A key-authenticated caller is not subject to the Origin rule.
+    assert!(
+        policy
+            .browser_guard(&m, "/alkahest/v1/catalogs/x", &h, true, false)
+            .is_none()
+    );
+}
+
+/// Optional hardening: a `file://` catalog is only added by a loopback caller.
+#[tokio::test]
+async fn file_catalogs_are_added_only_from_loopback() {
+    let s = setup().await;
+    let store = KeyStore::new(&s.ctx.paths().key_store);
+    let mut spec = NewKey::named("ops");
+    spec.scopes = vec![Scope::Admin];
+    let (_, admin_key) = store.create(spec, OffsetDateTime::now_utc()).unwrap();
+    let state = AppState::builder(ServerInfo::default())
+        .key_verifier(Arc::new(FileKeyVerifier::new(store.clone())))
+        .service(s.ctx.clone())
+        .build();
+    let app = ApiRouter::new(state, ApiSettings::from_config(&Config::default()))
+        .merge(inference_routes())
+        .into_router();
+    let body = json!({"name": "local2", "url": "file:///etc"}).to_string();
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/alkahest/v1/catalogs")
+        .header("authorization", format!("Bearer {}", admin_key.expose()))
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    req.extensions_mut()
+        .insert(ConnectInfo::<SocketAddr>(LAN.parse().unwrap()));
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+/// Finding 3: catalog limits have hard ceilings, through the API as in the configuration.
+#[tokio::test]
+async fn catalog_limits_have_upper_bounds() {
+    let s = setup().await;
+    for bad in [
+        json!({"max_file_bytes": 268_435_457u64, "max_snapshot_bytes": 1_073_741_824u64}),
+        json!({"max_snapshot_bytes": 1_073_741_825u64}),
+        json!({"max_archive_bytes": 4_294_967_297u64}),
+    ] {
+        let (status, doc) = send(
+            &s.h,
+            "PUT",
+            "/alkahest/v1/settings/server",
+            Some(json!({ "catalog_limits": bad })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}: {doc}");
+    }
+    let (status, doc) = send(
+        &s.h,
+        "PUT",
+        "/alkahest/v1/settings/server",
+        Some(json!({"catalog_limits": {"max_archive_bytes": 4_294_967_296u64}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+}
+
+/// Finding 4: removing a catalog keeps the lock file (no lock on a fresh inode while a sync
+/// holds the old one), and later syncs never recreate the removed catalog's snapshot.
+#[tokio::test]
+async fn remove_keeps_the_lock_and_removed_sources_are_not_synced() {
+    // `official` disabled: a hermetic test never reaches github.com.
+    let s = setup_with(
+        |repo| {
+            let mut official = CatalogSource::official();
+            official.enabled = false;
+            vec![official, CatalogSource::new("fixture", file_url(repo))]
+        },
+        Vec::new(),
+    )
+    .await;
+    sync_fixture(&s).await;
+    let lock = s.data().join("catalogs/.lock-fixture");
+    assert!(lock.exists());
+    let (status, _) = send(&s.h, "DELETE", "/alkahest/v1/catalogs/fixture", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(lock.exists(), "the lock file is never unlinked");
+    assert!(!s.data().join("catalogs/fixture").exists());
+    // Later passes (and sync jobs) see only configured sources; the mechanism that stops a
+    // sync whose source vanished while it waited for the lock is
+    // alkahest-catalog `sync.rs#removed_source_is_not_synced_after_the_lock`.
+    assert!(refresh_pass(&s.ctx, true).await.is_empty());
+    let (status, doc) = send(&s.h, "POST", "/alkahest/v1/catalogs/sync", None).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let job = wait_job(&s.h, doc["job"]["id"].as_str().unwrap()).await;
+    assert_eq!(job["result"]["catalogs"], json!([]), "{job}");
+    assert!(!s.data().join("catalogs/fixture").exists());
+}
+
+/// Finding 5: setting a token re-checks the source under the edit lock against the file, so
+/// a catalog removed meanwhile (here by the CLI) gets no token.
+#[tokio::test]
+async fn token_set_rechecks_the_source_under_the_edit_lock() {
+    let s = setup().await;
+    // The CLI rewrote the file without `fixture` while the server ran.
+    std::fs::write(
+        s.config_file(),
+        "[[catalogs]]\nname = \"official\"\nurl = \"https://github.com/digiogithub/alchemai-alkahest\"\nsubdir = \"catalog\"\n",
+    )
+    .unwrap();
+    let (status, doc) = send(
+        &s.h,
+        "PUT",
+        "/alkahest/v1/catalogs/fixture/token",
+        Some(json!({ "token": SECRET })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{doc}");
+    assert!(s.tokens.get("fixture").unwrap().is_none());
+    let (status, _) = send(&s.h, "DELETE", "/alkahest/v1/catalogs/fixture/token", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// Finding 6: API edits start from the configuration file, so a source the CLI added while
+/// the server ran is kept and becomes live.
+#[tokio::test]
+async fn cli_edits_are_kept_by_api_edits() {
+    let s = setup_with(|_| vec![CatalogSource::official()], Vec::new()).await;
+    let cfg = s.config_file();
+    let text = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(
+        &cfg,
+        format!(
+            "{text}\n[[catalogs]]\nname = \"official\"\nurl = \"https://github.com/digiogithub/alchemai-alkahest\"\nsubdir = \"catalog\"\n\n[[catalogs]]\nname = \"fromcli\"\nurl = \"https://git.example.org/cli/catalog\"\n"
+        ),
+    )
+    .unwrap();
+    let (status, doc) = send(
+        &s.h,
+        "POST",
+        "/alkahest/v1/catalogs",
+        Some(json!({"name": "fixture", "url": file_url(&s.repo)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{doc}");
+    assert_eq!(doc["catalog"]["position"], 3);
+    let cfg = Config::from_toml_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+    let names: Vec<_> = cfg.catalogs.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["official", "fromcli", "fixture"]);
+    let (_, doc) = send(&s.h, "GET", "/alkahest/v1/catalogs", None).await;
+    assert_eq!(row(&doc, "fromcli")["position"], 2);
+    assert!(
+        s.ctx
+            .catalogs()
+            .sources()
+            .iter()
+            .any(|c| c.name == "fromcli")
+    );
 }

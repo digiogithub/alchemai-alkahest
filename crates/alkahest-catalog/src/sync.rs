@@ -76,7 +76,13 @@ pub struct SyncContext {
     pub deadline: Option<Duration>,
     /// Receives the steps of a sync (the admin API turns them into job progress).
     pub progress: Option<SyncProgress>,
+    /// Checked once the catalog lock is held: `false` means the source was removed or its
+    /// URL or folder changed meanwhile, and the sync stops without writing anything.
+    pub source_check: Option<SourceCheck>,
 }
+
+/// See [`SyncContext::source_check`].
+pub type SourceCheck = Arc<dyn Fn(&CatalogSource) -> bool + Send + Sync>;
 
 /// One step of a sync, reported through [`SyncContext::progress`] (desktop screen 16b shows
 /// it as `Syncing…` with the step).
@@ -143,7 +149,15 @@ impl SyncContext {
             alkahest_version: crate::running_version(),
             deadline: None,
             progress: None,
+            source_check: None,
         })
+    }
+
+    /// Stops a sync whose source no longer passes `check` once the lock is held (a server
+    /// passes "still configured with the same URL and folder").
+    pub fn with_source_check(mut self, check: SourceCheck) -> Self {
+        self.source_check = Some(check);
+        self
     }
 
     /// Uses `credentials` to find a token after a 401/403 (the admin API passes its token
@@ -243,6 +257,14 @@ pub async fn sync(source: &CatalogSource, ctx: &SyncContext) -> Result<SyncRepor
         let (root, name) = (root.clone(), source.name.clone());
         blocking(move || SyncLock::acquire(&root, &name)).await??
     };
+    if let Some(check) = &ctx.source_check
+        && !check(source)
+    {
+        // Removed or changed while waiting: nothing is written, not even an error record, so
+        // no snapshot directory of a removed catalog is created again.
+        drop(lock);
+        return Err(CatalogError::Unknown(source.name.clone()));
+    }
     let dir = root.join(&source.name);
     let previous = {
         let dir = dir.clone();
@@ -267,8 +289,8 @@ pub async fn sync(source: &CatalogSource, ctx: &SyncContext) -> Result<SyncRepor
         // Only now, for a host that refused anonymous access, look for a token: a public
         // catalog never touches the keyring.
         let creds = ctx.credentials.clone();
-        let name = source.name.clone();
-        let Some(token) = blocking(move || creds.catalog_token(&name)).await? else {
+        let src = source.clone();
+        let Some(token) = blocking(move || creds.catalog_token(&src)).await? else {
             return first;
         };
         let kind = HostKind::detect(&source.url);

@@ -39,21 +39,82 @@ pub fn keyring_user(name: &str) -> String {
     format!("catalog:{name}")
 }
 
+/// The host (`host:port`) a token of a catalog at `url` is bound to; empty for URLs without a
+/// host (`file://`).
+pub fn token_host(url: &str) -> String {
+    crate::hosts::host_of(url).unwrap_or_default()
+}
+
+/// A stored catalog token with the host it was stored for.
+#[derive(Clone)]
+pub struct StoredToken {
+    /// The secret.
+    pub token: Token,
+    /// `host:port` of the catalog source the token was stored for. `None` for a token written
+    /// before bindings existed (a bare keyring value): it is used only for sources the
+    /// operator configured in the configuration file ([`TokenPolicy`]).
+    pub host: Option<String>,
+}
+
+impl std::fmt::Debug for StoredToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredToken")
+            .field("token", &self.token)
+            .field("host", &self.host)
+            .finish()
+    }
+}
+
+/// The keyring value: `{"v": 1, "host": "<host:port>", "token": "<secret>"}`.
+#[derive(Serialize, Deserialize)]
+struct KeyringValue {
+    v: u32,
+    host: String,
+    token: String,
+}
+
+impl StoredToken {
+    /// Encodes the keyring value.
+    fn encode(&self) -> String {
+        let v = KeyringValue {
+            v: 1,
+            host: self.host.clone().unwrap_or_default(),
+            token: self.token.expose().to_string(),
+        };
+        serde_json::to_string(&v).unwrap_or_default()
+    }
+
+    /// Decodes a keyring value; a value that is not the JSON record is a legacy bare token.
+    fn decode(raw: &str) -> Option<Self> {
+        match serde_json::from_str::<KeyringValue>(raw) {
+            Ok(v) if v.v == 1 => Some(Self {
+                token: Token::new(&v.token)?,
+                host: Some(v.host),
+            }),
+            _ => Some(Self {
+                token: Token::new(raw)?,
+                host: None,
+            }),
+        }
+    }
+}
+
 /// Where private catalog tokens are stored. The real one is [`KeyringTokenStore`]; tests and
-/// keyring-less embeddings use [`MemoryTokenStore`].
+/// keyring-less embeddings use [`MemoryTokenStore`]. Every token is stored with the host of
+/// the source it was set for, and [`TokenPolicy`] never hands it to another host.
 pub trait CatalogTokenStore: Send + Sync {
     /// The stored token of catalog `name`, if any.
     ///
     /// # Errors
     ///
     /// [`CatalogError::Keyring`] when the store cannot be read.
-    fn get(&self, name: &str) -> Result<Option<Token>>;
-    /// Stores (replaces) the token of catalog `name`.
+    fn get(&self, name: &str) -> Result<Option<StoredToken>>;
+    /// Stores (replaces) the token of catalog `name`, bound to `host` (`host:port`).
     ///
     /// # Errors
     ///
     /// [`CatalogError::Keyring`] when the store cannot be written.
-    fn set(&self, name: &str, token: &Token) -> Result<()>;
+    fn set(&self, name: &str, token: &Token, host: &str) -> Result<()>;
     /// Removes the token of catalog `name`; absent is fine.
     ///
     /// # Errors
@@ -62,7 +123,8 @@ pub trait CatalogTokenStore: Send + Sync {
     fn delete(&self, name: &str) -> Result<()>;
 }
 
-/// The OS keyring: service `alkahest`, user `catalog:<name>`.
+/// The OS keyring: service `alkahest`, user `catalog:<name>`, value
+/// `{"v": 1, "host": ..., "token": ...}` (a bare legacy value still reads, unbound).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeyringTokenStore;
 
@@ -74,17 +136,24 @@ impl KeyringTokenStore {
 }
 
 impl CatalogTokenStore for KeyringTokenStore {
-    fn get(&self, name: &str) -> Result<Option<Token>> {
+    fn get(&self, name: &str) -> Result<Option<StoredToken>> {
         match Self::entry(name)?.get_password() {
-            Ok(v) => Ok(Token::new(v)),
+            Ok(v) => Ok(StoredToken::decode(&zeroize::Zeroizing::new(v))),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(CatalogError::Keyring(e.to_string())),
         }
     }
 
-    fn set(&self, name: &str, token: &Token) -> Result<()> {
+    fn set(&self, name: &str, token: &Token, host: &str) -> Result<()> {
+        let value = zeroize::Zeroizing::new(
+            StoredToken {
+                token: token.clone(),
+                host: Some(host.to_string()),
+            }
+            .encode(),
+        );
         Self::entry(name)?
-            .set_password(token.expose())
+            .set_password(&value)
             .map_err(|e| CatalogError::Keyring(e.to_string()))
     }
 
@@ -98,10 +167,27 @@ impl CatalogTokenStore for KeyringTokenStore {
 
 /// Tokens kept in memory (tests, machines without a keyring).
 #[derive(Debug, Default)]
-pub struct MemoryTokenStore(Mutex<BTreeMap<String, Token>>);
+pub struct MemoryTokenStore(Mutex<BTreeMap<String, StoredToken>>);
+
+impl MemoryTokenStore {
+    /// Stores a token without a binding, as a token written before bindings existed (tests of
+    /// the legacy rule).
+    pub fn set_unbound(&self, name: &str, token: &Token) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                name.to_string(),
+                StoredToken {
+                    token: token.clone(),
+                    host: None,
+                },
+            );
+    }
+}
 
 impl CatalogTokenStore for MemoryTokenStore {
-    fn get(&self, name: &str) -> Result<Option<Token>> {
+    fn get(&self, name: &str) -> Result<Option<StoredToken>> {
         Ok(self
             .0
             .lock()
@@ -110,11 +196,17 @@ impl CatalogTokenStore for MemoryTokenStore {
             .cloned())
     }
 
-    fn set(&self, name: &str, token: &Token) -> Result<()> {
+    fn set(&self, name: &str, token: &Token, host: &str) -> Result<()> {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(name.to_string(), token.clone());
+            .insert(
+                name.to_string(),
+                StoredToken {
+                    token: token.clone(),
+                    host: Some(host.to_string()),
+                },
+            );
         Ok(())
     }
 
@@ -138,48 +230,127 @@ pub enum TokenSource {
     Env,
     /// The token store (OS keyring).
     Keyring,
+    /// A token exists for the name but is bound to another host: it is never used for this
+    /// source (set it again, or remove it).
+    Mismatch,
     /// No token: the catalog is read anonymously.
     None,
 }
 
-/// Where the token of catalog `name` comes from: the environment first, then `store`. A store
-/// that cannot be read counts as "no token".
-pub fn token_source(name: &str, store: &dyn CatalogTokenStore, env: &EnvLookup) -> TokenSource {
-    if env(&token_env_var(name)).is_some_and(|v| !v.trim().is_empty()) {
-        return TokenSource::Env;
-    }
-    match store.get(name) {
-        Ok(Some(_)) => TokenSource::Keyring,
-        _ => TokenSource::None,
+/// Which token a catalog source may use (ALK-SP-0011.R14, security review of ALK-US-0124):
+///
+/// - a stored token bound to a host is used only for a source on that `host:port`;
+/// - an environment token, and a legacy keyring token without a binding, are used only for a
+///   *trusted* source: one whose name and host match a source the operator configured in the
+///   configuration file (`trusted`). A source added at runtime under the same name but another
+///   host never gets them.
+#[derive(Clone)]
+pub struct TokenPolicy {
+    store: Arc<dyn CatalogTokenStore>,
+    env: EnvLookup,
+    trusted: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for TokenPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenPolicy")
+            .field("trusted", &self.trusted)
+            .finish_non_exhaustive()
     }
 }
 
-/// [`CredentialSource`] over a [`CatalogTokenStore`]: `ALKAHEST_CATALOG_TOKEN_<NAME>`, then the
-/// store; host tokens as [`KeyringCredentials`] reads them.
+impl TokenPolicy {
+    /// A policy over `store` and `env`, trusting `trusted` (the sources of the configuration
+    /// file) for environment and unbound tokens.
+    pub fn new(
+        store: Arc<dyn CatalogTokenStore>,
+        env: EnvLookup,
+        trusted: &[CatalogSource],
+    ) -> Self {
+        Self {
+            store,
+            env,
+            trusted: trusted
+                .iter()
+                .map(|s| (s.name.clone(), token_host(&s.url)))
+                .collect(),
+        }
+    }
+
+    /// The store.
+    pub fn store(&self) -> &Arc<dyn CatalogTokenStore> {
+        &self.store
+    }
+
+    fn is_trusted(&self, source: &CatalogSource) -> bool {
+        self.trusted.get(&source.name) == Some(&token_host(&source.url))
+    }
+
+    /// The token `source` may use, and where it comes from. A store that cannot be read
+    /// counts as "no token".
+    pub fn resolve(&self, source: &CatalogSource) -> (TokenSource, Option<Token>) {
+        let host = token_host(&source.url);
+        let mut mismatch = false;
+        if let Some(t) = (self.env)(&token_env_var(&source.name)).and_then(Token::new) {
+            if self.is_trusted(source) {
+                return (TokenSource::Env, Some(t));
+            }
+            mismatch = true;
+        }
+        match self.store.get(&source.name) {
+            Ok(Some(StoredToken {
+                token,
+                host: Some(h),
+            })) => {
+                if h == host {
+                    return (TokenSource::Keyring, Some(token));
+                }
+                mismatch = true;
+            }
+            Ok(Some(StoredToken { token, host: None })) => {
+                if self.is_trusted(source) {
+                    return (TokenSource::Keyring, Some(token));
+                }
+                mismatch = true;
+            }
+            _ => {}
+        }
+        if mismatch {
+            (TokenSource::Mismatch, None)
+        } else {
+            (TokenSource::None, None)
+        }
+    }
+
+    /// Whether a token exists for `name` that `source` (a new source of that name) could not
+    /// use: bound to another host, or an environment/unbound token for an untrusted source.
+    pub fn conflicts_with(&self, source: &CatalogSource) -> bool {
+        self.resolve(source).0 == TokenSource::Mismatch
+    }
+}
+
+/// Where the token of `source` comes from, under `policy`.
+pub fn token_source(policy: &TokenPolicy, source: &CatalogSource) -> TokenSource {
+    policy.resolve(source).0
+}
+
+/// [`CredentialSource`] over a [`TokenPolicy`]; host tokens as [`KeyringCredentials`] reads
+/// them.
+#[derive(Debug, Clone)]
 pub struct StoreCredentials {
-    store: Arc<dyn CatalogTokenStore>,
-    env: EnvLookup,
+    policy: TokenPolicy,
 }
 
 impl StoreCredentials {
-    /// Credentials from `store` with `env` consulted first.
-    pub fn new(store: Arc<dyn CatalogTokenStore>, env: EnvLookup) -> Self {
-        Self { store, env }
-    }
-}
-
-impl std::fmt::Debug for StoreCredentials {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StoreCredentials").finish_non_exhaustive()
+    /// Credentials under `policy`.
+    pub fn new(policy: TokenPolicy) -> Self {
+        Self { policy }
     }
 }
 
 impl CredentialSource for StoreCredentials {
-    fn catalog_token(&self, name: &str) -> Option<Token> {
-        if let Some(t) = (self.env)(&token_env_var(name)).and_then(Token::new) {
-            return Some(t);
-        }
-        self.store.get(name).ok().flatten()
+    fn catalog_token(&self, source: &CatalogSource) -> Option<Token> {
+        self.policy.resolve(source).1
     }
 
     fn host_token(&self, host: &str) -> Option<Token> {
@@ -271,7 +442,7 @@ pub fn status_text(state: &CatalogState) -> String {
 pub fn describe(
     data_dir: &Path,
     states: &[CatalogState],
-    token_of: impl Fn(&str) -> TokenSource,
+    token_of: impl Fn(&CatalogSource) -> TokenSource,
 ) -> Vec<CatalogInfo> {
     let time = |t: Option<&String>| t.filter(|t| !t.is_empty()).cloned();
     states
@@ -279,7 +450,7 @@ pub fn describe(
         .enumerate()
         .map(|(i, s)| {
             let meta = s.meta.as_ref();
-            let token = token_of(&s.source.name);
+            let token = token_of(&s.source);
             CatalogInfo {
                 position: i + 1,
                 name: s.source.name.clone(),
@@ -305,7 +476,7 @@ pub fn describe(
                     .map(|c| c.warnings.iter().map(ToString::to_string).collect())
                     .unwrap_or_default(),
                 status: status_text(s),
-                token_present: token != TokenSource::None,
+                token_present: matches!(token, TokenSource::Env | TokenSource::Keyring),
                 token_source: token,
                 syncing: sync_in_progress(data_dir, &s.source.name),
             }
@@ -352,6 +523,29 @@ impl CatalogSet {
     pub fn set_limits(&self, limits: CatalogLimits) {
         self.inner.write().unwrap_or_else(PoisonError::into_inner).1 = limits;
     }
+}
+
+/// The `[[catalogs]]` of the configuration file `file`, or `fallback` (the sources in force)
+/// when the file is missing or has none. The admin API calls this before every edit, so a
+/// source added with the CLI while the server runs is kept.
+///
+/// # Errors
+///
+/// [`CatalogError::Config`] when the file does not parse, [`CatalogError::Io`].
+pub fn sources_from_file(file: &Path, fallback: &[CatalogSource]) -> Result<Vec<CatalogSource>> {
+    let text = match std::fs::read_to_string(file) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(fallback.to_vec()),
+        Err(e) => return Err(CatalogError::io(file, e)),
+    };
+    let table: toml::Table = toml::from_str(&text)
+        .map_err(|e| CatalogError::Config(format!("{}: {e}", file.display())))?;
+    if !table.contains_key("catalogs") {
+        return Ok(fallback.to_vec());
+    }
+    alkahest_core::Config::from_toml_str(&text)
+        .map(|c| c.catalogs)
+        .map_err(|e| CatalogError::Config(format!("{}: {e}", file.display())))
 }
 
 /// Adds `source` last in the layer order of the configuration file `file` (comments kept)
@@ -416,11 +610,9 @@ pub fn remove_catalog(
             snapshot_deleted = true;
         }
     }
+    // The lock file stays: unlinking it would let a waiting process lock a different inode
+    // than a sync that already holds the old one.
     drop(lock);
-    if !official {
-        // The lock file of a catalog that no longer exists.
-        let _ = std::fs::remove_file(catalogs_root(data_dir).join(format!(".lock-{name}")));
-    }
     let mut token_deleted = false;
     if let Some(store) = tokens {
         store.delete(name)?;
@@ -550,6 +742,7 @@ mod tests {
             .set(
                 "acme",
                 &Token::new("s3cr3t").unwrap_or_else(|| panic!("token")),
+                "git.example.org:443",
             )
             .unwrap_or_else(|e| panic!("{e}"));
         let out = remove_catalog(&file, &data, "official", &effective, None)
@@ -573,18 +766,108 @@ mod tests {
 
     #[test]
     fn token_source_prefers_the_environment() {
-        let store = MemoryTokenStore::default();
+        let store = Arc::new(MemoryTokenStore::default());
+        let acme = CatalogSource::new("acme", "https://git.example.org/acme/catalog");
         let none: EnvLookup = Arc::new(|_| None);
-        assert_eq!(token_source("acme", &store, &none), TokenSource::None);
+        let policy = TokenPolicy::new(store.clone(), none.clone(), std::slice::from_ref(&acme));
+        assert_eq!(token_source(&policy, &acme), TokenSource::None);
         store
-            .set("acme", &Token::new("t").unwrap_or_else(|| panic!("token")))
+            .set(
+                "acme",
+                &Token::new("t").unwrap_or_else(|| panic!("token")),
+                &token_host(&acme.url),
+            )
             .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(token_source("acme", &store, &none), TokenSource::Keyring);
+        assert_eq!(token_source(&policy, &acme), TokenSource::Keyring);
         let env: EnvLookup =
             Arc::new(|k| (k == "ALKAHEST_CATALOG_TOKEN_ACME").then(|| "e".to_string()));
-        assert_eq!(token_source("acme", &store, &env), TokenSource::Env);
-        let creds = StoreCredentials::new(Arc::new(store), none);
-        assert!(creds.catalog_token("acme").is_some());
-        assert!(creds.catalog_token("other").is_none());
+        let policy = TokenPolicy::new(store.clone(), env, std::slice::from_ref(&acme));
+        assert_eq!(token_source(&policy, &acme), TokenSource::Env);
+        let creds = StoreCredentials::new(TokenPolicy::new(store, none, &[]));
+        assert!(creds.catalog_token(&acme).is_some());
+        assert!(
+            creds
+                .catalog_token(&CatalogSource::new("other", "https://git.example.org/x"))
+                .is_none()
+        );
+    }
+
+    /// Security review of ALK-US-0124, finding 1: a token is never re-targeted to another
+    /// host by re-adding its catalog name with another URL; environment and unbound tokens
+    /// only serve the configured source.
+    #[test]
+    fn token_retargeting_to_another_host_is_refused() {
+        let store = Arc::new(MemoryTokenStore::default());
+        let good = CatalogSource::new("acme", "https://git.example.org/acme/catalog");
+        let evil = CatalogSource::new("acme", "https://evil.example.net/acme/catalog");
+        let other_port = CatalogSource::new("acme", "https://git.example.org:8443/acme/catalog");
+        let token = Token::new("s3cr3t").unwrap_or_else(|| panic!("token"));
+        store
+            .set("acme", &token, &token_host(&good.url))
+            .unwrap_or_else(|e| panic!("{e}"));
+        // Bound token: the configured host only, whatever the trust list says.
+        let policy = TokenPolicy::new(
+            store.clone(),
+            Arc::new(|_| None),
+            std::slice::from_ref(&evil),
+        );
+        assert!(policy.resolve(&good).1.is_some());
+        assert_eq!(policy.resolve(&evil).0, TokenSource::Mismatch);
+        assert!(policy.resolve(&evil).1.is_none());
+        assert!(policy.resolve(&other_port).1.is_none());
+        assert!(policy.conflicts_with(&evil));
+        assert!(!policy.conflicts_with(&good));
+
+        // Environment and legacy unbound tokens: only for the source of the configuration.
+        let env: EnvLookup =
+            Arc::new(|k| (k == "ALKAHEST_CATALOG_TOKEN_ACME").then(|| "e".to_string()));
+        let empty = Arc::new(MemoryTokenStore::default());
+        let policy = TokenPolicy::new(empty.clone(), env, std::slice::from_ref(&good));
+        assert_eq!(policy.resolve(&good).0, TokenSource::Env);
+        assert!(policy.resolve(&evil).1.is_none());
+        assert!(policy.conflicts_with(&evil));
+        empty.set_unbound("acme", &token);
+        let policy = TokenPolicy::new(empty, Arc::new(|_| None), std::slice::from_ref(&good));
+        assert_eq!(policy.resolve(&good).0, TokenSource::Keyring);
+        assert_eq!(policy.resolve(&evil).0, TokenSource::Mismatch);
+        assert!(policy.resolve(&evil).1.is_none());
+    }
+
+    #[test]
+    fn keyring_values_round_trip_and_legacy_values_read_unbound() {
+        let t = StoredToken {
+            token: Token::new("abc").unwrap_or_else(|| panic!("token")),
+            host: Some("h.example:443".into()),
+        };
+        let back = StoredToken::decode(&t.encode()).unwrap_or_else(|| panic!("decode"));
+        assert_eq!(back.host.as_deref(), Some("h.example:443"));
+        assert_eq!(back.token.expose(), "abc");
+        let legacy = StoredToken::decode("plain-token").unwrap_or_else(|| panic!("decode"));
+        assert_eq!(legacy.host, None);
+        assert_eq!(legacy.token.expose(), "plain-token");
+        assert!(!format!("{t:?}").contains("abc"));
+    }
+
+    /// Security review of ALK-US-0124, finding 6: sources come from the file when it has
+    /// `[[catalogs]]`, so CLI edits are not lost by an API edit.
+    #[test]
+    fn sources_are_reread_from_the_file() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let file = dir.path().join("config.toml");
+        let fallback = vec![CatalogSource::official()];
+        assert_eq!(
+            sources_from_file(&file, &fallback).unwrap_or_else(|e| panic!("{e}")),
+            fallback
+        );
+        std::fs::write(&file, "[server]\nport = 1\n").unwrap_or_default();
+        assert_eq!(
+            sources_from_file(&file, &fallback).unwrap_or_else(|e| panic!("{e}")),
+            fallback
+        );
+        let acme = CatalogSource::new("acme", "https://git.example.org/acme/catalog");
+        add_catalog(&file, &acme, &fallback).unwrap_or_else(|e| panic!("{e}"));
+        let got = sources_from_file(&file, &[]).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[1], acme);
     }
 }

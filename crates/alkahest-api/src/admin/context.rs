@@ -64,6 +64,9 @@ pub struct AdminContext {
     pub(crate) catalogs: CatalogSet,
     /// Private catalog tokens.
     pub(crate) catalog_tokens: SharedCatalogTokens,
+    /// The catalog sources of the configuration the server started with: the only sources an
+    /// environment token or an unbound legacy keyring token may serve.
+    pub(crate) catalog_trusted: Vec<alkahest_core::config::CatalogSource>,
     /// Serialises catalog configuration edits (add, remove, patch, limits).
     pub(crate) catalog_edit: Mutex<()>,
     /// `catalog` events of `/alkahest/v1/events` (background sync failures).
@@ -245,6 +248,7 @@ impl AdminContextBuilder {
             CatalogSet::new(self.config.catalogs.clone(), self.config.catalog_limits)
         });
         let (catalog_events, _) = broadcast::channel(CATALOG_EVENTS);
+        let catalog_trusted = self.config.catalogs.clone();
         Arc::new(AdminContext {
             config: self.config,
             paths: self.paths,
@@ -264,6 +268,7 @@ impl AdminContextBuilder {
             sources: self.sources,
             catalogs,
             catalog_tokens: self.catalog_tokens,
+            catalog_trusted,
             catalog_edit: Mutex::new(()),
             catalog_events,
         })

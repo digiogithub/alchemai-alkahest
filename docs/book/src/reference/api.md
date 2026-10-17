@@ -114,6 +114,14 @@ Under `/alkahest/v1/`, described by an OpenAPI 3.1 document served at
 `/alkahest/v1/openapi.json` (the authoritative, always current list). Every route needs the
 `admin` scope for remote callers. It is what the desktop app uses.
 
+Loopback trust does not extend to web pages. An admin request without a verified key is
+refused (403) when it carries an `Origin` that is neither the server's own nor an explicit
+`server.cors_origins` entry (`*` does not count), when `Sec-Fetch-Site` is `cross-site` or
+`same-site`, or, from loopback, when `Host` is not `localhost`, a loopback address or the
+configured bind host (DNS rebinding). Admin requests with a body must be
+`Content-Type: application/json` (400 otherwise). Command-line tools and the desktop app
+(which send JSON and no browser headers) are not affected.
+
 | Area | Routes |
 |---|---|
 | System | `GET info`, `GET ps` (with an estimated `load_progress` while a model loads, CPU and GPU `utilization`, engine `cpu_percent`), `GET events` (server-sent events: scheduler `status`, `job`, `request` and `catalog` updates), `POST unload`, `POST models/{name}/kill` (SIGKILL a hung engine), `GET requests` (recent inference requests: route, model, key, tokens, duration, status; never content), `GET utilization` |
@@ -130,19 +138,20 @@ Under `/alkahest/v1/`, described by an OpenAPI 3.1 document served at
 
 The catalog routes manage the `[[catalogs]]` sources of the server's configuration file (the
 `--config` file, else the user configuration file) and their snapshots, as `alkahest catalog`
-does. Edits keep the file's comments and apply at once: the next engine listing, catalog
+does. Each edit starts from the file (a source added with the CLI while the server runs is
+kept), keeps the file's comments and applies at once: the next engine listing, catalog
 search, pull or background refresh sees them, without a restart. A remote caller needs an API
 key with the `admin` scope, like every admin route.
 
 | Route | Request | Response |
 |---|---|---|
-| `GET catalogs` | | `{"catalogs": [row], "limits", "default_limits", "file", "auto_sync", "keyring_service", "token_env"}`; a row has `position` (1 = lowest layer), `name`, `url`, `ref`, `subdir`, `pin`, `enabled`, `refresh_interval`, `official`, `commit`, `fetched_at`, `checked_at`, `error_at`, `last_error`, `error_reported`, `load_error`, `engines`, `models`, `warnings`, `status`, `token_present`, `token_source` (`env`, `keyring`, `none`), `syncing` (the same rows as `alkahest catalog ls --json`) |
-| `POST catalogs` | `{"name", "url", "ref"?, "subdir"?, "pin"?, "refresh_interval"?, "enabled"?, "sync"?}` | `201 {"catalog": row, "job": job or null}`. The catalog goes last in the layer order. `sync: true` starts its sync job. A `token` field is refused: use `PUT catalogs/{name}/token` |
+| `GET catalogs` | | `{"catalogs": [row], "limits", "default_limits", "file", "auto_sync", "keyring_service", "token_env"}`; a row has `position` (1 = lowest layer), `name`, `url`, `ref`, `subdir`, `pin`, `enabled`, `refresh_interval`, `official`, `commit`, `fetched_at`, `checked_at`, `error_at`, `last_error`, `error_reported`, `load_error`, `engines`, `models`, `warnings`, `status`, `token_present`, `token_source` (`env`, `keyring`, `mismatch` = a token exists but belongs to another host and is not used, `none`), `syncing` (the same rows as `alkahest catalog ls --json`) |
+| `POST catalogs` | `{"name", "url", "ref"?, "subdir"?, "pin"?, "refresh_interval"?, "enabled"?, "sync"?}` | `201 {"catalog": row, "job": job or null}`. The catalog goes last in the layer order. `sync: true` starts its sync job. A `token` field is refused: use `PUT catalogs/{name}/token`. `409` when a token stored for an earlier catalog of this name belongs to another host, unless `"replace_token": true` (which deletes it). `file://` URLs only from loopback callers |
 | `PATCH catalogs/{name}` | any of `{"enabled", "ref", "subdir", "pin", "refresh_interval"}`; `"pin": null` unpins | `{"catalog": row}`. The URL and the name cannot change (remove and add instead) |
 | `DELETE catalogs/{name}?delete_token=true` | | `{"catalog", "result": "removed" or "disabled", "snapshot_deleted", "token_deleted"}`. `official` is disabled, never removed, and keeps its snapshot. `delete_token=true` also clears the keyring entry |
 | `POST catalogs/sync` | | `202 {"job", "created"}`: a `catalog_sync` job over every enabled catalog |
 | `POST catalogs/{name}/sync` | | `202 {"job", "created"}`; `409` for a disabled catalog |
-| `PUT catalogs/{name}/token` | `{"token": "..."}` | `{"catalog", "token_present", "token_source", "shadowed_by_env"}`. Stored in the server's OS keyring (service `alkahest`, user `catalog:<name>`). The token is never returned, logged or echoed in an error |
+| `PUT catalogs/{name}/token` | `{"token": "..."}` | `{"catalog", "token_present", "token_source", "shadowed_by_env"}`. Stored in the server's OS keyring (service `alkahest`, user `catalog:<name>`). The token is never returned, logged or echoed in an error. It is bound to the `host:port` of the catalog's URL and never sent to another host: re-adding the name with another URL, or editing the URL in the file, does not re-target it (`token_source: "mismatch"`). `ALKAHEST_CATALOG_TOKEN_<NAME>` serves only the source of that name the server started with |
 | `DELETE catalogs/{name}/token` | | `{"catalog", "token_present", "token_source"}` |
 | `GET catalog/models/{ns}/{model}?catalog=` | | `{"name", "reference", "description", "license", "homepage", "tags", "default_tag", "catalog", "commit", "variants": [...]}`; a variant has `tag`, `reference`, `default`, `format`, `quant`, `engine`, `engine_resolved`, `engine_build` (`engine`, `installed`, `version`, `variant`, `path`, `native`, `native_stale`), `template`, `template_text`, `template_format`, `params`, `size`, `files` (`kind`, `filename`, `size`, `sha256`, `sha256_short`, `urls`, `auth`), `catalog`, `commit`, `pulled` |
 
@@ -158,7 +167,7 @@ The background refresh of `serve` (off with `ALKAHEST_CATALOG_AUTO_SYNC=0`) publ
 succeeds.
 
 `PUT settings/server` accepts `{"catalog_limits": {"max_snapshot_bytes", "max_file_bytes",
-"max_archive_bytes"}}` (bytes; `null` resets a field); `GET settings/server` returns
+"max_archive_bytes"}}` (bytes; `null` resets a field; at most 1 GiB, 256 MiB and 4 GiB); `GET settings/server` returns
 `catalog_limits` and `catalog_limits_default`. The limits apply to the next sync at once.
 
 `POST engines/install` takes `with: ["<dependency id>"]` (optional dependencies of the variant

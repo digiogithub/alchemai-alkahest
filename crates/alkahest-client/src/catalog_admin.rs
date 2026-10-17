@@ -72,7 +72,8 @@ pub struct CatalogInfo {
     pub status: String,
     /// A token is available (keyring or environment); the token itself is never sent.
     pub token_present: bool,
-    /// `env`, `keyring` or `none`.
+    /// `env`, `keyring`, `mismatch` (a token exists for another host and is not used) or
+    /// `none`.
     pub token_source: String,
     /// A sync runs now.
     pub syncing: bool,
@@ -124,6 +125,10 @@ pub struct NewCatalog {
     /// Start a sync job right away ("Add & sync").
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub sync: bool,
+    /// Delete a token left from an earlier catalog of this name that belongs to another host
+    /// (without it the server answers 409).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub replace_token: bool,
 }
 
 /// `PATCH /alkahest/v1/catalogs/{name}`: absent fields stay as they are.

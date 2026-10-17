@@ -51,7 +51,7 @@ pub use layers::{
 };
 pub use manage::{
     CatalogInfo, CatalogSet, CatalogTokenStore, KeyringTokenStore, MemoryTokenStore,
-    StoreCredentials, TokenSource,
+    StoreCredentials, StoredToken, TokenPolicy, TokenSource,
 };
 pub use model::{ModelEntry, ModelFile, ModelFileKind, ModelFormat, ModelVariant, TemplateFormat};
 pub use pull::{CatalogPullError, CatalogPullOutcome, pull_catalog, resolve_model};

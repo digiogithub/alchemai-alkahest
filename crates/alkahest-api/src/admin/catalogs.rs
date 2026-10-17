@@ -31,8 +31,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use alkahest_catalog::manage::{
-    AUTO_SYNC_ENV, CatalogInfo, StoreCredentials, add_catalog, auto_sync_enabled, describe,
-    edit_catalog, remove_catalog, token_source,
+    AUTO_SYNC_ENV, CatalogInfo, StoreCredentials, StoredToken, TokenPolicy, add_catalog,
+    auto_sync_enabled, describe, edit_catalog, remove_catalog, sources_from_file, token_host,
 };
 use alkahest_catalog::{
     CatalogError, Limits, SourcePatch, SyncContext, SyncStep, Token, TokenSource, load_states,
@@ -105,16 +105,36 @@ fn source_of(ctx: &AdminContext, name: &str) -> Result<CatalogSource, HttpError>
         })
 }
 
-/// Where the token of `name` comes from (environment first, then the store).
-fn token_of(ctx: &AdminContext, name: &str) -> TokenSource {
-    token_source(name, ctx.catalog_tokens.as_ref(), &ctx.env)
+/// The token policy of the server: tokens bound to their host; environment and unbound
+/// tokens only for the sources of the configuration file the server started with.
+fn token_policy(ctx: &AdminContext) -> TokenPolicy {
+    TokenPolicy::new(
+        ctx.catalog_tokens.clone(),
+        ctx.env.clone(),
+        &ctx.catalog_trusted,
+    )
+}
+
+/// Where the token of `source` comes from.
+fn token_of(ctx: &AdminContext, source: &CatalogSource) -> TokenSource {
+    token_policy(ctx).resolve(source).0
+}
+
+/// Re-reads `[[catalogs]]` from the configuration file (a CLI edit made while the server runs
+/// is kept) and makes it the live set. Callers hold `catalog_edit`.
+fn fresh_sources(ctx: &AdminContext) -> Result<Vec<CatalogSource>, HttpError> {
+    let sources =
+        sources_from_file(&ctx.config_file, &ctx.catalogs.sources()).map_err(catalog_error)?;
+    ctx.catalogs.set_sources(sources.clone());
+    Ok(sources)
 }
 
 /// The listing of every configured catalog (blocking: reads snapshots).
 fn infos(ctx: &AdminContext) -> Vec<CatalogInfo> {
     let data_dir = &ctx.paths.data_dir;
     let states = load_states(data_dir, &ctx.catalogs.sources());
-    describe(data_dir, &states, |n| token_of(ctx, n))
+    let policy = token_policy(ctx);
+    describe(data_dir, &states, |s| policy.resolve(s).0)
 }
 
 /// The listing row of `name` (blocking).
@@ -164,15 +184,30 @@ struct AddBody {
     enabled: Option<bool>,
     /// Start a sync job of the new catalog at once ("Add & sync").
     sync: bool,
+    /// Delete a token left from an earlier catalog of this name that belongs to another host
+    /// (without it, such a token makes the add fail with 409).
+    replace_token: bool,
 }
 
 /// Names the admin API cannot address as `/catalogs/{name}` because a fixed route uses them.
 const RESERVED_NAMES: &[&str] = &["sync"];
 
 /// `POST /alkahest/v1/catalogs`.
-pub(super) async fn add(State(state): State<AppState>, body: Bytes) -> Response {
+pub(super) async fn add(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::auth::RequestContext>>,
+    body: Bytes,
+) -> Response {
     let r = async {
         let b: AddBody = parse_body(&body)?;
+        // A `file://` catalog reads a directory of the server machine: only for loopback
+        // callers (fails closed without an authentication context).
+        if b.url.trim().starts_with("file://") && !caller.as_ref().is_some_and(|c| c.0.local) {
+            return Err(HttpError::new(
+                ErrorKind::Forbidden,
+                "file:// catalogs can only be added from the server machine (loopback)",
+            ));
+        }
         let name = b.name.trim().to_string();
         if name.is_empty() || b.url.trim().is_empty() {
             return Err(HttpError::bad_request("name and url are required"));
@@ -200,12 +235,46 @@ pub(super) async fn add(State(state): State<AppState>, body: Bytes) -> Response 
             source.enabled = e;
         }
         let ctx = admin(&state)?;
+        let sync_after = b.sync;
         let doc = {
             let ctx = ctx.clone();
             blocking(move || {
                 let _edit = ctx.catalog_edit.lock();
-                let next = add_catalog(&ctx.config_file, &source, &ctx.catalogs.sources())
+                let effective = fresh_sources(&ctx)?;
+                // A token kept from an earlier catalog of this name must never reach a new
+                // host: refuse unless the caller asks to replace it.
+                let stored = ctx
+                    .catalog_tokens
+                    .get(&source.name)
                     .map_err(catalog_error)?;
+                let host = token_host(&source.url);
+                let foreign = match &stored {
+                    Some(StoredToken { host: Some(h), .. }) => *h != host,
+                    Some(StoredToken { host: None, .. }) => !ctx
+                        .catalog_trusted
+                        .iter()
+                        .any(|t| t.name == source.name && token_host(&t.url) == host),
+                    None => false,
+                };
+                if foreign && !effective.iter().any(|s| s.name == source.name) {
+                    if !b.replace_token {
+                        return Err(HttpError::new(
+                            ErrorKind::Conflict,
+                            format!(
+                                "a token stored for catalog `{}` belongs to another host; \
+                                 pass replace_token: true to delete it, or choose another name",
+                                source.name
+                            ),
+                        ));
+                    }
+                    ctx.catalog_tokens
+                        .delete(&source.name)
+                        .map_err(catalog_error)?;
+                    tracing::info!(catalog = %source.name,
+                        "foreign catalog token deleted on add (replace_token)");
+                }
+                let next =
+                    add_catalog(&ctx.config_file, &source, &effective).map_err(catalog_error)?;
                 ctx.catalogs.set_sources(next);
                 tracing::info!(catalog = %source.name, file = %ctx.config_file.display(),
                     "catalog added through the admin API");
@@ -213,7 +282,7 @@ pub(super) async fn add(State(state): State<AppState>, body: Bytes) -> Response 
             })
             .await?
         };
-        let job = if b.sync && doc.enabled {
+        let job = if sync_after && doc.enabled {
             Some(start_sync(&ctx, Some(name))?.0)
         } else {
             None
@@ -239,8 +308,9 @@ pub(super) async fn patch(
         let ctx = admin(&state)?;
         let doc = blocking(move || {
             let _edit = ctx.catalog_edit.lock();
-            let (_, next) = edit_catalog(&ctx.config_file, &name, &p, &ctx.catalogs.sources())
-                .map_err(catalog_error)?;
+            let effective = fresh_sources(&ctx)?;
+            let (_, next) =
+                edit_catalog(&ctx.config_file, &name, &p, &effective).map_err(catalog_error)?;
             ctx.catalogs.set_sources(next);
             tracing::info!(catalog = %name, change = ?p, "catalog changed through the admin API");
             info(&ctx, &name)
@@ -269,12 +339,13 @@ pub(super) async fn remove(
         let ctx = admin(&state)?;
         let doc = blocking(move || {
             let _edit = ctx.catalog_edit.lock();
+            let effective = fresh_sources(&ctx)?;
             let tokens = q.delete_token.then(|| ctx.catalog_tokens.as_ref());
             let out = remove_catalog(
                 &ctx.config_file,
                 &ctx.paths.data_dir,
                 &name,
-                &ctx.catalogs.sources(),
+                &effective,
                 tokens,
             )
             .map_err(catalog_error)?;
@@ -339,12 +410,16 @@ fn job_response(job: Job, created: bool) -> Response {
 /// The sync context of the server: configured limits, the context's token store (environment
 /// first) and job progress.
 fn sync_context(ctx: &AdminContext) -> Result<SyncContext, CatalogError> {
+    let set = ctx.catalogs.clone();
     Ok(SyncContext::new(&ctx.paths.data_dir)?
         .with_limits(Limits::from_config(&ctx.catalogs.limits()))
-        .with_credentials(Arc::new(StoreCredentials::new(
-            ctx.catalog_tokens.clone(),
-            ctx.env.clone(),
-        ))))
+        .with_credentials(Arc::new(StoreCredentials::new(token_policy(ctx))))
+        // Removed (or re-pointed) while waiting for the lock: nothing is written.
+        .with_source_check(Arc::new(move |src: &CatalogSource| {
+            set.sources()
+                .iter()
+                .any(|s| s.name == src.name && s.url == src.url && s.subdir == src.subdir)
+        })))
 }
 
 /// Starts a sync job of `name` (every enabled catalog when `None`).
@@ -439,13 +514,26 @@ struct SetToken {
 }
 
 /// Token presence document.
-fn token_doc(ctx: &AdminContext, name: &str) -> Value {
-    let source = token_of(ctx, name);
+fn token_doc(ctx: &AdminContext, source: &CatalogSource) -> Value {
+    let from = token_of(ctx, source);
     json!({
-        "catalog": name,
-        "token_present": source != TokenSource::None,
-        "token_source": source,
+        "catalog": source.name,
+        "token_present": matches!(from, TokenSource::Env | TokenSource::Keyring),
+        "token_source": from,
     })
+}
+
+/// The configured source `name` (blocking callers holding `catalog_edit`), or 404.
+fn configured(ctx: &AdminContext, name: &str) -> Result<CatalogSource, HttpError> {
+    fresh_sources(ctx)?
+        .into_iter()
+        .find(|s| s.name == name)
+        .ok_or_else(|| {
+            HttpError::new(
+                ErrorKind::NotFound,
+                format!("no catalog named `{name}` is configured"),
+            )
+        })
 }
 
 /// `PUT /alkahest/v1/catalogs/{name}/token` `{"token": "..."}`: stores the token in the
@@ -469,13 +557,16 @@ pub(super) async fn token_set(
             .ok_or_else(|| HttpError::bad_request("token must not be empty"))?;
         drop(req);
         let ctx = admin(&state)?;
-        source_of(&ctx, &name)?;
         let doc = blocking(move || {
+            // Under the edit lock, so a concurrent removal cannot leave a token behind for a
+            // catalog that no longer exists (or re-point it).
+            let _edit = ctx.catalog_edit.lock();
+            let source = configured(&ctx, &name)?;
             ctx.catalog_tokens
-                .set(&name, &token)
+                .set(&name, &token, &token_host(&source.url))
                 .map_err(catalog_error)?;
             tracing::info!(catalog = %name, "catalog token stored through the admin API");
-            let mut doc = token_doc(&ctx, &name);
+            let mut doc = token_doc(&ctx, &source);
             doc["shadowed_by_env"] = json!(doc["token_source"] == "env");
             Ok(doc)
         })
@@ -493,11 +584,12 @@ pub(super) async fn token_delete(
 ) -> Response {
     let r = async {
         let ctx = admin(&state)?;
-        source_of(&ctx, &name)?;
         let doc = blocking(move || {
+            let _edit = ctx.catalog_edit.lock();
+            let source = configured(&ctx, &name)?;
             ctx.catalog_tokens.delete(&name).map_err(catalog_error)?;
             tracing::info!(catalog = %name, "catalog token removed through the admin API");
-            Ok(token_doc(&ctx, &name))
+            Ok(token_doc(&ctx, &source))
         })
         .await?;
         Ok(Json(doc).into_response())
@@ -689,7 +781,8 @@ pub async fn refresh_pass(ctx: &Arc<AdminContext>, force: bool) -> Vec<CatalogEv
             Ok(r) => {
                 tracing::info!(catalog = %r.catalog, outcome = ?r.outcome, "catalog refreshed");
             }
-            Err(CatalogError::Busy(_)) => {}
+            // Busy elsewhere, or removed / re-pointed meanwhile: nothing to report.
+            Err(CatalogError::Busy(_) | CatalogError::Unknown(_)) => {}
             Err(e) => {
                 tracing::warn!(catalog = %state.source.name, error = %e,
                     "catalog refresh failed; keeping the last good snapshot");
@@ -792,14 +885,7 @@ pub(crate) fn patched_limits(
             keys.push((key, Some(n)));
         }
     }
-    if next.max_file_bytes < 1024
-        || next.max_snapshot_bytes < next.max_file_bytes
-        || next.max_archive_bytes < 1024
-    {
-        return Err(HttpError::bad_request(
-            "catalog_limits: max_file_bytes and max_archive_bytes must be at least 1024, and \
-             max_snapshot_bytes at least max_file_bytes",
-        ));
-    }
+    next.validate()
+        .map_err(|e| HttpError::bad_request(e.to_string()))?;
     Ok((next, keys))
 }

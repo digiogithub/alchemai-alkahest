@@ -758,3 +758,19 @@ async fn sync_reports_its_steps() {
         "downloading changed files 2 / 4"
     );
 }
+
+/// Security review of ALK-US-0124, finding 4: a sync whose source was removed while it waited
+/// for the lock writes nothing (no orphan snapshot directory).
+#[tokio::test]
+async fn removed_source_is_not_synced_after_the_lock() {
+    let server = MockServer::start().await;
+    let data = tempfile::tempdir().unwrap();
+    let files = catalog_files(ENGINE_URL);
+    mount_refs(&server, C1).await;
+    mount_raw(&server, C1, &files).await;
+    let ctx = context(data.path()).with_source_check(Arc::new(|_| false));
+    let err = sync(&source(&server), &ctx).await.unwrap_err();
+    assert!(matches!(err, CatalogError::Unknown(_)), "{err}");
+    assert!(!snapshot_dir(data.path(), "acme").exists());
+    assert!(requested(&server).await.is_empty());
+}

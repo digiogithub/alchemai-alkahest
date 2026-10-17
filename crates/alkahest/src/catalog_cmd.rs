@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use alkahest_catalog::manage::{
     CatalogTokenStore, KeyringTokenStore, add_catalog, describe, edit_catalog, remove_catalog,
-    status_text, token_source,
+    status_text, token_host, token_source,
 };
 use alkahest_catalog::manifest::{Index, SCHEMA_VERSION};
 use alkahest_catalog::snapshot::read_files;
@@ -174,9 +174,8 @@ fn age_text(d: Duration) -> String {
 fn ls(data_dir: &Path, sources: &[CatalogSource], json: bool) -> Result<ExitCode> {
     let states = load_states(data_dir, sources);
     if json {
-        let store = KeyringTokenStore;
-        let env: alkahest_catalog::manage::EnvLookup = Arc::new(|k| std::env::var(k).ok());
-        let rows = describe(data_dir, &states, |n| token_source(n, &store, &env));
+        let policy = cli_policy(sources);
+        let rows = describe(data_dir, &states, |s| token_source(&policy, s));
         println!("{}", serde_json::to_string_pretty(&rows)?);
         return Ok(ExitCode::SUCCESS);
     }
@@ -363,9 +362,9 @@ fn token(action: &CatalogTokenAction, sources: &[CatalogSource], json: bool) -> 
     let name = match action {
         CatalogTokenAction::Set { name } | CatalogTokenAction::Clear { name } => name,
     };
-    if !sources.iter().any(|s| &s.name == name) {
+    let Some(source) = sources.iter().find(|s| &s.name == name) else {
         bail!("no catalog named `{name}`; `alkahest catalog ls` lists them");
-    }
+    };
     let store = KeyringTokenStore;
     match action {
         CatalogTokenAction::Set { .. } => {
@@ -375,8 +374,10 @@ fn token(action: &CatalogTokenAction, sources: &[CatalogSource], json: bool) -> 
             }
             let token = Token::new(&text).context("the token is empty")?;
             drop(text);
+            // Bound to the source's host: never sent anywhere else, even if the catalog is
+            // later re-added under this name with another URL.
             store
-                .set(name, &token)
+                .set(name, &token, &token_host(&source.url))
                 .context("storing the token in the OS keyring")?;
             let shadowed = std::env::var(alkahest_catalog::token_env_var(name)).is_ok();
             let mut line = format!(
@@ -399,16 +400,23 @@ fn token(action: &CatalogTokenAction, sources: &[CatalogSource], json: bool) -> 
             store
                 .delete(name)
                 .context("removing the token from the OS keyring")?;
-            let env: alkahest_catalog::manage::EnvLookup = Arc::new(|k| std::env::var(k).ok());
-            let left = token_source(name, &store, &env);
+            let left = token_source(&cli_policy(sources), source);
             report(
                 json,
-                json!({"catalog": name, "token_present": left != TokenSource::None,
+                json!({"catalog": name,
+                       "token_present": matches!(left, TokenSource::Env | TokenSource::Keyring),
                        "token_source": left}),
                 &format!("removed the token of catalog {name} from the OS keyring"),
             )
         }
     }
+}
+
+/// The token policy of the CLI: its sources come from the configuration file, so they are
+/// trusted for environment and unbound tokens; bound tokens must match their host.
+fn cli_policy(sources: &[CatalogSource]) -> alkahest_catalog::TokenPolicy {
+    let env: alkahest_catalog::manage::EnvLookup = Arc::new(|k| std::env::var(k).ok());
+    alkahest_catalog::TokenPolicy::new(Arc::new(KeyringTokenStore), env, sources)
 }
 
 /// A hidden prompt on a terminal, one stdin line otherwise. Never an argument: command lines

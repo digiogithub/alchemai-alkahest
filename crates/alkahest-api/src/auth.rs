@@ -13,6 +13,14 @@
 //!    verified; other bearer values from clients that need no key are ignored, because local
 //!    OpenAI SDK users routinely send placeholders such as `Bearer ollama`.
 //! 4. Admin routes need the `admin` scope whenever a key is required (R4).
+//! 5. Browser guard on admin routes (security review of ALK-US-0124): a caller without a key
+//!    (trusted loopback, or a remote client when keys are off) is refused when the request
+//!    carries browser cross-site markers — an `Origin` that is neither the server's own nor
+//!    a configured CORS origin, or `Sec-Fetch-Site: cross-site`/`same-site` — or, for
+//!    loopback callers, a `Host` that is not a loopback name or address or the configured
+//!    host (DNS rebinding). Admin API requests (`/alkahest/...`) with a body must be
+//!    `Content-Type: application/json`, which a cross-origin form or `text/plain` fetch
+//!    cannot send without a CORS preflight.
 //!
 //! The outcome is attached to the request as a [`RequestContext`] for handlers (model
 //! allowlist checks, usage accounting).
@@ -78,6 +86,12 @@ pub struct AuthPolicy {
     pub trusted_proxies: Vec<IpAddr>,
     /// Enabled API families.
     pub endpoints: EndpointsConfig,
+    /// Browser origins (`scheme://host[:port]`) allowed to call admin routes without a key:
+    /// the explicit CORS origins (`*` does not count).
+    pub allowed_origins: Vec<String>,
+    /// Extra `Host` names a keyless loopback caller may use besides loopback names and
+    /// addresses (the configured bind host).
+    pub allowed_hosts: Vec<String>,
 }
 
 impl Default for AuthPolicy {
@@ -99,7 +113,95 @@ impl AuthPolicy {
                 .map(|ip| ip.to_canonical())
                 .collect(),
             endpoints: config.server.endpoints,
+            allowed_origins: explicit_origins(&config.server.cors_origins),
+            allowed_hosts: vec![config.server.host.trim().to_ascii_lowercase()],
         }
+    }
+
+    /// Checks the browser guard (module documentation, point 5). `keyless` is true when the
+    /// caller presented no verified key. Returns the refusal message, if any.
+    pub fn browser_guard(
+        &self,
+        method: &Method,
+        path: &str,
+        headers: &HeaderMap,
+        local: bool,
+        keyless: bool,
+    ) -> Option<(ErrorKind, &'static str)> {
+        let admin_api = Family::of_path(path) == Family::Admin;
+        if admin_api && has_body(method, headers) && !is_json(headers) {
+            return Some((
+                ErrorKind::BadRequest,
+                "admin requests with a body must use Content-Type: application/json",
+            ));
+        }
+        if !keyless || !requires_admin(method, path) {
+            return None;
+        }
+        let host = header_str(headers, header::HOST);
+        if let Some(fetch_site) = header_str(headers, "sec-fetch-site")
+            && matches!(
+                fetch_site.to_ascii_lowercase().as_str(),
+                "cross-site" | "same-site"
+            )
+        {
+            return Some((
+                ErrorKind::Forbidden,
+                "cross-site browser requests to admin routes are refused",
+            ));
+        }
+        if let Some(origin) = header_str(headers, header::ORIGIN) {
+            let origin = origin.trim().trim_end_matches('/').to_ascii_lowercase();
+            let same = host.is_some_and(|h| {
+                origin
+                    .split_once("://")
+                    .is_some_and(|(_, rest)| rest == h.trim().to_ascii_lowercase())
+            });
+            let allowed = self
+                .allowed_origins
+                .iter()
+                .any(|o| o.trim_end_matches('/').eq_ignore_ascii_case(&origin));
+            if !same && !allowed {
+                return Some((
+                    ErrorKind::Forbidden,
+                    "cross-origin browser requests to admin routes are refused",
+                ));
+            }
+        }
+        if local
+            && let Some(h) = host
+            && !self.is_local_host(h)
+        {
+            return Some((
+                ErrorKind::Forbidden,
+                "the Host header is not a loopback name; admin routes refuse it (DNS rebinding)",
+            ));
+        }
+        None
+    }
+
+    /// Whether `host` (a `Host` header value) names this machine's loopback interface or the
+    /// configured bind host.
+    fn is_local_host(&self, host: &str) -> bool {
+        let host = host.trim().to_ascii_lowercase();
+        // Strip the port: `[::1]:11435`, `127.0.0.1:11435`, `localhost:11435`.
+        let name = if let Some(rest) = host.strip_prefix('[') {
+            rest.split_once(']').map_or(rest, |(h, _)| h).to_string()
+        } else {
+            match host.rsplit_once(':') {
+                Some((h, port)) if port.bytes().all(|b| b.is_ascii_digit()) => h.to_string(),
+                _ => host.clone(),
+            }
+        };
+        if name == "localhost" || name.ends_with(".localhost") {
+            return true;
+        }
+        if let Ok(ip) = name.parse::<IpAddr>() {
+            return ip.to_canonical().is_loopback();
+        }
+        self.allowed_hosts
+            .iter()
+            .any(|h| !h.is_empty() && *h == name)
     }
 
     /// Effective client address and whether it counts as loopback.
@@ -125,6 +227,43 @@ impl AuthPolicy {
 }
 
 /// Addresses listed in `X-Forwarded-For` headers, in order; unparsable entries are dropped.
+/// The explicit origins of `server.cors_origins` (without `*`).
+fn explicit_origins(origins: &[String]) -> Vec<String> {
+    origins
+        .iter()
+        .map(|o| o.trim().to_ascii_lowercase())
+        .filter(|o| !o.is_empty() && o != "*")
+        .collect()
+}
+
+fn header_str<K: header::AsHeaderName>(headers: &HeaderMap, key: K) -> Option<&str> {
+    headers.get(key).and_then(|v| v.to_str().ok())
+}
+
+/// Whether the request carries a body (a non-zero `Content-Length` or chunked encoding).
+fn has_body(method: &Method, headers: &HeaderMap) -> bool {
+    if matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) {
+        return false;
+    }
+    let length = header_str(headers, header::CONTENT_LENGTH)
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    length > 0 || headers.contains_key(header::TRANSFER_ENCODING)
+}
+
+/// Whether the body is declared as JSON (`application/json` or `application/*+json`).
+fn is_json(headers: &HeaderMap) -> bool {
+    header_str(headers, header::CONTENT_TYPE).is_some_and(|v| {
+        let mime = v
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        mime == "application/json" || (mime.starts_with("application/") && mime.ends_with("+json"))
+    })
+}
+
 fn forwarded_for(headers: &HeaderMap) -> Vec<IpAddr> {
     headers
         .get_all("x-forwarded-for")
@@ -292,6 +431,28 @@ pub async fn authenticate(State(auth): State<AuthState>, mut req: Request, next:
             }
         }
     };
+    if family != Family::Base
+        && let Some((kind, message)) = auth.policy.browser_guard(
+            req.method(),
+            &path,
+            req.headers(),
+            local,
+            caller.principal().is_none(),
+        )
+    {
+        tracing::warn!(%client, %family, path = %path, reason = message, "request refused");
+        let resp = auth.errors.render(family, kind, message);
+        auth.audit(AuditFacts {
+            request_id: request_id(req.headers()),
+            key_id: caller.principal().map(|p| p.key_id.clone()),
+            client,
+            method: req.method(),
+            path: &path,
+            status: resp.status().as_u16(),
+            outcome: "browser guard".into(),
+        });
+        return resp;
+    }
     let key_id = caller.principal().map(|p| p.key_id.clone());
     let method = req.method().clone();
     let rid = request_id(req.headers());
