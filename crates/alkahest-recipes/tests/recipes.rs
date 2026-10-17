@@ -124,6 +124,37 @@ fn recipe_validation_names_the_broken_rule() {
 }
 
 #[test]
+fn llama_cpp_recipe_covers_the_published_gpu_builds_with_pinned_digests() {
+    let catalog = Catalog::builtin();
+    let variants = catalog.variants("llama-cpp", "b11669");
+    let names: Vec<&str> = variants.iter().map(|r| r.variant.as_str()).collect();
+    for want in [
+        "cpu", "cuda12.4", "cuda12.8", "cuda13.4", "vulkan", "rocm", "metal",
+    ] {
+        assert!(names.contains(&want), "{want} missing from {names:?}");
+    }
+    for r in &variants {
+        assert!(r.source.is_some(), "{} has no source steps", r.variant);
+        for a in &r.assets {
+            assert!(
+                a.sha256.is_some() && !a.tofu,
+                "{} {}/{}",
+                r.variant,
+                a.os,
+                a.arch
+            );
+            assert!(a.size.is_some());
+        }
+    }
+    let host = Host::new("linux", "x86_64");
+    let linux_cuda = catalog
+        .resolve("llama-cpp", None, Some("cuda12"), None, &host)
+        .unwrap();
+    assert_eq!(linux_cuda.variant, "cuda12.8");
+    assert!(linux_cuda.asset_for(&host).is_some());
+}
+
+#[test]
 fn builtin_recipes_all_parse_and_have_a_cpu_variant() {
     let all = builtin_recipes();
     assert!(!all.is_empty());
