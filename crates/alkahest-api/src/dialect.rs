@@ -88,22 +88,35 @@ pub fn requires_admin(method: &Method, path: &str) -> bool {
     }
     matches!(
         path,
-        "/api/pull" | "/api/push" | "/api/create" | "/api/copy" | "/api/delete"
+        "/api/pull" | "/api/push" | "/api/create" | "/api/copy" | "/api/delete" | "/metrics"
     ) || (under(path, "/api/blobs") && method != Method::GET)
         || (Family::of_path(path) == Family::OpenAi
             && method == Method::DELETE
             && under(path, "/v1/models"))
 }
 
-/// Error classes produced by middleware.
+/// Error classes produced by middleware and handlers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
     /// Missing or invalid credentials (401).
     Unauthorized,
-    /// Valid credentials without the needed scope (403).
+    /// Valid credentials without the needed scope, or a model outside the key's allowlist
+    /// (403).
     Forbidden,
     /// Disabled family or unknown route (404).
     NotFound,
+    /// The request names a model that does not exist (404; OpenAI code `model_not_found`).
+    ModelNotFound,
+    /// Malformed or unsupported request (400).
+    BadRequest,
+    /// Unexpected server failure (500).
+    Internal,
+    /// The route exists but the operation is not implemented (501).
+    NotImplemented,
+    /// The engine failed or crashed (502).
+    BadGateway,
+    /// Busy, out of memory, shutting down or the model went away (503).
+    Unavailable,
 }
 
 impl ErrorKind {
@@ -112,7 +125,27 @@ impl ErrorKind {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Forbidden => StatusCode::FORBIDDEN,
-            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::NotFound | Self::ModelNotFound => StatusCode::NOT_FOUND,
+            Self::BadRequest => StatusCode::BAD_REQUEST,
+            Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
+            Self::BadGateway => StatusCode::BAD_GATEWAY,
+            Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+        }
+    }
+
+    /// The kind for an HTTP status code. Statuses without a kind of their own fall back to
+    /// the nearest class (other 4xx -> 400, other 5xx -> 500).
+    pub fn from_status(status: u16) -> Self {
+        match status {
+            401 => Self::Unauthorized,
+            403 => Self::Forbidden,
+            404 => Self::NotFound,
+            501 => Self::NotImplemented,
+            502 | 504 => Self::BadGateway,
+            503 => Self::Unavailable,
+            400..=499 => Self::BadRequest,
+            _ => Self::Internal,
         }
     }
 }
@@ -134,17 +167,27 @@ impl ErrorRenderer for DefaultErrorRenderer {
         let body = match family {
             Family::OpenAi | Family::Decisions => {
                 let (kind_name, code) = match kind {
-                    ErrorKind::Unauthorized => ("invalid_request_error", "invalid_api_key"),
-                    ErrorKind::Forbidden => ("invalid_request_error", "insufficient_scope"),
-                    ErrorKind::NotFound => ("invalid_request_error", "not_found"),
+                    ErrorKind::Unauthorized => ("invalid_request_error", Some("invalid_api_key")),
+                    ErrorKind::Forbidden => ("invalid_request_error", Some("insufficient_scope")),
+                    ErrorKind::NotFound => ("invalid_request_error", Some("not_found")),
+                    ErrorKind::ModelNotFound => ("invalid_request_error", Some("model_not_found")),
+                    ErrorKind::BadRequest => ("invalid_request_error", None),
+                    ErrorKind::NotImplemented => ("invalid_request_error", Some("not_implemented")),
+                    ErrorKind::Internal | ErrorKind::BadGateway => ("server_error", None),
+                    ErrorKind::Unavailable => ("server_error", Some("server_busy")),
                 };
-                json!({ "error": { "message": message, "type": kind_name, "code": code } })
+                json!({
+                    "error": { "message": message, "type": kind_name, "param": null, "code": code }
+                })
             }
             Family::Anthropic => {
                 let kind_name = match kind {
                     ErrorKind::Unauthorized => "authentication_error",
                     ErrorKind::Forbidden => "permission_error",
-                    ErrorKind::NotFound => "not_found_error",
+                    ErrorKind::NotFound | ErrorKind::ModelNotFound => "not_found_error",
+                    ErrorKind::BadRequest | ErrorKind::NotImplemented => "invalid_request_error",
+                    ErrorKind::Internal | ErrorKind::BadGateway => "api_error",
+                    ErrorKind::Unavailable => "overloaded_error",
                 };
                 json!({ "type": "error", "error": { "type": kind_name, "message": message } })
             }

@@ -42,11 +42,7 @@ fn list_is_an_alias_of_ls() {
 #[test]
 fn unbuilt_commands_name_their_story_and_exit_2() {
     let tmp = tempfile::tempdir().unwrap();
-    let cases: &[(&[&str], &str)] = &[
-        (&["ps"], "ALK-US-0031"),
-        (&["stop", "m"], "ALK-US-0031"),
-        (&["run", "m"], "ALK-US-0039"),
-    ];
+    let cases: &[(&[&str], &str)] = &[(&["run", "m"], "ALK-US-0039")];
     for (args, story) in cases {
         alkahest(tmp.path())
             .args(*args)

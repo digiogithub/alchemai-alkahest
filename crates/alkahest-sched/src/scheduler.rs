@@ -993,6 +993,7 @@ impl Scheduler {
                                             inner: Arc::clone(inner),
                                             runner,
                                             engine,
+                                            request_settings: resolved.request.settings.clone(),
                                             _slot: permit,
                                         });
                                     }
@@ -1304,6 +1305,9 @@ pub struct Lease {
     inner: Arc<Inner>,
     runner: Arc<Runner>,
     engine: Arc<dyn EngineInstance>,
+    /// Effective settings resolved for this request (its own request layer on top), which
+    /// can differ from the loaded instance's in sampling fields.
+    request_settings: ModelSettings,
     /// The request slot; released after the bookkeeping in `drop`.
     _slot: OwnedSemaphorePermit,
 }
@@ -1354,9 +1358,16 @@ impl Lease {
         &self.runner.model.capabilities
     }
 
-    /// Effective settings of the model (request > model > recommended > global); sampling
-    /// defaults for the API come from here.
+    /// Effective settings of this request (request > model > recommended > global); the
+    /// sampling fields the API sends to the engine come from here. Load settings equal the
+    /// loaded instance's (a difference would have reloaded the model); sampling fields are the
+    /// request's own, since sampling changes never reload.
     pub fn settings(&self) -> &ModelSettings {
+        &self.request_settings
+    }
+
+    /// Effective settings the loaded instance was started with (the first request's layer).
+    pub fn instance_settings(&self) -> &ModelSettings {
         &self.runner.model.request.settings
     }
 

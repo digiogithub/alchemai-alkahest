@@ -4,19 +4,26 @@
 //! accepting connections, drain in-flight requests for `server.shutdown_timeout_secs`, run
 //! the shutdown hooks and exit with code 0.
 //!
-//! The scheduler, catalog and engines plug into [`AppState`] as their stories land; today the
-//! server answers the base routes only, behind the authentication layer.
+//! Startup builds the unified catalog, the engine registry, the platform description (from
+//! hardware detection), the catalog-backed scheduler and the pull service, registers them as
+//! [`AppState`] services and mounts the Ollama, OpenAI and admin routes. Engine teardown is a
+//! shutdown hook, so no engine process outlives the server.
 
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use alkahest_api::UpstreamClient;
 use alkahest_api::audit::{AuditLog, UsageTracker, usage_path};
 use alkahest_api::keys::{FileKeyVerifier, KeyStore, KeyVerifier};
+use alkahest_api::pull::PullService;
 use alkahest_api::{
     ApiRouter, ApiSettings, AppState, Exposure, ServeOptions, ServerInfo, check_exposure,
 };
 use alkahest_core::config::Loaded;
+use alkahest_engine::{EngineRegistry, Platform};
+use alkahest_sched::{CatalogBackend, Scheduler, SchedulerOptions};
+use alkahest_store::{Catalog, ModelSettings};
 use anyhow::{Context, Result};
 use tokio::sync::watch;
 
@@ -53,10 +60,47 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         allow_unauthenticated,
     )?;
 
+    // Models, engines and the scheduler. Hardware detection may probe GPU libraries, so it
+    // runs on the blocking pool.
+    let catalog = {
+        let paths = paths.clone();
+        tokio::task::spawn_blocking(move || Catalog::open(&paths))
+            .await
+            .context("opening the model catalog")?
+            .context("opening the model catalog")?
+    };
+    for warning in catalog.warnings() {
+        tracing::warn!("{warning}");
+        eprintln!("alkahest serve: warning: {warning}");
+    }
+    let catalog = Arc::new(catalog);
+    let platform = tokio::task::spawn_blocking(|| Platform::current(&alkahest_sysinfo::detect()))
+        .await
+        .context("detecting the hardware")?;
+    tracing::info!(?platform, "platform");
+    let registry = Arc::new(EngineRegistry::from_config(config, &paths));
+    let backend = CatalogBackend::new(
+        catalog.clone(),
+        registry,
+        platform,
+        ModelSettings::global_defaults(config),
+    )
+    .with_log_dir(paths.log_dir.join("engines"));
+    let scheduler = Scheduler::new(
+        Arc::new(backend),
+        SchedulerOptions::from_config(&config.scheduler),
+    )
+    .context("starting the scheduler")?;
+    let pulls = Arc::new(PullService::new(config.clone(), paths.clone()));
+
     let usage = Arc::new(UsageTracker::open(usage_path(&paths.key_store)));
     let mut builder = AppState::builder(ServerInfo::default())
         .key_verifier(verifier)
-        .usage_recorder(usage.clone());
+        .usage_recorder(usage.clone())
+        .service(scheduler.clone())
+        .service(catalog)
+        .service(pulls)
+        .service(UpstreamClient::new());
     if config.auth.audit_log {
         let audit = AuditLog::start(
             paths.log_dir.join("audit.jsonl"),
@@ -72,16 +116,21 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         let _ = stopped_rx.wait_for(|stopped| *stopped).await;
     }));
     // Registered first, so it runs last: the counters include requests drained at the end.
-    // (The scheduler registers engine teardown later, which then runs before this.)
     let hooks = state.shutdown_hooks();
     hooks.register("key usage flush", move || async move {
         let _ = stopped_tx.send(true);
         let _ = flusher.await;
     });
+    // Hooks run newest first: engines stop before the final usage flush.
+    hooks.register("scheduler shutdown", move || async move {
+        scheduler.shutdown().await;
+    });
     // Installed before binding so an early stop signal is not lost.
     let stop = alkahest_api::stop_signal().context("installing stop-signal handlers")?;
     let options = ServeOptions::from_config(config);
-    let app = ApiRouter::new(state, settings).into_router();
+    let app = ApiRouter::new(state, settings)
+        .merge(alkahest_api::inference_routes())
+        .into_router();
     let listener = alkahest_api::bind(&bind).await?;
     let addr = listener
         .local_addr()

@@ -384,12 +384,13 @@ impl Command {
         Some(match self {
             Self::Search(_) => "ALK-US-0021",
             Self::Ls | Self::Show(_) => "ALK-US-0012",
-            Self::Ps | Self::Stop { .. } => "ALK-US-0031",
             Self::Rm { .. } | Self::Cp { .. } | Self::Gc { .. } => "ALK-US-0013",
             Self::Run { .. } => "ALK-US-0039",
             Self::Desktop => "ALK-US-0064",
             Self::Service { .. } => "ALK-US-0045",
             Self::Pull { .. }
+            | Self::Ps
+            | Self::Stop { .. }
             | Self::Config { .. }
             | Self::Completions { .. }
             | Self::Sysinfo
