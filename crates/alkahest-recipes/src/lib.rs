@@ -23,13 +23,44 @@
 //! sit next to the executable, which the loader searches first.
 
 mod archive;
+mod build;
+mod catalog;
 mod error;
 mod install;
 mod recipe;
 
 pub use archive::{extract, strip_components};
+pub use build::BuildTools;
+pub use catalog::{Catalog, DiscoveryIssue};
 pub use error::{RecipeError, Result};
 pub use install::{
     InstallOptions, InstalledEngine, MARKER_FILE, bundled_roots, install, list_installed, locate,
+    remove_installed,
 };
-pub use recipe::{ArchiveFormat, Asset, Host, Recipe, RecipeKind, builtin_recipes, find_recipe};
+pub use recipe::{
+    AcceleratorKind, ArchiveFormat, Asset, Host, Recipe, SourceBuild, parse_recipes, select_variant,
+};
+
+/// The built-in recipe for `id` and `variant` (`None` means the CPU variant, the default that
+/// works on every host), newest version first.
+///
+/// # Errors
+///
+/// [`RecipeError::UnknownEngine`] or [`RecipeError::UnknownVariant`].
+pub fn find_recipe(id: &str, variant: Option<&str>) -> Result<Recipe> {
+    let catalog = Catalog::builtin();
+    catalog
+        .resolve(
+            id,
+            None,
+            Some(variant.unwrap_or("cpu")),
+            None,
+            &Host::current(),
+        )
+        .cloned()
+}
+
+/// The recipes compiled into the binary, one per engine, version and variant.
+pub fn builtin_recipes() -> Vec<Recipe> {
+    Catalog::builtin().recipes().to_vec()
+}

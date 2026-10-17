@@ -192,6 +192,24 @@ fn bonsai_types_select_prismml_family() {
     assert_eq!(GgmlType::Q2_0.family(), QuantFamily::Mainline);
 }
 
+/// Ids and block geometry confirmed against PrismML-Eng/llama.cpp `prism-b10777-e3de715`
+/// (`ggml.h` type enum, `ggml-common.h` block structs), ALK-T-0220.
+#[test]
+fn bonsai_type_ids_and_block_geometry_match_the_fork() {
+    assert_eq!(GgmlType::PTQ1_0_ID, 143);
+    assert_eq!(GgmlType::from_id(143), GgmlType::PTQ1_0);
+    assert_eq!(GgmlType::PTQ1_0.id(), 143);
+    assert_eq!(GgmlType::PQ2_0.id(), 142);
+    assert_eq!(GgmlType::Q2_0.block_layout(), Some((64, 18)));
+    assert_eq!(GgmlType::PQ2_0.block_layout(), Some((128, 34)));
+    assert_eq!(GgmlType::PTQ1_0.block_layout(), Some((128, 28)));
+    // One 4096x4096 PQ2_0 matrix: 4096*4096/128 blocks of 34 bytes.
+    assert_eq!(
+        GgmlType::PQ2_0.byte_size(4096 * 4096),
+        Some(4096 * 4096 / 128 * 34)
+    );
+}
+
 #[test]
 fn unknown_type_is_reported_not_fatal() {
     let b = build(3, &[], &[("w", &[32], 9999)]);
