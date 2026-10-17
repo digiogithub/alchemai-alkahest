@@ -2,7 +2,7 @@
 id: ALK-US-0117
 type: story
 title: Catalog repository format and fetch strategy (spec + ADR)
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0015
 milestone: ALK-M-0006
@@ -10,7 +10,10 @@ author: mcp
 labels: [catalog, spec, adr]
 estimate: 3
 created: 2026-10-17T18:30:04Z
-updated: 2026-10-17T18:30:04Z
+updated: 2026-10-17T18:42:05Z
+started: 2026-10-17T18:34:46Z
+links:
+  - { kind: relates_to, target: ALK-SP-0011 }
 ---
 
 ## Description

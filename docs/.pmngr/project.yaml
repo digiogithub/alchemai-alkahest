@@ -40,7 +40,7 @@ id_allocation:
   strategy: scan
   write_counters: true
   counters:
-    spec: 10
+    spec: 11
     milestone: 6
     epic: 15
     story: 122

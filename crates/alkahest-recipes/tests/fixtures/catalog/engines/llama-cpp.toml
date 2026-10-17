@@ -1,0 +1,85 @@
+# Fixture engine recipe (ALK-SP-0011.R4, R5, R6): the recipe format of ALK-SP-0003.R3 plus
+# `[[variants.<v>.dependencies]]` and a `native = true` variant. Digests are syntactically
+# valid but synthetic; tests serve archives whose digests they compute themselves or rewrite.
+id = "llama-cpp"
+version = "b11669"
+description = "llama.cpp (fixture)"
+license = "MIT"
+homepage = "https://github.com/ggml-org/llama.cpp"
+executable = "llama-server"
+
+[variants."cpu"]
+accelerator = "cpu"
+[[variants."cpu".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://example.invalid/llama-b11669-bin-ubuntu-x64.tar.gz"
+sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+size = 17851611
+format = "tar.gz"
+strip_components = 1
+[[variants."cpu".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://example.invalid/llama-b11669-bin-win-cpu-x64.zip"
+sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+size = 16000000
+format = "zip"
+
+[variants."vulkan"]
+accelerator = "vulkan"
+notes = "Needs a Vulkan 1.x GPU; on Windows the loader comes as a dependency."
+[[variants."vulkan".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://example.invalid/llama-b11669-bin-win-vulkan-x64.zip"
+sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+size = 30000000
+format = "zip"
+# Required dependency: installed with the variant on windows/x86_64 (ALK-SP-0011.R5).
+[[variants."vulkan".dependencies]]
+id = "vulkan-loader"
+os = "windows"
+arch = "x86_64"
+url = "https://example.invalid/vulkan-1.dll"
+sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+size = 1500000
+format = "file"
+dest = "."
+
+[variants."cuda12.8"]
+accelerator = "cuda"
+cuda = "12.8"
+[[variants."cuda12.8".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://example.invalid/llama-b11669-bin-ubuntu-cuda-12.8-x64.tar.gz"
+sha256 = "5555555555555555555555555555555555555555555555555555555555555555"
+size = 300000000
+format = "tar.gz"
+strip_components = 1
+# Optional dependency: only with `--with cuda-runtime` or `--with-runtime` (replaces `companions`).
+[[variants."cuda12.8".dependencies]]
+id = "cuda-runtime"
+os = "linux"
+arch = "x86_64"
+url = "https://example.invalid/cudart-llama-b11669-bin-ubuntu-cuda-12.8-x64.tar.gz"
+sha256 = "6666666666666666666666666666666666666666666666666666666666666666"
+size = 594377811
+format = "tar.gz"
+strip_components = 1
+dest = "."
+optional = true
+
+# Native variant (ALK-SP-0011.R6): source-only, never auto-selected, built for the host CPU on
+# an explicit `alkahest engines install llama-cpp --native`.
+[variants."cpu-native"]
+accelerator = "cpu"
+native = true
+notes = "Compiled for this machine's CPU (GGML_NATIVE=ON); not portable to other CPUs."
+[variants."cpu-native".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DGGML_NATIVE=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]

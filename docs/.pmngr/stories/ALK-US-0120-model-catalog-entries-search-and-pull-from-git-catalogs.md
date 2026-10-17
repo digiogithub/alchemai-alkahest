@@ -10,7 +10,12 @@ author: mcp
 labels: [catalog, models, store]
 estimate: 8
 created: 2026-10-17T18:30:04Z
-updated: 2026-10-17T18:30:04Z
+updated: 2026-10-17T18:42:00Z
+links:
+  - { kind: implements, target: ALK-SP-0011.R7 }
+  - { kind: implements, target: ALK-SP-0011.R12 }
+  - { kind: implements, target: ALK-SP-0011.R13 }
+  - { kind: implements, target: ALK-SP-0011.R14 }
 ---
 
 ## Description

@@ -10,7 +10,11 @@ author: mcp
 labels: [catalog, recipes, engine]
 estimate: 5
 created: 2026-10-17T18:30:04Z
-updated: 2026-10-17T18:30:04Z
+updated: 2026-10-17T18:41:56Z
+links:
+  - { kind: implements, target: ALK-SP-0011.R4 }
+  - { kind: implements, target: ALK-SP-0011.R5 }
+  - { kind: implements, target: ALK-SP-0011.R6 }
 ---
 
 ## Description

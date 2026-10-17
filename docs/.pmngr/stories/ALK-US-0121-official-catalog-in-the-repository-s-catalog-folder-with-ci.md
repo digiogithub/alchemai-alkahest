@@ -10,7 +10,13 @@ author: mcp
 labels: [catalog, ci, recipes]
 estimate: 3
 created: 2026-10-17T18:30:04Z
-updated: 2026-10-17T18:34:27Z
+updated: 2026-10-17T18:42:04Z
+links:
+  - { kind: implements, target: ALK-SP-0011.R1 }
+  - { kind: implements, target: ALK-SP-0011.R2 }
+  - { kind: implements, target: ALK-SP-0011.R3 }
+  - { kind: implements, target: ALK-SP-0011.R4 }
+  - { kind: implements, target: ALK-SP-0011.R8 }
 ---
 
 ## Description

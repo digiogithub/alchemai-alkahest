@@ -1,0 +1,9 @@
+# Fixture catalog manifest (ALK-SP-0011.R2). Shared test input of ALK-US-0118 to ALK-US-0121;
+# see docs/research/catalog-format-example.md. Every URL uses the reserved `.invalid` TLD:
+# tests rewrite the base URL to a local server, nothing here is downloadable.
+schema_version = "1.0"
+name = "fixture"
+description = "Test catalog: one engine with dependencies and a native variant, one model."
+min_alkahest = ">=0.1.0"
+homepage = "https://example.invalid/fixture-catalog"
+maintainers = ["Alkahest maintainers"]

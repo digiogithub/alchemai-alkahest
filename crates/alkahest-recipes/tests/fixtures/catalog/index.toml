@@ -1,0 +1,18 @@
+# Generated file index (ALK-SP-0011.R8). Regenerate with `alkahest catalog index` or
+# `cargo xtask catalog-check --fix`; never edit by hand.
+schema_version = "1.0"
+
+[[files]]
+path = "catalog.toml"
+sha256 = "081c5e904c43a72eafb46f131fa10292e62c39d880204b4bad4d78142acddebb"
+size = 512
+
+[[files]]
+path = "engines/llama-cpp.toml"
+sha256 = "86395201b2d66726f95b278b89c73e7b6c9175c84c5761abc159f988f5773e57"
+size = 3011
+
+[[files]]
+path = "models/acme/assistant.toml"
+sha256 = "09a374331106fe3f7aed3f8b76f493083699a98a0febeaaec16176a5ec69756b"
+size = 1638

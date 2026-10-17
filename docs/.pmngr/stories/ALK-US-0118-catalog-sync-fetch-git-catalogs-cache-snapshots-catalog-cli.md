@@ -10,7 +10,15 @@ author: mcp
 labels: [catalog, security]
 estimate: 8
 created: 2026-10-17T18:30:04Z
-updated: 2026-10-17T18:30:04Z
+updated: 2026-10-17T18:41:53Z
+links:
+  - { kind: implements, target: ALK-SP-0011.R3 }
+  - { kind: implements, target: ALK-SP-0011.R8 }
+  - { kind: implements, target: ALK-SP-0011.R9 }
+  - { kind: implements, target: ALK-SP-0011.R10 }
+  - { kind: implements, target: ALK-SP-0011.R11 }
+  - { kind: implements, target: ALK-SP-0011.R12 }
+  - { kind: implements, target: ALK-SP-0011.R14 }
 ---
 
 ## Description

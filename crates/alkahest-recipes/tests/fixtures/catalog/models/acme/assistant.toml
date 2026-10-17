@@ -1,0 +1,46 @@
+# Fixture model entry (ALK-SP-0011.R7), pulled as `catalog:acme/assistant[:<tag>]` (R13).
+# The `q4_k_m` model file is ../../../catalog-blobs/assistant-q4_k_m.gguf (a 24-byte GGUF header
+# with no tensors); its sha256 and size are real so pull tests can serve it from a local server.
+name = "acme/assistant"
+description = "Tiny fixture assistant model."
+license = "apache-2.0"
+homepage = "https://example.invalid/acme/assistant"
+tags = ["chat", "tools", "fixture"]
+
+# First variant = default tag.
+[[variants]]
+tag = "q4_k_m"
+format = "gguf"
+quant = "Q4_K_M"
+engine = "llama-cpp"
+template = "chatml"
+params = { num_ctx = 8192, temperature = 0.7, stop = ["<|im_end|>"] }
+[[variants.files]]
+kind = "model"
+urls = [
+    "https://mirror-a.example.invalid/acme/assistant-q4_k_m.gguf",
+    "https://mirror-b.example.invalid/acme/assistant-q4_k_m.gguf",
+]
+sha256 = "a4e5e156ddec27e286f75328784d7106b60a4eb1d246e950a001a3f944fbda99"
+size = 24
+filename = "assistant-q4_k_m.gguf"
+
+[[variants]]
+tag = "q8_0"
+format = "gguf"
+quant = "Q8_0"
+template_format = "jinja"
+template_text = "{% for m in messages %}<|{{ m.role }}|>{{ m.content }}\n{% endfor %}<|assistant|>"
+params = { num_ctx = 4096 }
+[[variants.files]]
+kind = "model"
+url = "https://private.example.invalid/acme/assistant-q8_0.gguf"
+sha256 = "7777777777777777777777777777777777777777777777777777777777777777"
+size = 8000000000
+auth = "private.example.invalid"
+[[variants.files]]
+kind = "projector"
+url = "https://private.example.invalid/acme/assistant-mmproj.gguf"
+sha256 = "8888888888888888888888888888888888888888888888888888888888888888"
+size = 600000000
+auth = "private.example.invalid"
