@@ -9,9 +9,12 @@
 //! - `notice [--check]`: generate and verify THIRD_PARTY_LICENSES and NOTICE (ALK-US-0077).
 //! - `engines-check [--fail-on-update]`: report newer upstream engine releases (ALK-US-0053).
 //! - `docs-cli [--check]`: generate the CLI and configuration reference pages of the user guide (ALK-US-0080).
+//! - `catalog-check [<dir>] [--net] [--fix]` / `catalog-index [<dir>] [--sync-recipes]`: validate and index a git
+//!   catalog directory, default `catalog/` (ALK-US-0121).
 //! - `bundle`: build the Linux release artefacts: headless tar.gz, desktop .deb and AppImage (ALK-US-0074).
 
 mod bundle;
+mod catalog;
 mod deps;
 mod docs;
 mod engines;
@@ -37,6 +40,8 @@ fn main() -> ExitCode {
         "engines-check" => workspace_root().and_then(|root| engines::run(&root, rest)),
         "bundle" => workspace_root().and_then(|root| bundle::run(&root, rest)),
         "docs-cli" => workspace_root().and_then(|root| docs::run(&root, rest)),
+        "catalog-check" => workspace_root().and_then(|root| catalog::run_check(&root, rest)),
+        "catalog-index" => workspace_root().and_then(|root| catalog::run_index(&root, rest)),
         "notice" => workspace_root().and_then(|root| notice::run(&root, rest)),
         other => {
             eprintln!("xtask: unknown command `{other}`");
@@ -64,6 +69,6 @@ fn workspace_root() -> Result<PathBuf> {
 
 fn usage() {
     eprintln!(
-        "usage: cargo xtask <check-deps|tokens [--check] [--contrast]|icons|notice [--check]|engines-check [--fail-on-update]|docs-cli [--check]|bundle [--flavour ..] [--formats ..] [--no-build]>"
+        "usage: cargo xtask <check-deps|tokens [--check] [--contrast]|icons|notice [--check]|engines-check [--fail-on-update]|docs-cli [--check]|catalog-check [<dir>] [--net] [--fix]|catalog-index [<dir>] [--sync-recipes]|bundle [--flavour ..] [--formats ..] [--no-build]>"
     );
 }

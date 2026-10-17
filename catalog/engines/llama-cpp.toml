@@ -1,0 +1,337 @@
+# Engine recipe: mainline llama.cpp (ALK-SP-0003.R3/R4/R6; ALK-US-0026, ALK-US-0049, ALK-US-0050).
+#
+# Pinned to one upstream release tag (b11669). Every sha256 is the digest GitHub reports for the
+# release asset (`digest` field of the releases API). Moving the pin means editing this file,
+# re-checking the digests and running the install tests with ALKAHEST_TEST_NET=1 and
+# ALKAHEST_TEST_GPU=1.
+#
+# Variants and their runtime requirements:
+#   cpu        runtime-selected SIMD backends; runs everywhere.
+#   cuda12.8   Linux x64. Needs an NVIDIA driver for CUDA 12.8+ and the CUDA 12 runtime libraries
+#              (libcudart, libcublas) installed system-wide; the upstream `cudart-llama-*` archive
+#              (440-590 MB) bundles them and is not installed by this recipe.
+#   cuda13.4   Linux x64/arm64, Windows x64. Needs a driver for CUDA 13.4+ (same runtime note).
+#   cuda12.4   Windows x64. Needs a driver for CUDA 12.4+; the CUDA DLLs come from the separate
+#              `cudart-llama-bin-win-cuda-12.4-x64.zip` (391 MB) or a CUDA toolkit on PATH.
+#   vulkan     any Vulkan 1.x GPU through the system loader.
+#   rocm       AMD ROCm/HIP 10.0 (Linux x64, Windows x64).
+#   metal      macOS Apple Silicon: the standard macOS arm64 archive has Metal compiled in.
+#   sycl       Intel oneAPI; installed on request only, never picked automatically.
+#
+# Every variant also carries `source` build steps (`engines install --from-source`).
+
+id = "llama-cpp"
+version = "b11669"
+description = "llama.cpp (mainline)"
+license = "MIT"
+homepage = "https://github.com/ggml-org/llama.cpp"
+# Path of the server binary inside the extracted tree (".exe" is added on Windows).
+executable = "llama-server"
+
+
+[variants."cpu"]
+accelerator = "cpu"
+[[variants."cpu".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-x64.tar.gz"
+sha256 = "cf07c1c112d709bd67e522017471de57ed0ec8bea031d732c5422351c07f65ac"
+size = 17851611
+format = "tar.gz"
+strip_components = 1
+[[variants."cpu".assets]]
+os = "linux"
+arch = "aarch64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-arm64.tar.gz"
+sha256 = "9ac6fda2058d35677608a06f751a50122ddfa4ce0ddb7f084466b8e79b6d4a99"
+size = 13900160
+format = "tar.gz"
+strip_components = 1
+[[variants."cpu".assets]]
+os = "macos"
+arch = "aarch64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-macos-arm64.tar.gz"
+sha256 = "dbed55493d72bc1ba2babc8770d669c2289b5bc4ee9fb2a4dfc158d45b7d13fd"
+size = 12191582
+format = "tar.gz"
+strip_components = 1
+[[variants."cpu".assets]]
+os = "macos"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-macos-x64.tar.gz"
+sha256 = "cab28238d78158109b48deb27b05d50e0dcef56275d2e76da9ca8281526c7532"
+size = 11677404
+format = "tar.gz"
+strip_components = 1
+[[variants."cpu".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-cpu-x64.zip"
+sha256 = "37b3efcf962847ca869745fd4ccf7f5e7e8dacfeff9fa3523b4ca8cdc66d632b"
+size = 19537886
+format = "zip"
+strip_components = 0
+[[variants."cpu".assets]]
+os = "windows"
+arch = "aarch64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-cpu-arm64.zip"
+sha256 = "9cff39ffed17edcd03a7d876073f74d7b48cd43a1e5eafdd59ee094185ad871b"
+size = 12442177
+format = "zip"
+strip_components = 0
+[variants."cpu".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_NATIVE=OFF", "-DGGML_CPU_ALL_VARIANTS=ON", "-DGGML_BACKEND_DL=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+# Native variant (ALK-SP-0011.R6): source-only, never auto-selected; built for the host CPU by
+# `alkahest engines install llama-cpp --native`. Not portable to other CPUs.
+[variants."cpu-native"]
+accelerator = "cpu"
+native = true
+notes = "Compiled for this machine's CPU (GGML_NATIVE=ON); needs git, cmake and ninja; not portable."
+[variants."cpu-native".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_NATIVE=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."cuda12.8"]
+accelerator = "cuda"
+cuda = "12.8"
+notes = "Needs the CUDA 12 runtime libraries (libcudart, libcublas) installed on the host, or `--with-runtime` to unpack upstream's cudart archive (594 MB) next to the engine."
+[[variants."cuda12.8".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-cuda-12.8-x64.tar.gz"
+sha256 = "4703ed1a3cd6e8504affb6cb9866f501e96d634d68a002dc9a8251c9e2819b49"
+size = 172525113
+format = "tar.gz"
+strip_components = 1
+[[variants."cuda12.8".companions]]
+name = "cuda-runtime"
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/cudart-llama-b11669-bin-ubuntu-cuda-12.8-x64.tar.gz"
+sha256 = "ab3eda89a82096bcba00b6448218c3c11eec2016b0f38d64884dc29736549f26"
+size = 594377811
+format = "tar.gz"
+strip_components = 1
+[variants."cuda12.8".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."cuda12.4"]
+accelerator = "cuda"
+cuda = "12.4"
+notes = "Windows: CUDA DLLs come from a CUDA toolkit on PATH, or `--with-runtime` (cudart-llama-bin-win-cuda-12.4-x64.zip, 391 MB)."
+[[variants."cuda12.4".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-cuda-12.4-x64.zip"
+sha256 = "c2da1f73ed176ae093ac5aceb978a7b167a16113f6d74c6789eeaee2135cb8dc"
+size = 266582698
+format = "zip"
+strip_components = 0
+[[variants."cuda12.4".companions]]
+name = "cuda-runtime"
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/cudart-llama-bin-win-cuda-12.4-x64.zip"
+sha256 = "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
+size = 391443627
+format = "zip"
+strip_components = 0
+[variants."cuda12.4".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DGGML_CUDA=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."cuda13.4"]
+accelerator = "cuda"
+cuda = "13.4"
+notes = "Needs the CUDA 13 runtime libraries on the host, or `--with-runtime` to unpack upstream's cudart archive (440 to 552 MB on Linux, 423 MB on Windows)."
+[[variants."cuda13.4".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-cuda-13.4-x64.tar.gz"
+sha256 = "80878473d27278dbe9c38fb7e704f292a51e889d3c28a1e863137cdee1e2ba4e"
+size = 153679828
+format = "tar.gz"
+strip_components = 1
+[[variants."cuda13.4".assets]]
+os = "linux"
+arch = "aarch64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-cuda-13.4-arm64.tar.gz"
+sha256 = "19902edd0c02942ac736c2dea5e104ff219a196a5cd07f125a7adcd44c103e6b"
+size = 149286186
+format = "tar.gz"
+strip_components = 1
+[[variants."cuda13.4".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-cuda-13.4-x64.zip"
+sha256 = "3b92d5c064f5032e603e531d3ec8961f3bd6613e5dfad047399a92dec8e95dbc"
+size = 154582227
+format = "zip"
+strip_components = 0
+[[variants."cuda13.4".companions]]
+name = "cuda-runtime"
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/cudart-llama-b11669-bin-ubuntu-cuda-13.4-x64.tar.gz"
+sha256 = "1108bd9300a281e8eabb18d3fa028d4240ecd983f9f90dbbbc3297671016d697"
+size = 440236547
+format = "tar.gz"
+strip_components = 1
+[[variants."cuda13.4".companions]]
+name = "cuda-runtime"
+os = "linux"
+arch = "aarch64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/cudart-llama-b11669-bin-ubuntu-cuda-13.4-arm64.tar.gz"
+sha256 = "6c81453d16a574eef3273662a7a8ceafa3537699a5b2ffec3fc853eb1a08f67c"
+size = 552521396
+format = "tar.gz"
+strip_components = 1
+[[variants."cuda13.4".companions]]
+name = "cuda-runtime"
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/cudart-llama-bin-win-cuda-13.4-x64.zip"
+sha256 = "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668"
+size = 423535356
+format = "zip"
+strip_components = 0
+[variants."cuda13.4".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."vulkan"]
+accelerator = "vulkan"
+[[variants."vulkan".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-vulkan-x64.tar.gz"
+sha256 = "e8709e5ba6c1b093dea7f3de57f4aba842f9a188fba6b465782d65d6fcfa4d9f"
+size = 30497889
+format = "tar.gz"
+strip_components = 1
+[[variants."vulkan".assets]]
+os = "linux"
+arch = "aarch64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-vulkan-arm64.tar.gz"
+sha256 = "d283522e479c0d532e3a04d715dd852ffb2d95925caa6d41ef2ba53a65e46a51"
+size = 24187561
+format = "tar.gz"
+strip_components = 1
+[[variants."vulkan".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-vulkan-x64.zip"
+sha256 = "2c07574e7bde71321cb785282b20cc821e951132149eeceeea32ddebdbf0598e"
+size = 32182350
+format = "zip"
+strip_components = 0
+[[variants."vulkan".assets]]
+os = "windows"
+arch = "aarch64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-vulkan-arm64.zip"
+sha256 = "963d3b185362cadca3de643409f916a5ce95dd0f7fd8617ba9ee5d8833ac1ef3"
+size = 24817965
+format = "zip"
+strip_components = 0
+[variants."vulkan".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_VULKAN=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."rocm"]
+accelerator = "rocm"
+notes = "ROCm/HIP 10.0 build; needs the ROCm runtime on the host."
+[[variants."rocm".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-rocm-10.0-x64.tar.gz"
+sha256 = "02d36f06accd8fdcb2d41078361b21fb2df5d139f169bf4efcb8424a7dbbef01"
+size = 245070738
+format = "tar.gz"
+strip_components = 1
+[[variants."rocm".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-rocm-10.0-x64.zip"
+sha256 = "940aa2c42450500f73ddbbcf40c5101ce44062d8a9775e9cffc23804433f17ca"
+size = 258449188
+format = "zip"
+strip_components = 0
+[variants."rocm".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_HIP=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."metal"]
+accelerator = "metal"
+notes = "The macOS arm64 archive has Metal built in; same archive as the cpu variant on Apple Silicon."
+[[variants."metal".assets]]
+os = "macos"
+arch = "aarch64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-macos-arm64.tar.gz"
+sha256 = "dbed55493d72bc1ba2babc8770d669c2289b5bc4ee9fb2a4dfc158d45b7d13fd"
+size = 12191582
+format = "tar.gz"
+strip_components = 1
+[variants."metal".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+[variants."sycl"]
+accelerator = "sycl"
+notes = "Intel oneAPI SYCL (fp16 build); needs the oneAPI runtime. Never picked automatically."
+[[variants."sycl".assets]]
+os = "linux"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-ubuntu-sycl-fp16-x64.tar.gz"
+sha256 = "d139fc5a236ffba7de799607ede79f68942620a88f18dd16d90596b7f9a08b4a"
+size = 54548988
+format = "tar.gz"
+strip_components = 1
+[[variants."sycl".assets]]
+os = "windows"
+arch = "x86_64"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11669/llama-b11669-bin-win-sycl-x64.zip"
+sha256 = "a6fa46b20c5161ad71e5b8ec4a52f2dcf713573ce25cefde86aeff4ff0e56cf1"
+size = 149038704
+format = "zip"
+strip_components = 0
+[variants."sycl".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DGGML_SYCL=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]

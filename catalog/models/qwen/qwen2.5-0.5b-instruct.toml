@@ -1,0 +1,37 @@
+# Model entry (ALK-SP-0011.R7): Qwen2.5 0.5B Instruct, a small chat model that runs on any CPU.
+# Pulled as `alkahest/qwen/qwen2.5-0.5b-instruct[:tag]` (first variant = default tag).
+# Files come from the upstream Hugging Face repository Qwen/Qwen2.5-0.5B-Instruct-GGUF
+# (Apache-2.0); sha256 and size are the LFS values reported by the Hugging Face API.
+name = "qwen/qwen2.5-0.5b-instruct"
+description = "Qwen2.5 0.5B Instruct: small multilingual chat model with a 32k context."
+license = "apache-2.0"
+homepage = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+tags = ["chat", "small", "multilingual"]
+
+[[variants]]
+tag = "q4_k_m"
+format = "gguf"
+quant = "Q4_K_M"
+engine = "llama-cpp"
+template = "chatml"
+params = { num_ctx = 8192, temperature = 0.7, stop = ["<|im_end|>"] }
+[[variants.files]]
+kind = "model"
+url = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+sha256 = "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
+size = 491400032
+filename = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+
+[[variants]]
+tag = "q8_0"
+format = "gguf"
+quant = "Q8_0"
+engine = "llama-cpp"
+template = "chatml"
+params = { num_ctx = 8192, temperature = 0.7, stop = ["<|im_end|>"] }
+[[variants.files]]
+kind = "model"
+url = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q8_0.gguf"
+sha256 = "ca59ca7f13d0e15a8cfa77bd17e65d24f6844b554a7b6c12e07a5f89ff76844e"
+size = 675710816
+filename = "qwen2.5-0.5b-instruct-q8_0.gguf"

@@ -1,0 +1,38 @@
+# Generated file index (ALK-SP-0011.R8). Regenerate with `cargo xtask catalog-index`;
+# never edit by hand.
+schema_version = "1.0"
+
+[[files]]
+path = "catalog.toml"
+sha256 = "f59b534157ba77f8088a344d7dbc0561b77d85bc6c2c50c333f636269a7a4387"
+size = 504
+
+[[files]]
+path = "engines/llama-cpp.toml"
+sha256 = "d87e805249419e8a383ec63e1a7b84609b3a4037e42e48ff501a05567821deca"
+size = 13944
+
+[[files]]
+path = "engines/prism-llama-cpp.toml"
+sha256 = "a7da0453ebba23f8807e94b94decaf7e5d0e7abf34562cc73adf0361b2a76b86"
+size = 12776
+
+[[files]]
+path = "engines/stable-diffusion-cpp.toml"
+sha256 = "91c2f68ef61d9cac5e31511035959796e60c872fd8d5c483f407332294a8d70d"
+size = 7511
+
+[[files]]
+path = "engines/vllm.toml"
+sha256 = "a16250fb7d2fe7704ae4214c575290335a8ed5615266f09ac426f550b355ed27"
+size = 1928
+
+[[files]]
+path = "engines/whisper-cpp.toml"
+sha256 = "0eef725f21d179b0ecbb301c8e31a23fca1e7e9ee5baeb670e9d34f16b14cee3"
+size = 3380
+
+[[files]]
+path = "models/qwen/qwen2.5-0.5b-instruct.toml"
+sha256 = "3a39356c0e76508c9d63dc34da29958d44e3201e3a713520847b5c8d94c0e54d"
+size = 1590
