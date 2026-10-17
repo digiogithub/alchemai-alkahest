@@ -3,7 +3,7 @@
 # AGENTS.md section 5. Usage: scripts/ci-local.sh [--no-deny] [--size] [--desktop]
 #   --no-deny  skip cargo deny
 #   --size     also build the release binary and enforce the size budget (slow;
-#              budget from ALKAHEST_SIZE_BUDGET_MIB, default 60)
+#              budget from ALKAHEST_SIZE_BUDGET_MIB, default 30)
 #   --desktop  also run the desktop job: tokens --check --contrast, clippy and GUI tests
 #              with the desktop feature, the desktop build and the first-frame smoke test
 #              (under xvfb-run when installed, else on $DISPLAY / $WAYLAND_DISPLAY)
