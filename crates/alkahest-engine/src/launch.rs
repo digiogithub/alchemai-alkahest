@@ -39,6 +39,15 @@ pub struct LaunchRequest {
     pub settings: ModelSettings,
     /// Backend the engine should offload to.
     pub accelerator: Accelerator,
+    /// Parallel request slots the scheduler granted (`scheduler.num_parallel`); `None` lets
+    /// the engine decide.
+    pub num_parallel: Option<u32>,
+    /// CPU threads for generation; `None` lets the engine pick from the hardware.
+    pub threads: Option<u32>,
+    /// Built-in chat template name (`chatml`, `llama3`) matched from the model's Ollama Go
+    /// `TEMPLATE` layer by [`crate::llama_cpp::builtin_template_for_go`], used only when the
+    /// GGUF carries no template (ADR 0001, case 3).
+    pub builtin_template: Option<String>,
     /// Address the engine binds; always loopback, the API server is the only client.
     pub host: IpAddr,
     /// Port the engine binds; `0` until the supervisor allocates one.
@@ -63,6 +72,9 @@ impl LaunchRequest {
             needs_prism: false,
             settings: ModelSettings::default(),
             accelerator: Accelerator::Cpu,
+            num_parallel: None,
+            threads: None,
+            builtin_template: None,
             host: IpAddr::V4(Ipv4Addr::LOCALHOST),
             port: 0,
         }
@@ -96,6 +108,9 @@ impl LaunchRequest {
             needs_prism: entry.info.needs_prism,
             settings: effective.settings.clone(),
             accelerator,
+            num_parallel: None,
+            threads: None,
+            builtin_template: None,
             host: IpAddr::V4(Ipv4Addr::LOCALHOST),
             port,
         })

@@ -316,19 +316,22 @@ fn llama_server_spec_from_request() {
             "127.0.0.1",
             "--port",
             "40123",
-            "--model",
+            "-m",
             "/models/q.gguf",
             "--alias",
             "qwen3:8b",
-            "--ctx-size",
+            "-c",
             "8192",
-            "--n-gpu-layers",
+            "-ngl",
             "999",
-            "--flash-attn",
+            "-fa",
             "on",
             "--jinja",
             "--chat-template-kwargs",
             r#"{"enable_thinking":false}"#,
+            "--no-webui",
+            "--metrics",
+            "--slots",
             "--threads",
             "8",
             "--threads",
@@ -345,13 +348,13 @@ fn llama_server_spec_from_request() {
 #[test]
 fn embeddings_and_rerank_modes() {
     let embed = LaunchRequest::new("bge", "/m/b.gguf", ModelFormat::Gguf, ModelKind::Embeddings);
-    let args = alkahest_engine::builtin::LlamaCppEngine::model_args(&embed);
+    let args = alkahest_engine::LlamaCppEngine::model_args(&embed).unwrap();
     assert!(args.contains(&"--embeddings".to_string()));
     assert!(!args.contains(&"--jinja".to_string()));
     // CPU without a setting: no GPU offload flag.
     assert!(!args.contains(&"--n-gpu-layers".to_string()));
     let rerank = LaunchRequest::new("r", "/m/r.gguf", ModelFormat::Gguf, ModelKind::Rerank);
-    let args = alkahest_engine::builtin::LlamaCppEngine::model_args(&rerank);
+    let args = alkahest_engine::LlamaCppEngine::model_args(&rerank).unwrap();
     assert!(args.contains(&"--reranking".to_string()));
 }
 

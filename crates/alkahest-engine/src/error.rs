@@ -83,6 +83,14 @@ pub enum EngineError {
         /// Why it was rejected.
         reason: String,
     },
+    /// Installing a missing engine on first use failed.
+    #[error("could not install engine `{engine}` automatically: {reason}")]
+    AutoInstallFailed {
+        /// Engine that was being installed.
+        engine: EngineId,
+        /// Why (no recipe, download or digest failure).
+        reason: String,
+    },
     /// The engine executable could not be started.
     #[error("cannot start {}: {source}", program.display())]
     Spawn {

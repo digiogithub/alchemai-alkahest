@@ -253,6 +253,9 @@ pub struct EnginesConfig {
     pub dir: Option<PathBuf>,
     /// Per-engine overrides keyed by engine id (`llama-cpp`, `prism-llama-cpp`, `vllm`, ...).
     pub overrides: BTreeMap<String, EngineOverride>,
+    /// Download and install a missing engine the first time a model needs it, instead of
+    /// failing with `alkahest engines install <id>`. Off by default: it fetches executables.
+    pub auto_install: bool,
 }
 
 /// User override for one engine.
