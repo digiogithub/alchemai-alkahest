@@ -27,8 +27,8 @@ use crate::ui::{
 use crate::views::icons;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
-    ButtonKind, button, checkbox, column_label, dialog, dot, empty_block, meter, mono_caption,
-    notice_line, tag,
+    ButtonKind, button, checkbox, column_label, dialog, dismissable, dot, empty_block, meter,
+    mono_caption, notice_line, tag, with_tooltip,
 };
 
 /// Pause before re-subscribing to the job events after the stream broke.
@@ -458,6 +458,53 @@ impl EnginesView {
             );
         }
         let id = job.id.clone();
+        let mut recovery = h_flex().gap(px(space::S2)).items_center();
+        if let Some(req) = job.retry.clone() {
+            recovery = recovery.child(
+                button(
+                    ("engines-job-retry", i),
+                    "Retry",
+                    ButtonKind::Secondary,
+                    size::CONTROL_SMALL,
+                    false,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.install(req.clone(), cx))),
+            );
+        }
+        if let Some(req) = job.prebuilt.clone() {
+            let jid = id.clone();
+            recovery = recovery.child(
+                button(
+                    ("engines-job-prebuilt", i),
+                    "Install prebuilt instead",
+                    ButtonKind::Secondary,
+                    size::CONTROL_SMALL,
+                    false,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.dismiss_job(jid.clone(), cx);
+                    this.install(req.clone(), cx);
+                })),
+            );
+        }
+        if job.error.is_some() {
+            // The server keeps no build log to open yet (inbox item); the card's own tail
+            // above is what the server reported.
+            recovery = recovery.child(with_tooltip(
+                button(
+                    ("engines-job-log", i),
+                    "View log",
+                    ButtonKind::Secondary,
+                    size::CONTROL_SMALL,
+                    true,
+                    p,
+                ),
+                "The server does not expose build logs yet (ALK-US-0110); the last lines are \
+                 shown below.",
+            ));
+        }
         let action = if job.running {
             button(
                 ("engines-job-cancel", i),
@@ -516,6 +563,7 @@ impl EnginesView {
                             .child(SharedString::from(job.target.clone())),
                     )
                     .child(mono_caption(job.bytes.clone(), p))
+                    .child(recovery)
                     .child(action),
             );
         if job.running {
@@ -736,7 +784,12 @@ impl EnginesView {
             )
     }
 
-    fn remove_dialog(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn remove_dialog(
+        &self,
+        window: &mut Window,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let ask = self.remove.as_ref()?;
         let cancel = button(
             "remove-cancel",
@@ -760,17 +813,26 @@ impl EnginesView {
             p,
         )
         .on_click(cx.listener(|this, _, _, cx| this.confirm_remove(cx)));
+        let scrim = dialog(
+            format!("Remove {} {}?", ask.engine_name, ask.build.label),
+            Some(SharedString::from(format!(
+                "{} \u{b7} {}",
+                ask.build.origin, ask.build.engine
+            ))),
+            ask.consequence(),
+            None,
+            vec![cancel, confirm],
+            p,
+        );
         Some(
-            dialog(
-                format!("Remove {} {}?", ask.engine_name, ask.build.label),
-                Some(SharedString::from(format!(
-                    "{} \u{b7} {}",
-                    ask.build.origin, ask.build.engine
-                ))),
-                ask.consequence(),
-                None,
-                vec![cancel, confirm],
-                p,
+            dismissable(
+                scrim,
+                cx.listener(|this, _: &(), _, cx| {
+                    this.remove = None;
+                    cx.notify();
+                }),
+                window,
+                cx,
             )
             .into_any_element(),
         )
@@ -778,7 +840,7 @@ impl EnginesView {
 }
 
 impl Render for EnginesView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Theme::get(cx).palette;
         let running: Vec<String> = self
             .jobs
@@ -839,7 +901,7 @@ impl Render for EnginesView {
                 .child(list),
         );
         let mut root = div().relative().size_full().child(content);
-        if let Some(d) = self.remove_dialog(p, cx) {
+        if let Some(d) = self.remove_dialog(window, p, cx) {
             root = root.child(d);
         }
         root

@@ -11,6 +11,7 @@ use crate::connection::{ConnectionHandle, ConnectionManager};
 use crate::launcher::{LocalLauncher, is_local_url};
 use crate::settings::{DesktopSettings, KeyringKeyStore, resolve_api_key};
 use crate::theme::tokens::size;
+use crate::tls;
 use futures::StreamExt as _;
 
 use crate::tray::{self, TrayAction, TrayHandle, TrayModel};
@@ -254,9 +255,25 @@ pub(crate) fn connect(
     } else {
         resolve_api_key(options.api_key.clone(), &KeyringKeyStore)
     };
-    let client = Client::new(&server_url)
-        .map_err(|e| DesktopError::ServerUrl(e.to_string()))?
-        .with_api_key(api_key);
+    let mut client =
+        Client::new(&server_url).map_err(|e| DesktopError::ServerUrl(e.to_string()))?;
+    let env_ca = std::env::var(alkahest_client::CA_CERT_ENV).ok();
+    let is_default = server_url == options.server_url;
+    if let Some(ca) = tls::resolve_ca_cert(
+        &server_url,
+        env_ca.as_deref(),
+        settings.ca_cert.as_deref(),
+        options.generated_ca.as_deref(),
+        is_default,
+    ) {
+        // An unreadable CA is logged, not fatal: the window must open so the Settings screen
+        // can fix the path; the connection then reports an untrusted certificate.
+        match client.clone().with_ca_cert_file(&ca) {
+            Ok(c) => client = c,
+            Err(e) => tracing::warn!("{e}; connecting without it"),
+        }
+    }
+    let client = client.with_api_key(api_key);
     // Starting a server only helps when the server is on this machine.
     let launcher = options
         .serve_program

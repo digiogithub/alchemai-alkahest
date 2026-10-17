@@ -48,6 +48,9 @@ pub struct DesktopSettings {
     /// A remote (or non-default) server, `http://gpu-box:11435`. `None`: the configured local
     /// server.
     pub server_url: Option<String>,
+    /// CA certificate file (PEM) trusted for an `https` server with a private CA. `None`: the
+    /// system roots, `ALKAHEST_CA_CERT`, or the CA generated for the local server.
+    pub ca_cert: Option<String>,
     /// Theme preference.
     pub theme: ThemePreference,
 }
@@ -196,7 +199,8 @@ mod tests {
             DesktopSettings::default()
         );
         let s = DesktopSettings {
-            server_url: Some("http://gpu-box:11435".into()),
+            server_url: Some("https://gpu-box:11435".into()),
+            ca_cert: Some("/etc/alkahest/ca.pem".into()),
             theme: ThemePreference::System,
         };
         s.save(&path).unwrap();

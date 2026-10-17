@@ -25,15 +25,15 @@ use crate::tokio_bridge;
 use crate::ui::input::{Input, InputEvent, InputState};
 use crate::ui::{
     Anchor, AnyElement, AppContext as _, Context, Div, Entity, EventEmitter, FontWeight, Hsla,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString, Stateful,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Task, Window, anchored, deferred, div, h_flex, px,
     svg_icon, v_flex,
 };
 use crate::views::icons;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
-    ButtonKind, button, card, choice_chip, column_label, dot, field_frame, format_tag, kind_badge,
-    meter, notice_line, overlay_shadow, segment, segmented,
+    ButtonKind, button, card, choice_chip, column_label, dismissable, dot, field_frame, format_tag,
+    kind_badge, meter, notice_line, overlay_shadow, segment, segmented,
 };
 
 /// Typing pause before a search runs.
@@ -1511,7 +1511,12 @@ impl DiscoverView {
         line
     }
 
-    fn token_dialog(&self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn token_dialog(
+        &self,
+        window: &mut Window,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let present = self.state.token.as_ref().is_some_and(|t| t.present);
         let cancel = button(
             "token-cancel",
@@ -1552,6 +1557,7 @@ impl DiscoverView {
             .border_1()
             .border_color(c(p.line_default))
             .shadow(vec![overlay_shadow()])
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(div().type_style(text::H2).child("Hugging Face token"))
             .child(
                 div()
@@ -1584,7 +1590,7 @@ impl DiscoverView {
                 .child(cancel)
                 .child(save),
         );
-        div()
+        let scrim = div()
             .id("token-scrim")
             .absolute()
             .inset_0()
@@ -1594,12 +1600,18 @@ impl DiscoverView {
             // The overlay shadow colour doubles as the scrim, as in the shared dialog.
             .bg(c(crate::theme::tokens::SHADOW_OVERLAY.color))
             .occlude()
-            .child(card)
+            .child(card);
+        dismissable(
+            scrim,
+            cx.listener(|this, _: &(), window, cx| this.close_token_dialog(window, cx)),
+            window,
+            cx,
+        )
     }
 }
 
 impl Render for DiscoverView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Theme::get(cx).palette;
         let mut content = v_flex()
             .size_full()
@@ -1632,7 +1644,7 @@ impl Render for DiscoverView {
         }
         let mut root = div().relative().size_full().child(content);
         if self.state.token_dialog {
-            root = root.child(self.token_dialog(p, cx));
+            root = root.child(self.token_dialog(window, p, cx));
         }
         root
     }
@@ -1832,6 +1844,7 @@ mod tests {
                     notice: None,
                     manages_server: false,
                     runtime: None,
+                    retry: None,
                 },
                 cx,
             );

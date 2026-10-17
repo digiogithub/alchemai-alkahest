@@ -23,6 +23,20 @@ pub enum ModelOp {
     Delete(String),
     /// Unload every model.
     UnloadAll,
+    /// Unload every model, then load this one (retry of a load that did not fit in memory).
+    UnloadAllThenLoad(String),
+}
+
+/// Why an action failed, when the screen can offer a way out (design 17.8).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum FailureCause {
+    /// Nothing specific.
+    #[default]
+    Other,
+    /// The model does not fit in the free memory.
+    Memory,
+    /// The engine that serves the model is not installed (the id).
+    EngineMissing(String),
 }
 
 /// A failed action, as shown to the user.
@@ -30,6 +44,27 @@ pub enum ModelOp {
 pub struct OpFailure {
     /// One-line explanation.
     pub message: String,
+    /// What went wrong, for the recovery actions.
+    pub cause: FailureCause,
+}
+
+/// Classifies a failed load from the server's error text (`ErrorKind` has no code for these
+/// yet; the sentences are stable, see `alkahest-sched` `InsufficientMemory` and
+/// `alkahest-engine` `NotInstalled`).
+pub fn classify_load_failure(err: &ClientError) -> FailureCause {
+    let ClientError::Api { message, .. } = err else {
+        return FailureCause::Other;
+    };
+    if message.contains("does not fit in memory") {
+        return FailureCause::Memory;
+    }
+    if message.contains("is not installed")
+        && let Some(rest) = message.split("engine `").nth(1)
+        && let Some(id) = rest.split('`').next().filter(|id| !id.is_empty())
+    {
+        return FailureCause::EngineMissing(id.to_string());
+    }
+    FailureCause::Other
 }
 
 /// What the screens need from a server.
@@ -107,6 +142,10 @@ pub async fn run<O: ModelOps>(ops: &O, op: &ModelOp) -> Result<(), OpFailure> {
         ModelOp::Unload(m) => ops.unload(m).await,
         ModelOp::Delete(m) => ops.delete(m).await,
         ModelOp::UnloadAll => ops.unload_all().await,
+        ModelOp::UnloadAllThenLoad(m) => match ops.unload_all().await {
+            Ok(()) => ops.load(m).await,
+            Err(e) => Err(e),
+        },
     };
     result.map_err(|e| failure(op, &e))
 }
@@ -125,7 +164,11 @@ pub fn failure(op: &ModelOp, err: &ClientError) -> OpFailure {
         ) => "Unloading everything needs an API key with the admin scope.".to_string(),
         (op, err) => format!("{} failed: {err}", describe(op)),
     };
-    OpFailure { message }
+    let cause = match op {
+        ModelOp::Load(_) | ModelOp::UnloadAllThenLoad(_) => classify_load_failure(err),
+        _ => FailureCause::Other,
+    };
+    OpFailure { message, cause }
 }
 
 fn describe(op: &ModelOp) -> String {
@@ -134,6 +177,7 @@ fn describe(op: &ModelOp) -> String {
         ModelOp::Unload(m) => format!("Unloading {m}"),
         ModelOp::Delete(m) => format!("Deleting {m}"),
         ModelOp::UnloadAll => "Unloading all models".to_string(),
+        ModelOp::UnloadAllThenLoad(m) => format!("Unloading all models and loading {m}"),
     }
 }
 
@@ -236,5 +280,44 @@ mod tests {
         };
         let e = run(&fake, &ModelOp::Load("m".into())).await.unwrap_err();
         assert!(e.message.starts_with("Loading m failed"), "{}", e.message);
+        assert_eq!(e.cause, FailureCause::Other);
+    }
+
+    #[test]
+    fn load_failures_are_classified_for_the_recovery_actions() {
+        let api = |status, message: &str| ClientError::Api {
+            status,
+            message: message.into(),
+        };
+        let memory = api(
+            503,
+            "`qwen3:30b` does not fit in memory: needs 20 GB RAM and 0 B VRAM, 8 GB RAM usable",
+        );
+        assert_eq!(classify_load_failure(&memory), FailureCause::Memory);
+        let missing = api(
+            503,
+            "engine `llama-cpp` is not installed (needed by qwen3:8b); install it with `alkahest engines install llama-cpp`",
+        );
+        assert_eq!(
+            classify_load_failure(&missing),
+            FailureCause::EngineMissing("llama-cpp".into())
+        );
+        assert_eq!(
+            classify_load_failure(&api(500, "boom")),
+            FailureCause::Other
+        );
+        let f = failure(&ModelOp::Load("qwen3:30b".into()), &memory);
+        assert_eq!(f.cause, FailureCause::Memory);
+        let f = failure(&ModelOp::Delete("x".into()), &memory);
+        assert_eq!(f.cause, FailureCause::Other, "only loads have a way out");
+    }
+
+    #[tokio::test]
+    async fn unload_all_then_load_runs_in_that_order() {
+        let fake = Fake::default();
+        run(&fake, &ModelOp::UnloadAllThenLoad("m".into()))
+            .await
+            .unwrap();
+        assert_eq!(*fake.calls.lock().unwrap(), ["unload all", "load m"]);
     }
 }

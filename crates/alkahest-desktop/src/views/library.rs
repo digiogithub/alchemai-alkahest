@@ -8,12 +8,13 @@
 use std::collections::HashMap;
 
 use alkahest_client::Client;
+use alkahest_client::admin::EngineInstall;
 use alkahest_gguf::ModelKind;
 
 use crate::connection::{ConnectionState, RuntimeSnapshot, Snapshot};
 use crate::library::{
-    FormatFilter, KindChip, LibraryRow, LibraryState, ListStatus, NoticeTone, PendingOp, RowAction,
-    SourceFilter,
+    FormatFilter, KindChip, LibraryRow, LibraryState, ListStatus, NoticeAction, NoticeTone,
+    PendingOp, RowAction, SourceFilter,
 };
 use crate::nav::Screen;
 use crate::ops::{self, ModelOp};
@@ -31,8 +32,8 @@ use crate::views::icons;
 use crate::views::model_settings::{ModelSettingsView, SettingsEvent};
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
-    ButtonKind, button, column_label, dialog, empty_block, format_tag, icon_button, kind_badge,
-    overlay_shadow, pill,
+    ButtonKind, button, column_label, dialog, dismissable, empty_block, format_tag, icon_button,
+    kind_badge, overlay_shadow, pill,
 };
 
 /// Fixed column widths (px); the Model column takes the rest. The table scrolls sideways
@@ -225,6 +226,7 @@ impl LibraryView {
             let result = call.await.unwrap_or_else(|e| {
                 Err(ops::OpFailure {
                     message: format!("the request was cancelled: {e}"),
+                    cause: ops::FailureCause::Other,
                 })
             });
             let _ = this.update(cx, |view, cx| {
@@ -476,8 +478,85 @@ impl LibraryView {
         })
     }
 
+    /// Carries out a button of a failure notice (design 17.8).
+    fn notice_action(
+        &mut self,
+        action: NoticeAction,
+        model: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.dismiss_notice();
+        match (action, model) {
+            (NoticeAction::OpenSettings, Some(m)) => self.open_settings(&m, window, cx),
+            (NoticeAction::LowerContext, Some(m)) => {
+                self.open_settings(&m, window, cx);
+                if let Some(view) = &self.settings {
+                    view.update(cx, |v, cx| v.focus_context(window, cx));
+                }
+            }
+            (NoticeAction::UnloadOthersAndRetry, Some(m)) => {
+                self.run_op(
+                    m.clone(),
+                    PendingOp::Loading,
+                    ModelOp::UnloadAllThenLoad(m),
+                    cx,
+                );
+            }
+            (NoticeAction::InstallEngine(engine), _) => {
+                let client = self.client.clone();
+                let req = EngineInstall {
+                    engine,
+                    ..EngineInstall::default()
+                };
+                let call =
+                    tokio_bridge::spawn(cx, async move { client.install_engine(&req).await });
+                cx.spawn(async move |this, cx| {
+                    let result = call.await;
+                    let _ = this.update(cx, |view, cx| {
+                        let failed = match result {
+                            Ok(Ok(_)) => None,
+                            Ok(Err(e)) => Some(e.to_string()),
+                            Err(e) => Some(e.to_string()),
+                        };
+                        if let Some(e) = failed {
+                            view.state
+                                .show_error(format!("Cannot install the engine: {e}"));
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
+                // The job card with its progress lives on the Engines screen.
+                cx.emit(LibraryEvent::Navigate(Screen::Engines));
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
     fn notice(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let notice = self.state.notice()?;
+        let model = notice.model.clone();
+        let actions: Vec<_> = notice
+            .actions
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                let (action, model) = (a.clone(), model.clone());
+                button(
+                    ("library-notice-action", i),
+                    a.label(),
+                    ButtonKind::Secondary,
+                    size::CONTROL_SMALL,
+                    false,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.notice_action(action.clone(), model.clone(), window, cx);
+                }))
+            })
+            .collect();
         let (fg, bg, border) = match notice.tone {
             NoticeTone::Info => (p.info_text, p.info_subtle, p.info_subtle),
             NoticeTone::Danger => (p.danger_text, p.danger_subtle, p.danger_border),
@@ -500,6 +579,7 @@ impl LibraryView {
                         .min_w_0()
                         .child(SharedString::from(notice.text.clone())),
                 )
+                .children(actions)
                 .child(
                     div()
                         .id("library-notice-dismiss")
@@ -815,7 +895,7 @@ impl LibraryView {
 }
 
 impl Render for LibraryView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Theme::get(cx).palette;
         if self.state.settings_for().is_some()
             && let Some(settings) = &self.settings
@@ -871,7 +951,7 @@ impl Render for LibraryView {
                 p,
             )
             .on_click(cx.listener(|this, _, _, cx| this.confirm_delete(cx)));
-            root = root.child(dialog(
+            let scrim = dialog(
                 format!("Delete {name}?"),
                 Some(SharedString::from(self.state.delete_facts(&name))),
                 format!(
@@ -881,6 +961,15 @@ impl Render for LibraryView {
                 None,
                 vec![cancel, confirm],
                 p,
+            );
+            root = root.child(dismissable(
+                scrim,
+                cx.listener(|this, _: &(), _, cx| {
+                    this.state.cancel_delete();
+                    cx.notify();
+                }),
+                window,
+                cx,
             ));
         }
         if let Some(name) = self.state.refused_delete().map(str::to_string) {
@@ -911,13 +1000,22 @@ impl Render for LibraryView {
                 this.state.dismiss_refused();
                 cx.notify();
             }));
-            root = root.child(dialog(
+            let scrim = dialog(
                 format!("{name} is in the Ollama store"),
                 Some("ollama store \u{b7} read-only".into()),
                 crate::library::read_only_hint(&name),
                 None,
                 vec![close, copy],
                 p,
+            );
+            root = root.child(dismissable(
+                scrim,
+                cx.listener(|this, _: &(), _, cx| {
+                    this.state.dismiss_refused();
+                    cx.notify();
+                }),
+                window,
+                cx,
             ));
         }
         root
@@ -968,6 +1066,7 @@ mod tests {
             notice: None,
             manages_server: false,
             runtime: None,
+            retry: None,
         }
     }
 

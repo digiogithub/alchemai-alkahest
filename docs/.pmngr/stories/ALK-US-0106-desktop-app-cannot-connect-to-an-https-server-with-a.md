@@ -2,13 +2,13 @@
 id: ALK-US-0106
 type: story
 title: Desktop app cannot connect to an HTTPS server with a private CA
-status: in_progress
+status: in_review
 priority: medium
 parent: ALK-EP-0013
 author: mcp
 labels: [desktop, security]
 created: 2026-10-17T05:40:03Z
-updated: 2026-10-17T06:43:09Z
+updated: 2026-10-17T07:13:05Z
 started: 2026-10-17T06:43:09Z
 inbox:
   status: accepted
