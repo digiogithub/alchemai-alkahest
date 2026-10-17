@@ -6,6 +6,22 @@ use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::Duration;
 
+/// Stops a server with SIGTERM so its graceful shutdown stops the engine processes (a
+/// SIGKILL would skip the shutdown hooks), then kills it if it is still running after 10 s.
+fn stop_server(child: &mut Child) {
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+    for _ in 0..100 {
+        if let Ok(Some(_)) = child.try_wait() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -30,8 +46,7 @@ struct Serve(Child);
 
 impl Drop for Serve {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        stop_server(&mut self.0);
     }
 }
 

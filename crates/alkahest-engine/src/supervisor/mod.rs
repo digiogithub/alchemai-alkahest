@@ -13,7 +13,9 @@
 
 pub mod health;
 pub mod kill;
+pub mod ledger;
 pub mod logs;
+mod orphan;
 pub mod restart;
 pub mod usage;
 
@@ -34,6 +36,7 @@ use tokio::task::JoinHandle;
 use crate::error::{EngineError, Result};
 use crate::id::EngineId;
 use crate::launch::LaunchSpec;
+use ledger::ProcessLedger;
 use logs::{LogBuffer, Stream};
 use usage::{ResourceSampler, ResourceUsage};
 
@@ -173,6 +176,9 @@ pub struct SpawnOptions {
     pub port_attempts: u32,
     /// Port allocation strategy.
     pub ports: Arc<dyn PortPicker>,
+    /// Runtime ledger every spawned engine is recorded in, so the next server can stop
+    /// engines this one leaves behind when it is killed (ALK-US-0092).
+    pub ledger: Option<Arc<ProcessLedger>>,
 }
 
 impl Default for SpawnOptions {
@@ -187,6 +193,7 @@ impl Default for SpawnOptions {
             stderr_tail_lines: 20,
             port_attempts: 5,
             ports: Arc::new(EphemeralPorts),
+            ledger: None,
         }
     }
 }
@@ -394,11 +401,15 @@ pub fn spawn(spec: LaunchSpec, opts: &SpawnOptions) -> Result<EngineHandle> {
     #[cfg(unix)]
     cmd.process_group(0);
 
-    let mut child = cmd.spawn().map_err(|source| EngineError::Spawn {
+    // Linux: the engine gets SIGTERM if the server dies without stopping it.
+    let mut child = orphan::spawn_tied_to_parent(cmd).map_err(|source| EngineError::Spawn {
         program: spec.program.clone(),
         source,
     })?;
     let pid = child.id();
+    if let (Some(ledger), Some(p)) = (&opts.ledger, pid) {
+        ledger.record(p, &opts.model);
+    }
     tracing::info!(
         engine = %spec.engine,
         model = %opts.model,
@@ -449,6 +460,7 @@ pub fn spawn(spec: LaunchSpec, opts: &SpawnOptions) -> Result<EngineHandle> {
         engine: spec.engine,
         model: opts.model.clone(),
         tail_lines: opts.stderr_tail_lines,
+        ledger: opts.ledger.clone(),
     }));
 
     Ok(EngineHandle {
@@ -557,6 +569,7 @@ struct Monitor {
     engine: EngineId,
     model: String,
     tail_lines: usize,
+    ledger: Option<Arc<ProcessLedger>>,
 }
 
 /// Kills the process group if the monitor is dropped before it reaped the engine (runtime
@@ -588,6 +601,7 @@ async fn monitor(m: Monitor) {
         engine,
         model,
         tail_lines,
+        ledger,
     } = m;
     let mut guard = GroupGuard { pid, armed: true };
 
@@ -603,6 +617,9 @@ async fn monitor(m: Monitor) {
     // Helpers the engine forked may outlive it; the group dies with the engine.
     if let Some(p) = pid {
         kill::kill_group(p);
+        if let Some(ledger) = &ledger {
+            ledger.forget(p);
+        }
     }
     guard.armed = false;
     for r in readers {

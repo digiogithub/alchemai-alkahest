@@ -3,7 +3,9 @@
 //! Opt-in: `ALKAHEST_TEST_ENGINE=1`, an installed llama.cpp (`alkahest engines install
 //! llama-cpp`) and `hf.co/ggml-org/tiny-llamas:Q4_0` in the local catalog (`alkahest pull
 //! hf.co/ggml-org/tiny-llamas:Q4_0`), or another model named by `ALKAHEST_TEST_MODEL`.
-//! `ALKAHEST_TEST_CHAT_MODEL` adds `/api/chat` and streamed `/v1/chat/completions`;
+//! The chat part (`/api/chat` and streamed `/v1/chat/completions`) uses
+//! `ALKAHEST_TEST_CHAT_MODEL`, default `qwen2.5-coder:0.5b` (set it empty to skip). Decision
+//! models such as `tev1:0.8b` refuse chat (ALK-US-0093) and are not valid chat models here;
 //! `ALKAHEST_TEST_EMBED_MODEL` additionally exercises `/api/embed` and `/v1/embeddings`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -19,9 +21,24 @@ struct Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        stop_server(&mut self.child);
     }
+}
+
+/// Stops a server with SIGTERM so its graceful shutdown stops the engine processes (a
+/// SIGKILL would skip the shutdown hooks), then kills it if it is still running after 10 s.
+fn stop_server(child: &mut Child) {
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+    for _ in 0..100 {
+        if let Ok(Some(_)) = child.try_wait() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn free_port() -> u16 {
@@ -121,7 +138,9 @@ async fn real_engine_answers_generate_chat_completions_and_embeddings() {
         .unwrap();
     assert_eq!(ps["models"].as_array().unwrap().len(), 1, "{ps}");
 
-    if let Ok(chat) = std::env::var("ALKAHEST_TEST_CHAT_MODEL") {
+    let chat = std::env::var("ALKAHEST_TEST_CHAT_MODEL")
+        .unwrap_or_else(|_| "qwen2.5-coder:0.5b".to_string());
+    if !chat.is_empty() {
         let v = post(
             base,
             "/api/chat",

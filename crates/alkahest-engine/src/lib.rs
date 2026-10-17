@@ -40,6 +40,7 @@ pub use registry::{EnginePlan, EngineRegistry, PreparedLaunch};
 pub use select::{
     EngineChoice, Os, PRISM_PIN, Platform, SelectionReason, parse_engine_setting, select_engine,
 };
+pub use supervisor::ledger::{LedgerEntry, ProcessLedger, SweepReport};
 pub use supervisor::logs::{LogBuffer, LogLine, Stream};
 pub use supervisor::restart::{RestartDecision, RestartPolicy, RestartTracker};
 pub use supervisor::usage::{ResourceSampler, ResourceUsage};
