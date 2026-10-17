@@ -16,6 +16,7 @@ mod run_cmd;
 mod search_cmd;
 mod serve_cmd;
 mod service_cmd;
+mod service_launchd;
 mod sysinfo_cmd;
 // The renderer is consumed by the listing commands (`ls`, `ps`, ...) of ALK-US-0012/0031.
 #[allow(dead_code)]

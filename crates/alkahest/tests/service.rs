@@ -136,3 +136,103 @@ fn status_json_reports_the_listen_address() {
             contains("\"listen\":\"http://127.0.0.1:11435\"").and(contains("\"installed\":false")),
         );
 }
+
+// launchd (ALK-US-0047): the generator is platform independent, so these run everywhere
+// through `--manager launchd` with `--dry-run` or `--root`.
+
+#[test]
+fn launchd_dry_run_prints_the_daemon_plist_and_launchctl_commands() {
+    let home = tempfile::tempdir().unwrap();
+    alkahest(home.path())
+        .args([
+            "service",
+            "install",
+            "--manager",
+            "launchd",
+            "--dry-run",
+            "--bin",
+            "/usr/local/bin/alkahest",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            contains("# would write /Library/LaunchDaemons/es.digio.alkahest.plist")
+                .and(contains("<string>_alkahest</string>"))
+                .and(contains("<key>KeepAlive</key>"))
+                .and(contains("# would run: dscl . -create /Users/_alkahest"))
+                .and(contains(
+                    "# would run: launchctl bootstrap system /Library/LaunchDaemons/es.digio.alkahest.plist",
+                )),
+        );
+}
+
+#[test]
+fn launchd_agent_install_into_a_root_then_status_and_uninstall() {
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    alkahest(home.path())
+        .args([
+            "service",
+            "install",
+            "--manager",
+            "launchd",
+            "--user",
+            "--bin",
+            "/Applications/Alkahest.app/Contents/MacOS/alkahest",
+            "--root",
+        ])
+        .arg(root.path())
+        .assert()
+        .success()
+        .stdout(contains("# would run: launchctl bootstrap gui/"));
+    let plist = root
+        .path()
+        .join("Library/LaunchAgents/es.digio.alkahest.plist");
+    let text = std::fs::read_to_string(&plist).unwrap();
+    assert!(
+        text.contains("<string>/Applications/Alkahest.app/Contents/MacOS/alkahest</string>"),
+        "{text}"
+    );
+    assert!(!text.contains("UserName"), "{text}");
+
+    alkahest(home.path())
+        .args([
+            "--json",
+            "service",
+            "status",
+            "--manager",
+            "launchd",
+            "--user",
+            "--root",
+        ])
+        .arg(root.path())
+        .assert()
+        .success()
+        .stdout(contains("\"installed\":true").and(contains("\"service\":\"es.digio.alkahest\"")));
+
+    alkahest(home.path())
+        .args([
+            "service",
+            "uninstall",
+            "--manager",
+            "launchd",
+            "--user",
+            "--root",
+        ])
+        .arg(root.path())
+        .assert()
+        .success()
+        .stdout(contains("launchctl bootout gui/"));
+    assert!(!plist.exists());
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn another_platforms_manager_needs_dry_run_or_root() {
+    let home = tempfile::tempdir().unwrap();
+    alkahest(home.path())
+        .args(["service", "start", "--manager", "launchd"])
+        .assert()
+        .failure()
+        .stderr(contains("only works with --dry-run or --root"));
+}

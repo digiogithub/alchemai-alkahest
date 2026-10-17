@@ -390,10 +390,37 @@ pub enum ServiceAction {
     Status(ServiceArgs),
 }
 
+/// Service managers `alkahest service` can target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ServiceManager {
+    /// systemd (Linux).
+    Systemd,
+    /// launchd (macOS).
+    Launchd,
+    /// The Windows service control manager.
+    Windows,
+}
+
+impl ServiceManager {
+    /// The manager of the platform this binary was built for.
+    pub fn native() -> Option<Self> {
+        if cfg!(target_os = "linux") {
+            Some(Self::Systemd)
+        } else if cfg!(target_os = "macos") {
+            Some(Self::Launchd)
+        } else if cfg!(windows) {
+            Some(Self::Windows)
+        } else {
+            None
+        }
+    }
+}
+
 /// Options shared by the `service` actions.
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct ServiceArgs {
-    /// Manage a per-user service (`systemctl --user`) instead of the system service.
+    /// Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the
+    /// system service.
     #[arg(long)]
     pub user: bool,
     /// Print the unit and the commands without writing or running anything.
@@ -405,6 +432,10 @@ pub struct ServiceArgs {
     /// Binary the unit starts; defaults to the running executable.
     #[arg(long, value_name = "PATH")]
     pub bin: Option<std::path::PathBuf>,
+    /// Service manager to target; defaults to this platform's. Another platform's manager
+    /// only works with `--dry-run` or `--root` (packaging, review).
+    #[arg(long, value_enum)]
+    pub manager: Option<ServiceManager>,
 }
 
 /// `alkahest config ...`

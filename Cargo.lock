@@ -187,6 +187,7 @@ dependencies = [
  "predicates",
  "reqwest",
  "rpassword",
+ "rustix",
  "rustyline",
  "serde_json",
  "tempfile",

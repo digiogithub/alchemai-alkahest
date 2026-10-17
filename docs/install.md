@@ -97,3 +97,18 @@ A renewed certificate (for example from an ACME client) is picked up on `SIGHUP`
 files change; open connections keep the old one. The CLI switches to `https://` by itself and
 trusts the generated `ca.pem` when it shares the data directory; elsewhere set
 `ALKAHEST_CA_CERT=/path/to/ca.pem`. The key file is written with mode 0600.
+
+## Running as a service
+
+`alkahest service install|uninstall|start|stop|status` (ALK-SP-0009.R1) targets the platform's
+service manager; `--dry-run` prints the files and commands without changing anything, and
+`--manager systemd|launchd|windows` with `--dry-run` or `--root <dir>` shows what another
+platform would get.
+
+| Platform | System service | `--user` |
+|---|---|---|
+| Linux | systemd unit, user `alkahest`, data `/var/lib/alkahest` | `~/.config/systemd/user/alkahest.service` |
+| macOS | LaunchDaemon `/Library/LaunchDaemons/es.digio.alkahest.plist`, hidden user `_alkahest`, data `/Library/Application Support/Alkahest`, output `/Library/Logs/Alkahest/` | LaunchAgent `~/Library/LaunchAgents/es.digio.alkahest.plist`, output `~/Library/Logs/Alkahest/` |
+
+On macOS `service stop` unloads the job (`launchctl bootout`), so `KeepAlive` does not restart it;
+it loads again at the next boot or login, or with `service start`.
