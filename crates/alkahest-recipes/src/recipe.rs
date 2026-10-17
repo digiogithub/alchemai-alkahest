@@ -145,6 +145,10 @@ pub struct SourceBuild {
     pub git: String,
     /// Commit, tag or branch to build; a commit id or tag keeps the build reproducible.
     pub rev: String,
+    /// Fetch the repository's submodules at their pinned commits (stable-diffusion.cpp vendors
+    /// ggml that way).
+    #[serde(default)]
+    pub submodules: bool,
     /// Arguments passed to the CMake configure step (`-DGGML_CUDA=ON`).
     #[serde(default)]
     pub cmake_flags: Vec<String>,

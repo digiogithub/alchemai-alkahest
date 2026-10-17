@@ -145,6 +145,26 @@ pub(crate) async fn build_from_source(
     )
     .await?;
 
+    if src.submodules {
+        run(
+            &step(
+                "git submodules",
+                &git,
+                vec![
+                    "submodule".into(),
+                    "update".into(),
+                    "--init".into(),
+                    "--recursive".into(),
+                    "--depth".into(),
+                    "1".into(),
+                ],
+            ),
+            log,
+            cancel,
+        )
+        .await?;
+    }
+
     let mut configure: Vec<String> = vec![
         "-S".into(),
         ".".into(),

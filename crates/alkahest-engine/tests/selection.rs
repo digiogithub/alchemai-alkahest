@@ -288,7 +288,11 @@ fn info(format: ModelFormat, kind: ModelKind, quant: Option<&str>, needs_prism: 
 fn agrees_with_the_catalog_default_engine() {
     // `alkahest ls` shows ModelInfo::default_engine; the scheduler must launch the same one.
     let p = linux_cuda();
-    for format in [ModelFormat::Gguf, ModelFormat::Safetensors] {
+    for format in [
+        ModelFormat::Gguf,
+        ModelFormat::Safetensors,
+        ModelFormat::Ggml,
+    ] {
         for kind in ModelKind::ALL {
             for quant in [None, Some("Q4_K_M"), Some("PQ2_0"), Some("PTQ1_0")] {
                 for needs_prism in [false, true] {

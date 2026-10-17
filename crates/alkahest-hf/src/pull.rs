@@ -247,6 +247,19 @@ pub async fn pull_hf_with(
     }
 }
 
+/// Whether the Hub marks the repository as an image generation model: the `text-to-image`
+/// pipeline, or the tags stable-diffusion.cpp conversions carry. Their GGUF files have no
+/// metadata, so this is how the manifest learns what the model does.
+fn is_image_repo(info: &crate::ModelInfo) -> bool {
+    matches!(
+        info.pipeline_tag.as_deref(),
+        Some("text-to-image" | "image-to-image")
+    ) || info
+        .tags
+        .iter()
+        .any(|t| matches!(t.as_str(), "stable-diffusion.cpp" | "sd.cpp"))
+}
+
 /// The GGUF half of [`pull_hf_with`].
 async fn pull_gguf(
     transfer: &Transfer,
@@ -336,7 +349,14 @@ async fn pull_gguf(
     let mut config = ModelConfig {
         model_format: "gguf".into(),
         file_type: sel.variant.quant.clone().unwrap_or_default(),
-        capabilities: vec!["completion".into()],
+        capabilities: vec![
+            if is_image_repo(&info) {
+                "image-generation"
+            } else {
+                "completion"
+            }
+            .into(),
+        ],
         ..ModelConfig::default()
     };
     if let Some(g) = &info.gguf {

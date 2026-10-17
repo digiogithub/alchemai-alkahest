@@ -242,6 +242,23 @@ impl ModelInfo {
             }
         };
 
+        // Generation models whose file header says nothing (the conversions of
+        // stable-diffusion.cpp) are marked by the capability the Hub pull wrote into the
+        // manifest.
+        let kind = match kind {
+            ModelKind::Chat | ModelKind::Completion
+                if cfg.capabilities.iter().any(|c| c == "image-generation") =>
+            {
+                ModelKind::Image
+            }
+            ModelKind::Chat | ModelKind::Completion
+                if cfg.capabilities.iter().any(|c| c == "transcription") =>
+            {
+                ModelKind::SpeechToText
+            }
+            k => k,
+        };
+
         let known =
             |s: &str| (!s.is_empty() && !s.eq_ignore_ascii_case("unknown")).then(|| s.to_owned());
         let architecture = facts
@@ -293,12 +310,10 @@ impl ModelInfo {
     /// engine-choice rule of ALK-SP-0003.R2. A per-model override in the configuration
     /// overlay wins over it.
     pub fn default_engine(&self) -> &'static str {
-        if self.format == ModelFormat::Safetensors {
-            return "vllm";
-        }
         match self.kind {
             ModelKind::SpeechToText => "whisper-cpp",
             ModelKind::Image | ModelKind::Video => "stable-diffusion-cpp",
+            _ if self.format == ModelFormat::Safetensors => "vllm",
             _ if self.needs_prism || self.quantization.as_deref().is_some_and(is_prism_quant) => {
                 "prism-llama-cpp"
             }
@@ -332,6 +347,8 @@ fn capabilities_of(
         }
         ModelKind::Embeddings => add("embedding"),
         ModelKind::Rerank => add("rerank"),
+        ModelKind::Image => add("image-generation"),
+        ModelKind::SpeechToText => add("transcription"),
         _ => {}
     }
     if kind == ModelKind::Decision {

@@ -127,3 +127,50 @@ async fn unknown_model_lists_what_exists() {
         "{text}"
     );
 }
+
+/// stable-diffusion.cpp conversions carry no GGUF metadata; the Hub tags mark them as images.
+#[tokio::test]
+async fn sd_cpp_repositories_are_image_models() {
+    let weights: Vec<u8> = (0..3_000u32).map(|i| (i % 97) as u8).collect();
+    let server = MockServer::start().await;
+    let info = serde_json::json!({
+        "id": "org/sd-gguf", "sha": REVISION, "gated": false, "private": false,
+        "tags": ["gguf", "sd.cpp", "stable-diffusion.cpp"],
+        "siblings": [sibling("sd_turbo-f16-q8_0.gguf", &weights)]
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/models/org/sd-gguf"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(info))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/org/sd-gguf/resolve/{REVISION}/sd_turbo-f16-q8_0.gguf"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(weights.clone()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = AlkahestStore::open(dir.path()).unwrap();
+    let client = HfClient::new(&server.uri(), None).unwrap();
+    let hf: HfRef = "hf.co/org/sd-gguf:sd_turbo-f16-q8_0.gguf".parse().unwrap();
+
+    let out = pull_hf(&transfer(&store), &client, &hf, None)
+        .await
+        .unwrap();
+
+    let catalog = Catalog::new(store, None, None);
+    let entry = catalog.resolve_loadable(&out.name.to_string()).unwrap();
+    assert_eq!(entry.info.kind, ModelKind::Image);
+    assert_eq!(entry.info.default_engine(), "stable-diffusion-cpp");
+    assert!(
+        entry
+            .info
+            .capabilities
+            .contains(&"image-generation".to_string())
+    );
+}

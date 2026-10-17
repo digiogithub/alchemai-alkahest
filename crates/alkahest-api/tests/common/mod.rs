@@ -291,6 +291,33 @@ async fn inference(State(log): State<Arc<LlamaLog>>, mut mp: axum::extract::Mult
     }
 }
 
+/// sd-server `/v1/images/generations`: logs the body and answers `n` tiny images ("PNG" as
+/// base64), or sd-server's own `{"error": ...}` for the prompt "FAIL".
+async fn images_generations(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    log.requests
+        .lock()
+        .push(("/v1/images/generations".into(), body.clone()));
+    if body["prompt"].as_str().unwrap().contains("FAIL") {
+        return Response::builder()
+            .status(500)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"error":"generate_image returned no results"}"#,
+            ))
+            .unwrap();
+    }
+    let n = body["n"].as_u64().unwrap_or(1);
+    let data: Vec<Value> = (0..n)
+        .map(|_| json!({"b64_json": "iVBORw0KGgo="}))
+        .collect();
+    axum::Json(json!({
+        "created": 1700000000, "output_format": body["output_format"].as_str().unwrap_or("png"),
+        "data": data
+    }))
+    .into_response_body()
+}
+
 /// Per-slot context the fake engine reports in `/props`.
 pub const FAKE_N_CTX: u64 = 300;
 
@@ -419,6 +446,7 @@ pub async fn fake_llama(log: Arc<LlamaLog>) -> u16 {
         .route("/props", axum::routing::get(props))
         .route("/v1/rerank", post(rerank))
         .route("/inference", post(inference))
+        .route("/v1/images/generations", post(images_generations))
         .route("/v1/systemone", post(systemone))
         .with_state(log);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -561,6 +589,13 @@ pub fn rerank_model() -> FakeModel {
 pub fn stt_model() -> FakeModel {
     FakeModel {
         caps: Capabilities::of(&[Capability::SpeechToText]),
+        settings: ModelSettings::default(),
+    }
+}
+
+pub fn image_model() -> FakeModel {
+    FakeModel {
+        caps: Capabilities::of(&[Capability::Image]),
         settings: ModelSettings::default(),
     }
 }

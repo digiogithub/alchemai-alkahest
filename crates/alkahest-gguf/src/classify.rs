@@ -224,8 +224,19 @@ fn kind_from_hf_tag(tag: &str) -> Option<ModelKind> {
     })
 }
 
+/// stable-diffusion.cpp's own conversions (`sd_turbo-f16-q8_0.gguf`, SD 1.x/2.x/XL
+/// checkpoints) carry no metadata at all, only the original checkpoint's tensor names: the
+/// UNet under `model.diffusion_model.` and the VAE under `first_stage_model.`.
+fn looks_like_diffusion_checkpoint(g: &Gguf) -> bool {
+    g.tensors.iter().any(|t| {
+        t.name.starts_with("model.diffusion_model.") || t.name.starts_with("first_stage_model.")
+    })
+}
+
 fn kind_from_gguf(g: &Gguf, has_mmproj: bool) -> Option<ModelKind> {
-    let arch = g.architecture()?;
+    let Some(arch) = g.architecture() else {
+        return looks_like_diffusion_checkpoint(g).then_some(ModelKind::Image);
+    };
     if arch == "clip" || g.is_vision_projector() {
         return Some(ModelKind::Vision);
     }

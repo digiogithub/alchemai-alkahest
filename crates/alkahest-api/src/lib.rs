@@ -15,6 +15,7 @@
 //!   `Arc<Catalog>`, [`pull::PullService`], [`service::UpstreamClient`]) and [`HttpError`].
 //! * [`pull`]: pull orchestration shared with `alkahest pull`.
 //! * [`decisions`]: `/v1/systemone` and `/v1/decisions` (ALK-SP-0007).
+//! * [`audio`], [`imagegen`]: `/v1/audio/*` and `/v1/images/generations` (ALK-SP-0005.R4).
 
 pub mod admin;
 pub mod anthropic;
@@ -25,6 +26,7 @@ pub mod decisions;
 pub mod dialect;
 pub mod error;
 pub mod generation;
+pub mod imagegen;
 pub mod images;
 pub mod keys;
 pub mod ollama;
@@ -52,6 +54,7 @@ pub fn inference_routes() -> axum::Router<AppState> {
         .merge(responses::routes())
         .merge(rerank::routes())
         .merge(audio::routes())
+        .merge(imagegen::routes())
         .merge(decisions::routes())
         .merge(admin::routes())
 }
