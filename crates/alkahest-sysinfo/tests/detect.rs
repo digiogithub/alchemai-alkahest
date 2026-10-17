@@ -190,3 +190,36 @@ fn real_nvidia_gpu_when_enabled() {
     assert!(gpu.cuda_version.is_some());
     assert!(matches!(info.best_accelerator(), Accelerator::Cuda { .. }));
 }
+
+#[test]
+fn memory_monitor_reads_ram_without_a_full_detection() {
+    let monitor = MemoryMonitor::new();
+    let a = monitor.snapshot();
+    assert!(a.total_ram > 0 && a.available_ram > 0 && a.available_ram <= a.total_ram);
+    // Repeated snapshots reuse the open NVML session and stay consistent.
+    let b = monitor.snapshot();
+    assert_eq!(a.total_ram, b.total_ram);
+    assert_eq!(a.total_vram, b.total_vram);
+    assert_eq!(a.gpu_count, b.gpu_count);
+    // A process that holds no GPU memory (this test) has no per-process VRAM.
+    assert_eq!(monitor.process_vram(std::process::id()), None);
+}
+
+#[test]
+fn real_memory_monitor_sees_the_gpu_when_enabled() {
+    if std::env::var("ALKAHEST_TEST_GPU").as_deref() != Ok("1") {
+        return;
+    }
+    let monitor = MemoryMonitor::new();
+    let m = monitor.snapshot();
+    assert!(m.gpu_count > 0 && m.total_vram > 0 && m.free_vram <= m.total_vram);
+    // Same device list as the full detection.
+    let info = detect();
+    let nvidia_total: u64 = info
+        .gpus
+        .iter()
+        .filter(|g| g.vendor == GpuVendor::Nvidia)
+        .map(|g| g.vram_total_bytes)
+        .sum();
+    assert!(m.total_vram >= nvidia_total);
+}

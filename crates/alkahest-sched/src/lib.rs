@@ -23,8 +23,8 @@ pub use admission::{Accounted, MemoryProbe, MemorySnapshot, StaticMemoryProbe, S
 pub use backend::{CatalogBackend, EngineInstance, ModelBackend, ResolvedModel};
 pub use error::{Result, SchedError};
 pub use memory::{
-    EstimateConfig, EstimateError, GpuLayers, KvCacheType, MemoryEstimate, ModelProfile, estimate,
-    estimate_gguf,
+    EstimateConfig, EstimateError, GgmlWorkload, GpuLayers, KvCacheType, MemoryEstimate,
+    ModelProfile, estimate, estimate_ggml, estimate_gguf,
 };
 pub use metrics::{
     ModelState, ModelStatus, Processor, SchedulerSnapshot, Usage, render_prometheus,

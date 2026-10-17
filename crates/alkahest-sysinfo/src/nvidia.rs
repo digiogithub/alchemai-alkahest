@@ -128,6 +128,150 @@ fn query() -> Option<Vec<GpuInfo>> {
     }
 }
 
+/// `nvmlProcessInfo_t` (the v2 layout used by `nvmlDeviceGetComputeRunningProcesses_v3`).
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct NvmlProcessInfo {
+    pid: c_uint,
+    used_gpu_memory: u64,
+    gpu_instance_id: c_uint,
+    compute_instance_id: c_uint,
+}
+
+/// `NVML_VALUE_NOT_AVAILABLE`: the driver does not report this process's memory (containers,
+/// WSL, missing permissions).
+const NVML_VALUE_NOT_AVAILABLE: u64 = u64::MAX;
+/// `NVML_ERROR_INSUFFICIENT_SIZE`: the process array was too small; the count is updated.
+const NVML_ERROR_INSUFFICIENT_SIZE: c_int = 7;
+
+type ProcessesFn = unsafe extern "C" fn(*mut c_void, *mut c_uint, *mut NvmlProcessInfo) -> c_int;
+
+/// A loaded, initialised NVML that stays open, for cheap repeated memory queries.
+///
+/// [`detect`] opens and closes NVML on every call, which is right for a one-off hardware
+/// report but too heavy for the scheduler's per-load memory snapshot. A session keeps the
+/// library and the device handles, and calls `nvmlShutdown` when dropped.
+pub(crate) struct Session {
+    shutdown: ShutdownFn,
+    memory_fn: MemoryFn,
+    processes_fn: Option<ProcessesFn>,
+    /// Device handles (`nvmlDevice_t`), kept as integers so the session is `Send + Sync`.
+    devices: Vec<usize>,
+    /// Keeps the symbols above valid; dropped after `Drop::drop` has called `nvmlShutdown`.
+    _lib: libloading::Library,
+}
+
+impl Session {
+    /// Opens NVML, or `None` when it is absent, fails to initialise or lists no device.
+    #[allow(unsafe_code)]
+    pub(crate) fn open() -> Option<Self> {
+        // SAFETY: loading NVML runs its initialisers, which are safe in any process.
+        let lib = LIBRARY_NAMES
+            .iter()
+            .find_map(|n| unsafe { libloading::Library::new(*n).ok() })?;
+        // SAFETY: every symbol type matches nvml.h; the copied function pointers stay valid
+        // because `lib` is stored in the session and outlives them.
+        unsafe {
+            let init: InitFn = *lib.get::<InitFn>(b"nvmlInit_v2\0").ok()?;
+            let shutdown: ShutdownFn = *lib.get::<ShutdownFn>(b"nvmlShutdown\0").ok()?;
+            let count_fn: CountFn = *lib.get::<CountFn>(b"nvmlDeviceGetCount_v2\0").ok()?;
+            let handle_fn: HandleFn = *lib
+                .get::<HandleFn>(b"nvmlDeviceGetHandleByIndex_v2\0")
+                .ok()?;
+            let memory_fn: MemoryFn = *lib.get::<MemoryFn>(b"nvmlDeviceGetMemoryInfo\0").ok()?;
+            let processes_fn: Option<ProcessesFn> = lib
+                .get::<ProcessesFn>(b"nvmlDeviceGetComputeRunningProcesses_v3\0")
+                .ok()
+                .map(|s| *s);
+            if init() != 0 {
+                return None;
+            }
+            let mut count: c_uint = 0;
+            let mut devices = Vec::new();
+            if count_fn(&mut count) == 0 {
+                for i in 0..count {
+                    let mut handle: *mut c_void = std::ptr::null_mut();
+                    if handle_fn(i, &mut handle) == 0 && !handle.is_null() {
+                        devices.push(handle as usize);
+                    }
+                }
+            }
+            if devices.is_empty() {
+                let _ = shutdown();
+                return None;
+            }
+            Some(Self {
+                shutdown,
+                memory_fn,
+                processes_fn,
+                devices,
+                _lib: lib,
+            })
+        }
+    }
+
+    /// `(total, free)` bytes of every device, in index order; a device that fails to answer
+    /// is skipped.
+    #[allow(unsafe_code)]
+    pub(crate) fn memory(&self) -> Vec<(u64, u64)> {
+        self.devices
+            .iter()
+            .filter_map(|&h| {
+                let mut mem = NvmlMemory::default();
+                // SAFETY: `h` is a handle NVML returned and the session keeps NVML initialised;
+                // `mem` matches `nvmlMemory_t`.
+                (unsafe { (self.memory_fn)(h as *mut c_void, &mut mem) } == 0)
+                    .then_some((mem.total, mem.free))
+            })
+            .collect()
+    }
+
+    /// VRAM the compute process `pid` holds, summed over devices; `None` when the process is
+    /// on no device, the driver does not report per-process memory, or NVML lacks the call.
+    #[allow(unsafe_code)]
+    pub(crate) fn process_vram(&self, pid: u32) -> Option<u64> {
+        let query = self.processes_fn?;
+        let mut total: Option<u64> = None;
+        for &h in &self.devices {
+            // The process list can grow between the size query and the fetch: retry with the
+            // count NVML reports, a few times.
+            let mut capacity: c_uint = 0;
+            let mut buf: Vec<NvmlProcessInfo> = Vec::new();
+            for _ in 0..4 {
+                let mut count = capacity;
+                // SAFETY: `buf` holds `capacity` elements (a null-like empty buffer when 0, in
+                // which case NVML only writes the needed count); the struct matches
+                // `nvmlProcessInfo_t`.
+                let rc = unsafe { query(h as *mut c_void, &mut count, buf.as_mut_ptr()) };
+                if rc == 0 {
+                    buf.truncate(count as usize);
+                    break;
+                }
+                if rc != NVML_ERROR_INSUFFICIENT_SIZE {
+                    buf.clear();
+                    break;
+                }
+                capacity = count.saturating_add(8);
+                buf = vec![NvmlProcessInfo::default(); capacity as usize];
+            }
+            for p in buf.iter().take(capacity as usize).filter(|p| p.pid == pid) {
+                if p.used_gpu_memory != NVML_VALUE_NOT_AVAILABLE {
+                    total = Some(total.unwrap_or(0).saturating_add(p.used_gpu_memory));
+                }
+            }
+        }
+        total
+    }
+}
+
+impl Drop for Session {
+    #[allow(unsafe_code)]
+    fn drop(&mut self) {
+        // SAFETY: NVML was initialised in `open` and no query runs after this point.
+        let _ = unsafe { (self.shutdown)() };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

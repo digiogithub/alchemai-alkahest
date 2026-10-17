@@ -326,6 +326,10 @@ pub enum EnginesAction {
         /// Reinstall even when the engine is already installed.
         #[arg(long)]
         force: bool,
+        /// Also unpack the CUDA runtime libraries (cudart, cublas; 150 to 600 MB) next to the
+        /// engine, for a CUDA build on a machine without a system-wide CUDA runtime.
+        #[arg(long)]
+        with_runtime: bool,
     },
     /// Remove an installed engine version.
     #[command(visible_alias = "remove", disable_version_flag = true)]

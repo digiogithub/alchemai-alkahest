@@ -137,6 +137,51 @@ pub struct Asset {
     pub strip_components: usize,
 }
 
+/// An extra archive unpacked into the same install directory as the engine archive: the CUDA
+/// runtime libraries that upstream publishes separately (`cudart-llama-*`), for instance.
+///
+/// Companions are large (150 to 600 MB) and optional: they are only installed on request
+/// (`alkahest engines install --with-runtime`), so a host with a system-wide CUDA runtime does
+/// not pay for a second copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Companion {
+    /// Short label (`cuda-runtime`), recorded in the install marker.
+    pub name: String,
+    /// Operating system (`linux`, `macos`, `windows`).
+    pub os: String,
+    /// CPU architecture (`x86_64`, `aarch64`).
+    pub arch: String,
+    /// HTTPS download URL.
+    pub url: String,
+    /// Lower-case hex SHA-256 of the archive (a companion is never trust-on-first-use).
+    pub sha256: String,
+    /// Archive size in bytes, when known.
+    #[serde(default)]
+    pub size: Option<u64>,
+    /// Container format.
+    pub format: ArchiveFormat,
+    /// Leading path components to drop from every entry.
+    #[serde(default)]
+    pub strip_components: usize,
+}
+
+impl Companion {
+    /// The companion as a plain [`Asset`], which is how it is downloaded and unpacked.
+    pub fn as_asset(&self) -> Asset {
+        Asset {
+            os: self.os.clone(),
+            arch: self.arch.clone(),
+            url: self.url.clone(),
+            sha256: Some(self.sha256.clone()),
+            tofu: false,
+            size: self.size,
+            format: self.format,
+            strip_components: self.strip_components,
+        }
+    }
+}
+
 /// How to build a variant from source (`alkahest engines install --from-source`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -219,6 +264,8 @@ struct VariantDef {
     #[serde(default)]
     assets: Vec<Asset>,
     #[serde(default)]
+    companions: Vec<Companion>,
+    #[serde(default)]
     source: Option<SourceBuild>,
     #[serde(default)]
     venv: Option<VenvBuild>,
@@ -273,6 +320,8 @@ pub struct Recipe {
     pub library_dirs: Vec<String>,
     /// Prebuilt archives per platform (may be empty when the variant is source-only).
     pub assets: Vec<Asset>,
+    /// Optional extra archives unpacked into the same directory (the CUDA runtime).
+    pub companions: Vec<Companion>,
     /// Source build steps, when the variant can be built locally.
     pub source: Option<SourceBuild>,
     /// Python virtual environment steps, for engines distributed as Python packages (vLLM).
@@ -365,6 +414,26 @@ pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
                 return Err(vbad(format!("{at}: url must be https")));
             }
         }
+        for c in &v.companions {
+            let at = format!("companion `{}` for {}/{}", c.name, c.os, c.arch);
+            let hex_ok = c.sha256.len() == 64
+                && c.sha256
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            if !hex_ok {
+                return Err(vbad(format!(
+                    "{at}: sha256 must be 64 lower-case hex digits"
+                )));
+            }
+            if !c.url.starts_with("https://") {
+                return Err(vbad(format!("{at}: url must be https")));
+            }
+            if !ident(&c.name) {
+                return Err(vbad(format!(
+                    "{at}: name must use letters, digits, `-`, `_`, `.`"
+                )));
+            }
+        }
         if let Some(s) = &v.source {
             if !(s.git.starts_with("https://") || s.git.starts_with("ssh://")) {
                 return Err(vbad("source.git must be an https:// or ssh:// URL".into()));
@@ -396,6 +465,7 @@ pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
             executable: file.executable.clone(),
             library_dirs: file.library_dirs.clone(),
             assets: v.assets,
+            companions: v.companions,
             source: v.source,
             venv: v.venv,
         });
@@ -486,6 +556,14 @@ impl Recipe {
         self.assets
             .iter()
             .find(|a| a.os == host.os && a.arch == host.arch)
+    }
+
+    /// The companion archives that apply to `host` (possibly none).
+    pub fn companions_for(&self, host: &Host) -> Vec<&Companion> {
+        self.companions
+            .iter()
+            .filter(|c| c.os == host.os && c.arch == host.arch)
+            .collect()
     }
 
     /// Whether installing on `host` has to build from source: no prebuilt archive exists but
