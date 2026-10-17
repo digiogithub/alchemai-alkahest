@@ -32,6 +32,7 @@ pub mod feed;
 pub mod generation;
 pub mod imagegen;
 pub mod images;
+pub mod import;
 pub mod keys;
 pub mod ollama;
 pub mod openai;

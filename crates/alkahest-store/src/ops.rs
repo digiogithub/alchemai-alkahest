@@ -187,6 +187,12 @@ impl AlkahestStore {
         let path = self.blob_path(d);
         let size = match fs::metadata(&path) {
             Ok(m) => m.len(),
+            // A symbolic link of a linked import whose target is gone: remove the link.
+            Err(e)
+                if e.kind() == io::ErrorKind::NotFound && fs::symlink_metadata(&path).is_ok() =>
+            {
+                0
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(StoreError::io("stat", &path, e)),
         };

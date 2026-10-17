@@ -8,6 +8,7 @@ mod certs_cmd;
 mod cli;
 mod engines_cmd;
 mod hf_cmd;
+mod import_cmd;
 mod keys_cmd;
 mod model_config_cmd;
 mod models_cmd;
@@ -148,6 +149,8 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             source,
             destination,
         } => models_cmd::cp(source, destination, &loaded, cli.global.json),
+        Command::Create(args) => import_cmd::create(args, &loaded, cli.global.json),
+        Command::Import(args) => import_cmd::import(args, &loaded, cli.global.json),
         Command::Gc { dry_run } => models_cmd::gc(*dry_run, &loaded, cli.global.json),
         Command::Show(args) => models_cmd::show(args, &loaded, cli.global.json),
         Command::Search(args) => search_cmd::run(args, &loaded, cli.global.json),

@@ -7,6 +7,11 @@
 //! symlinks into `blobs/`. Symlinks (rather than hard links) mean a deleted blob can never
 //! linger as a hidden copy; [`AlkahestStore::delete_model`] and [`AlkahestStore::gc`] remove
 //! snapshot directories that no manifest owns any more.
+//!
+//! Split GGUF models (several [`media_type::MODEL`] layers, one per shard) get the same kind
+//! of view (ALK-SP-0002.R8): llama.cpp finds the other shards of `x-00001-of-00003.gguf` by
+//! their names next to it, which content-addressed blob names cannot provide. Their view
+//! holds one link per shard, named after the shard's original file name (the layer `name`).
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -27,6 +32,27 @@ pub fn is_snapshot_manifest(manifest: &Manifest) -> bool {
         .layers
         .iter()
         .any(|l| l.media_type == media_type::SAFETENSORS_FILE)
+}
+
+/// Whether `manifest` is a split GGUF model: more than one model-weights layer.
+pub fn is_split_manifest(manifest: &Manifest) -> bool {
+    manifest
+        .layers
+        .iter()
+        .filter(|l| l.media_type == media_type::MODEL)
+        .count()
+        > 1
+}
+
+/// Whether `manifest` is loaded through a view directory (safetensors snapshot or split GGUF).
+pub fn needs_view(manifest: &Manifest) -> bool {
+    is_snapshot_manifest(manifest) || is_split_manifest(manifest)
+}
+
+/// The file name a split GGUF shard layer is linked under: the last component of its `name`.
+pub(crate) fn shard_file_name(name: Option<&str>) -> Option<&str> {
+    let n = name?.rsplit(['/', '\\']).next()?;
+    safe_relative(n).map(|_| n)
 }
 
 /// Validates a repository-relative path: relative, no `..`, no empty or dot components.
@@ -58,19 +84,20 @@ impl AlkahestStore {
     ) -> Result<PathBuf> {
         let final_dir = self.snapshot_path(manifest_digest);
         let mut wanted = Vec::new();
-        for layer in manifest
-            .layers
-            .iter()
-            .filter(|l| l.media_type == media_type::SAFETENSORS_FILE)
-        {
-            let rel = layer
-                .name
-                .as_deref()
-                .and_then(safe_relative)
-                .ok_or_else(|| StoreError::InvalidManifest {
-                    what: manifest_digest.to_string(),
-                    reason: format!("safetensors layer has no usable path: {:?}", layer.name),
-                })?;
+        let split = is_split_manifest(manifest);
+        for layer in manifest.layers.iter().filter(|l| {
+            l.media_type == media_type::SAFETENSORS_FILE
+                || (split && l.media_type == media_type::MODEL)
+        }) {
+            let rel = if layer.media_type == media_type::MODEL {
+                shard_file_name(layer.name.as_deref()).map(PathBuf::from)
+            } else {
+                layer.name.as_deref().and_then(safe_relative)
+            }
+            .ok_or_else(|| StoreError::InvalidManifest {
+                what: manifest_digest.to_string(),
+                reason: format!("view layer has no usable path: {:?}", layer.name),
+            })?;
             if !self.has_blob(&layer.digest) {
                 return Err(StoreError::MissingBlob(layer.digest));
             }

@@ -14,7 +14,10 @@
 //! Invariants:
 //!
 //! * A file under `blobs/` always hashes to its name: blobs are written to `tmp/`, hashed on
-//!   the way, fsynced and renamed into place only when the digest matches.
+//!   the way, fsynced and renamed into place only when the digest matches. The one exception
+//!   is a model imported with `--link` ([`crate::import`]): its blob entries are hard or
+//!   symbolic links to files outside the store, hashed when imported and re-checked against
+//!   the model's link record before every load.
 //! * A manifest is installed only when every blob it references is present with the declared
 //!   size, so a listed model is always complete.
 //! * Manifests are replaced atomically (temp file and rename).
@@ -149,6 +152,7 @@ impl AlkahestStore {
             written: 0,
             expected,
             blobs_dir: self.blobs_dir(),
+            replace_links: None,
         })
     }
 
@@ -450,6 +454,9 @@ pub struct BlobWriter {
     written: u64,
     expected: Option<Digest>,
     blobs_dir: PathBuf,
+    /// `Some`: replace an existing blob that is only a link to an outside file, giving the
+    /// new copy this modification time (`Some(None)`: keep the commit time).
+    replace_links: Option<Option<std::time::SystemTime>>,
 }
 
 impl BlobWriter {
@@ -458,16 +465,31 @@ impl BlobWriter {
         self.written
     }
 
+    /// Makes [`BlobWriter::commit`] replace an existing blob that is only a hard or symbolic
+    /// link to a file outside the store (left by a `--link` import) with this store-owned
+    /// copy, stamped with `mtime` so the linked model's record still matches it.
+    pub fn replacing_links(mut self, mtime: Option<std::time::SystemTime>) -> Self {
+        self.replace_links = Some(mtime);
+        self
+    }
+
     /// Verifies the digest and moves the blob into `blobs/`; returns the digest. On mismatch
     /// the temp file is deleted and [`StoreError::DigestMismatch`] returned, so no partial or
     /// wrong blob ever appears under `blobs/`. If the blob already exists the new copy is
     /// discarded (deduplication).
     pub fn commit(self) -> Result<Digest> {
+        self.commit_reporting().map(|(d, _)| d)
+    }
+
+    /// [`BlobWriter::commit`] that also says whether a new blob file was written (`false`:
+    /// the store already had it).
+    pub fn commit_reporting(self) -> Result<(Digest, bool)> {
         let Self {
             out,
             hasher,
             expected,
             blobs_dir,
+            replace_links,
             ..
         } = self;
         let tmp = out
@@ -480,24 +502,31 @@ impl BlobWriter {
             return Err(StoreError::DigestMismatch { expected, actual });
         }
         let dest = blobs_dir.join(actual.filename());
-        if dest.is_file() {
-            return Ok(actual);
+        let replace = replace_links.is_some() && crate::import::is_link_blob(&dest);
+        if dest.is_file() && !replace {
+            return Ok((actual, false));
         }
         tmp.as_file()
             .sync_all()
             .map_err(|e| StoreError::io("sync", tmp.path(), e))?;
         fsutil::set_readable(tmp.as_file(), tmp.path())?;
+        if replace && let Some(Some(t)) = replace_links {
+            tmp.as_file()
+                .set_modified(t)
+                .map_err(|e| StoreError::io("touch", tmp.path(), e))?;
+        }
+        // A dangling symbolic link left by a linked import is replaced by the rename too.
         if let Err(e) = fsutil::persist(tmp, &dest) {
             // Blobs are content-addressed: when a concurrent writer committed the same digest
             // first (Windows refuses to replace it while that rename is in flight), its copy
             // is byte-identical to ours and the commit has succeeded.
             if dest.is_file() {
-                return Ok(actual);
+                return Ok((actual, false));
             }
             return Err(StoreError::io("rename", &dest, e));
         }
         fsutil::fsync_dir(&blobs_dir)?;
-        Ok(actual)
+        Ok((actual, true))
     }
 }
 

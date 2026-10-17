@@ -13,6 +13,8 @@
 //! * [`meta`]: [`ModelInfo`] and the cached GGUF facts behind it.
 //! * [`create`]: `ollama create` on [`AlkahestStore`]: a model from an uploaded GGUF blob or
 //!   an existing model plus Modelfile text layers.
+//! * [`import`]: local files and folders imported into [`AlkahestStore`], copied or linked
+//!   (ALK-SP-0002.R7 to R9).
 //! * [`ops`]: delete, copy and garbage collection on [`AlkahestStore`] (ALK-SP-0001.R4).
 //! * [`overlay`]: per-model settings overlay and the effective-settings resolver
 //!   (ALK-SP-0010.R4).
@@ -23,6 +25,7 @@ pub mod create;
 pub mod digest;
 pub mod error;
 mod fsutil;
+pub mod import;
 pub mod local;
 pub mod manifest;
 pub mod meta;
@@ -33,10 +36,13 @@ pub mod reference;
 pub mod snapshot;
 pub mod source;
 
-pub use catalog::{Catalog, CatalogEntry, ModelDetail, ModelSummary};
+pub use catalog::{Catalog, CatalogEntry, ModelDetail, ModelSummary, destination_name};
 pub use create::{CreateBase, CreateLayers, CreateReport};
 pub use digest::{Digest, DigestParseError};
 pub use error::{Result, StoreError};
+pub use import::{
+    ImportHow, ImportMode, ImportedBlob, ImportedModel, ImportedWeights, LinkRecord, LinkedFile,
+};
 pub use local::{AlkahestStore, BlobWriter, StoreLock, StoredManifest};
 pub use manifest::{
     Descriptor, DiffusionComponent, LayerKind, ListEntry, ListTarget, Manifest, ManifestDocument,

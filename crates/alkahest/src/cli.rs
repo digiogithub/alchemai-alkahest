@@ -108,9 +108,10 @@ pub struct DesktopArgs {
 }
 
 /// Arguments of `alkahest run`.
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub struct RunArgs {
-    /// Model reference.
+    /// Model reference, or the path of a local `.gguf` file or model folder (imported with
+    /// `--link` under its default name first, then run).
     pub model: String,
     /// One-shot prompt (words are joined with spaces, after any piped input).
     pub prompt: Vec<String>,
@@ -130,6 +131,40 @@ pub struct RunArgs {
     /// Do not offer to start the server when it is not running.
     #[arg(long)]
     pub no_start: bool,
+}
+
+/// Arguments of `alkahest create`.
+#[derive(Debug, Args)]
+pub struct CreateArgs {
+    /// Name of the new model (replaced when it exists in the Alkahest store).
+    pub name: String,
+    /// A `.gguf` file or a model folder to import (split shards, `mmproj` projector,
+    /// `Modelfile`, or a Hugging Face safetensors folder).
+    #[arg(long, value_name = "PATH")]
+    pub from: Option<PathBuf>,
+    /// Modelfile to build from, as `ollama create -f`: `FROM ./file.gguf`, `FROM ./folder`
+    /// (relative to the Modelfile) or `FROM <model>`, plus `TEMPLATE`, `PARAMETER`,
+    /// `SYSTEM`, `LICENSE`. `--from` replaces its `FROM`.
+    #[arg(short = 'f', long = "file", value_name = "MODELFILE")]
+    pub modelfile: Option<PathBuf>,
+    /// Register the files where they are instead of copying them: a hard link on the same
+    /// filesystem, otherwise a symbolic link checked before every load. The files must stay
+    /// unchanged.
+    #[arg(long)]
+    pub link: bool,
+}
+
+/// Arguments of `alkahest import`.
+#[derive(Debug, Args)]
+pub struct ImportArgs {
+    /// A `.gguf` file or a model folder.
+    pub path: PathBuf,
+    /// Model name; defaults to the file stem or folder name.
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Register the files where they are instead of copying them (see `create --link`).
+    #[arg(long)]
+    pub link: bool,
 }
 
 /// Arguments of `alkahest show`.
@@ -229,6 +264,14 @@ pub enum Command {
     },
     /// Show details of a model.
     Show(ShowArgs),
+    /// Create a model from a Modelfile, a local GGUF file or a model folder.
+    ///
+    /// Copies the files into the Alkahest store (or links them with `--link`); the source
+    /// files are never modified. Without `--from` and `-f`, a `Modelfile` in the current
+    /// directory is used, like `ollama create`.
+    Create(CreateArgs),
+    /// Import a local GGUF file or model folder (`create --from <path>` with a default name).
+    Import(ImportArgs),
     /// Copy a model under a new name.
     Cp {
         /// Existing model.
@@ -657,6 +700,8 @@ impl Command {
             Self::Rm { .. } | Self::Cp { .. } | Self::Gc { .. } => "ALK-US-0013",
             Self::Service { .. } => "ALK-US-0045",
             Self::Pull { .. }
+            | Self::Create(_)
+            | Self::Import(_)
             | Self::Run(_)
             | Self::Ps
             | Self::Stop { .. }
@@ -687,6 +732,8 @@ impl Command {
             Self::Gc { .. } => "gc",
             Self::Show(_) => "show",
             Self::Cp { .. } => "cp",
+            Self::Create(_) => "create",
+            Self::Import(_) => "import",
             Self::Run(_) => "run",
             Self::Stop { .. } => "stop",
             Self::Serve { .. } => "serve",

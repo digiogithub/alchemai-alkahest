@@ -9,6 +9,9 @@
 //!   `/bye`, `/clear`, `/set ...`, `/show ...`, `/load <model>`, `/?`; `"""` opens and closes
 //!   a multi-line message; Ctrl+C stops a generation or clears the line, Ctrl+D leaves.
 //!
+//! `alkahest run ./model.gguf` (or a model folder) imports the path with `--link` under its
+//! default name first and runs that model (ALK-SP-0002.R10).
+//!
 //! The command is only a client: it never loads a model in-process. When the server is not
 //! running it says how to start it and, on a terminal, offers to start `alkahest serve` in
 //! the background. Thinking text goes to stderr so stdout carries only the answer.
@@ -48,7 +51,21 @@ Available commands:
 Use \"\"\" to begin and end a multi-line message.";
 
 /// `alkahest run`.
+///
+/// A path to a local `.gguf` file or model folder is imported first (link mode, default
+/// name, skipped when an unchanged linked import of it exists), then run (ALK-SP-0002.R10).
 pub fn run(args: &RunArgs, loaded: &Loaded, stats: bool) -> Result<ExitCode> {
+    let imported;
+    let args = if alkahest_api::import::looks_like_local_model(&args.model) {
+        let name = crate::import_cmd::import_for_run(&args.model, loaded)?;
+        imported = RunArgs {
+            model: name,
+            ..args.clone()
+        };
+        &imported
+    } else {
+        args
+    };
     let c = client(loaded)?;
     let rt = runtime()?;
     let stdin_tty = std::io::stdin().is_terminal();

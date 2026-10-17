@@ -133,30 +133,7 @@ impl AlkahestStore {
                 .ok_or(StoreError::MissingBlob(*digest))?;
             kept.push(Descriptor::new(component.media_type(), *digest, size));
         }
-        let mut layers_written = 0;
-        let mut text = |mt: &str, body: &str| -> Result<Descriptor> {
-            let digest = self.put_blob(body.as_bytes())?;
-            layers_written += 1;
-            Ok(Descriptor::new(mt, digest, body.len() as u64))
-        };
-        if let Some(t) = &layers.template {
-            kept.push(text(media_type::TEMPLATE, t)?);
-        }
-        if let Some(s) = &layers.system {
-            kept.push(text(media_type::SYSTEM, s)?);
-        }
-        if let Some(p) = &layers.parameters
-            && !p.is_empty()
-        {
-            let json = serde_json::to_string(p).map_err(|source| StoreError::Json {
-                what: "parameters".into(),
-                source,
-            })?;
-            kept.push(text(media_type::PARAMS, &json)?);
-        }
-        for l in layers.license.iter().flatten() {
-            kept.push(text(media_type::LICENSE, l)?);
-        }
+        let mut layers_written = self.push_text_layers(layers, &mut kept)?;
         kept.push(
             self.put_json_blob(
                 media_type::ALKAHEST_SOURCE,
@@ -178,6 +155,40 @@ impl AlkahestStore {
             blobs_copied,
             layers_written,
         })
+    }
+
+    /// Stores the text layers of `layers` (template, system prompt, parameters, licences) and
+    /// appends their descriptors to `out`; returns how many were written.
+    pub(crate) fn push_text_layers(
+        &self,
+        layers: &CreateLayers,
+        out: &mut Vec<Descriptor>,
+    ) -> Result<usize> {
+        let mut written = 0;
+        let mut text = |mt: &str, body: &str| -> Result<Descriptor> {
+            let digest = self.put_blob(body.as_bytes())?;
+            written += 1;
+            Ok(Descriptor::new(mt, digest, body.len() as u64))
+        };
+        if let Some(t) = &layers.template {
+            out.push(text(media_type::TEMPLATE, t)?);
+        }
+        if let Some(s) = &layers.system {
+            out.push(text(media_type::SYSTEM, s)?);
+        }
+        if let Some(p) = &layers.parameters
+            && !p.is_empty()
+        {
+            let json = serde_json::to_string(p).map_err(|source| StoreError::Json {
+                what: "parameters".into(),
+                source,
+            })?;
+            out.push(text(media_type::PARAMS, &json)?);
+        }
+        for l in layers.license.iter().flatten() {
+            out.push(text(media_type::LICENSE, l)?);
+        }
+        Ok(written)
     }
 
     /// Config descriptor and model layer of a weights blob base: a GGUF, or for a diffusion

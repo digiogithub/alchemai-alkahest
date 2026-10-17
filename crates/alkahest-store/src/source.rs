@@ -138,12 +138,20 @@ impl ModelEntry {
             .any(|l| l.descriptor.media_type == media_type::SAFETENSORS_FILE)
     }
 
-    /// The directory view an engine loads for a safetensors snapshot
+    /// Whether the model is a split GGUF of the Alkahest store (several model-weights
+    /// layers, one per shard), loaded through a view directory named after the shard files.
+    /// Never true for the read-only Ollama store, where no view could be built.
+    pub fn is_split(&self) -> bool {
+        self.origin == Origin::Alkahest && crate::snapshot::is_split_manifest(&self.manifest)
+    }
+
+    /// The directory view an engine loads for a safetensors snapshot or a split GGUF
     /// (`<store>/snapshots/<manifest digest>`); `None` for other models. The directory is
-    /// built by [`crate::AlkahestStore::materialise_snapshot`], which pull does; the path is
-    /// derived from the blob locations so no store handle is needed.
+    /// built by [`crate::AlkahestStore::materialise_snapshot`], which pull and import do (and
+    /// the engine launcher repeats when it is missing); the path is derived from the blob
+    /// locations so no store handle is needed.
     pub fn snapshot_dir(&self) -> Option<PathBuf> {
-        if !self.is_snapshot() {
+        if !self.is_snapshot() && !self.is_split() {
             return None;
         }
         let blob = &self.layers.first()?.path;
@@ -154,8 +162,14 @@ impl ModelEntry {
         )
     }
 
-    /// What an engine loads: the weights blob (GGUF) or the snapshot directory (safetensors).
+    /// What an engine loads: the weights blob (GGUF), the first shard in the view directory
+    /// (split GGUF) or the snapshot directory (safetensors).
     pub fn weights_path(&self) -> Option<PathBuf> {
+        if self.is_split() {
+            let first = self.model_layer()?;
+            let name = crate::snapshot::shard_file_name(first.descriptor.name.as_deref())?;
+            return Some(self.snapshot_dir()?.join(name));
+        }
         self.model_path()
             .map(Path::to_path_buf)
             .or_else(|| self.snapshot_dir())

@@ -257,6 +257,20 @@ pub struct PullRequest {
     pub catalog: Option<String>,
 }
 
+/// `POST /alkahest/v1/models/import` (ALK-SP-0002.R10): a file or folder of the server
+/// machine to register as a model. Only keyless loopback callers may send it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ImportModelRequest {
+    /// Absolute path of a `.gguf` file or a model folder on the server machine.
+    pub path: String,
+    /// Model name; the server derives it from the file stem or folder name when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Register the files where they are (hard or symbolic links) instead of copying them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub link: bool,
+}
+
 /// Query of `GET /alkahest/v1/hf/search`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HfSearch {
@@ -954,6 +968,20 @@ impl Client {
         .await
     }
 
+    /// `POST /alkahest/v1/models/import`: starts (or joins) an `import` job for a local file
+    /// or folder; its `result` is the import summary (`name`, `digest`, `format`, `files`).
+    /// The server answers 403 unless this client is a keyless loopback caller.
+    pub async fn import_model(&self, req: &ImportModelRequest) -> Result<JobStarted> {
+        let body = Self::to_json(req)?;
+        self.admin_json(
+            reqwest::Method::POST,
+            "/alkahest/v1/models/import",
+            &[],
+            Some(&body),
+        )
+        .await
+    }
+
     /// `GET /alkahest/v1/pulls`.
     pub async fn pulls(&self) -> Result<Vec<Job>> {
         field(
@@ -1373,6 +1401,32 @@ mod tests {
         assert!(started.created);
         assert_eq!(started.job.fraction(), Some(0.5));
         assert!(!started.job.is_finished());
+    }
+
+    #[tokio::test]
+    async fn import_model_starts_a_job() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/alkahest/v1/models/import"))
+            .and(body_json(json!({"path": "/m/tiny.gguf", "link": true})))
+            .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+                "job": {"id": "job_2", "kind": "import", "target": "/m/tiny.gguf",
+                        "state": "running", "phase": "hashing", "completed": 1, "total": 4},
+                "created": true,
+            })))
+            .mount(&server)
+            .await;
+        let c = Client::new(&server.uri()).unwrap();
+        let started = c
+            .import_model(&ImportModelRequest {
+                path: "/m/tiny.gguf".into(),
+                name: None,
+                link: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(started.job.kind, "import");
+        assert_eq!(started.job.fraction(), Some(0.25));
     }
 
     #[tokio::test]

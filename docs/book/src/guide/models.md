@@ -64,6 +64,52 @@ and `/api/generate` but refuses chat with `does not support chat`.
 `SOURCE` is `alkahest` (Alkahest's store), `ollama` (an Ollama store, read-only) or
 `ollama-cloud` (Ollama cloud placeholders, not runnable locally).
 
+## Importing local files
+
+Models you already have on disk (a GGUF downloaded by hand, a llama.cpp conversion, a
+Hugging Face safetensors checkout) are registered with `import` or `create`:
+
+```sh
+alkahest import ./Qwen3-4B-Q4_K_M.gguf                 # name: Qwen3-4B-Q4_K_M
+alkahest import ./big-model/ --name big                # a folder (see below)
+alkahest create mine --from ./model.gguf --link        # no copy: the file must stay put
+alkahest create mine -f ./Modelfile                    # like `ollama create -f`
+alkahest run ./model.gguf "Hello"                      # imports with --link, then runs
+```
+
+What a path may be:
+
+- **A `.gguf` file**: one model. Format, family, quantisation and context length come from the
+  GGUF header; the name defaults to the file stem. A shard of a split model
+  (`x-00001-of-00003.gguf`) brings all its shards.
+- **A folder** with one GGUF model: every shard of a split model (all of them must be there),
+  plus an `mmproj*.gguf` projector, which becomes the vision layer. A folder that holds
+  several different GGUF models is refused; import one file instead.
+- **A Hugging Face safetensors folder** (`config.json` and `*.safetensors`, with the tokenizer
+  files): a safetensors model for the vLLM engine, the same layout `pull --safetensors`
+  produces.
+- A **`Modelfile`** inside the folder is honoured: `TEMPLATE`, `PARAMETER`, `SYSTEM`,
+  `LICENSE`, and a `FROM ./file.gguf` that picks a file of the folder. With `create -f`,
+  `FROM ./file.gguf` and `FROM ./folder` are relative to the Modelfile, and `FROM <model>`
+  builds on an existing model. `ADAPTER` is refused: no engine applies LoRA adapters yet.
+
+The files are **copied** into Alkahest's store by default, hashed on the way (the blob digests
+are the sha256 of your files), with a progress bar per file. With `--link` nothing is copied:
+the store gets a hard link to each file when it is on the same filesystem, otherwise a
+symbolic link to it. A linked model depends on the files staying as they are: before every
+load Alkahest checks each linked file's size and modification time and refuses to load the
+model, naming the file, when one changed or disappeared (import it again). With a hard link,
+deleting the original is harmless, since the store keeps the data. Either way **the source
+files are never modified, moved or deleted**, and nothing is written in an Ollama store
+(files inside it are only ever linked symbolically).
+
+`alkahest run ./model.gguf` (or a folder) imports in link mode under the default name and
+runs that model; the next run of the same unchanged file reuses the import. `alkahest rm`
+removes the model (and its links), never your file.
+
+The server offers the same import to programs on the machine:
+`POST /alkahest/v1/models/import` (see the [API reference](../reference/api.md)).
+
 ## Copying and deleting
 
 ```sh
