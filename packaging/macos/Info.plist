@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Extra Info.plist keys for Alkahest.app (ALK-US-0075). cargo-packager writes the bundle
+  identity (es.digio.alkahest), name, version, icon and category itself and merges this file over
+  it. LSUIElement is deliberately absent: the app keeps its Dock icon next to the tray icon.
+-->
+<plist version="1.0">
+<dict>
+  <!-- macOS 15 asks once before an app talks to devices on the local network; Alkahest does when
+       the configured server is on another machine. -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Alkahest connects to the Alkahest model server you configured, which can run on another machine of your network.</string>
+  <!-- Let macOS pick the integrated GPU when the window is idle on a dual-GPU Mac. -->
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+</dict>
+</plist>
