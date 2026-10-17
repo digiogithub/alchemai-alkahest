@@ -61,6 +61,12 @@ ignore = [
     # tray-icon's Linux backend (gtk 0.18 -> gtk3-macros) is in the lock file but never
     # compiled: tray-icon is a macOS/Windows-only dependency, Linux uses ksni (ALK-US-0073).
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained; only via tray-icon's unused Linux GTK backend" },
+    # zbus 5 split crates, folded into zbus 6 (z-galaxy/zbus#2043). They come in through
+    # keyring's Linux Secret Service store (keyring 4 -> zbus-secret-service-keyring-store ->
+    # secret-service -> zbus 5). Re-evaluate when keyring moves to zbus 6 (ALK-US-0123).
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (merged into zbus 6); transitive via keyring" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained (merged into zbus 6); transitive via keyring" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained (merged into zbus 6); transitive via keyring" },
 ]
 
 [sources]

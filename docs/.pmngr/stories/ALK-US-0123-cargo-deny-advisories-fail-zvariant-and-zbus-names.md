@@ -2,14 +2,16 @@
 id: ALK-US-0123
 type: story
 title: "cargo deny advisories fail: zvariant and zbus_names unmaintained (RUSTSEC-2026-0370/0371)"
-status: triage
+status: in_review
 priority: medium
+parent: ALK-EP-0001
 author: mcp
 labels: [deps, ci, security]
 created: 2026-10-17T18:54:06Z
-updated: 2026-10-17T18:54:06Z
+updated: 2026-10-17T21:58:13Z
+started: 2026-10-17T21:58:13Z
 inbox:
-  status: pending
+  status: accepted
   source: mcp
   received: 2026-10-17T18:54:06Z
 ---
