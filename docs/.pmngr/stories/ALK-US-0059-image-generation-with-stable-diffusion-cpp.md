@@ -2,14 +2,15 @@
 id: ALK-US-0059
 type: story
 title: Image generation with stable-diffusion.cpp
-status: backlog
+status: in_progress
 priority: medium
 parent: ALK-EP-0011
 milestone: ALK-M-0004
 labels: [engine, image]
 estimate: 5
 created: 2026-10-16T22:42:23Z
-updated: 2026-10-16T22:42:25Z
+updated: 2026-10-17T03:43:56Z
+started: 2026-10-17T03:43:56Z
 links:
   - { kind: implements, target: ALK-SP-0005.R4 }
 ---
