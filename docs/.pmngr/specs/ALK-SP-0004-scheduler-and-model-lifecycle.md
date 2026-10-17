@@ -5,7 +5,7 @@ title: Scheduler and model lifecycle
 status: backlog
 labels: [sched]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-17T04:48:10Z
+updated: 2026-10-17T07:48:40Z
 requirements:
   R1:
     status: backlog
@@ -103,6 +103,10 @@ requirements:
         - crates/alkahest-api/src/ollama/models.rs#ps
         - crates/alkahest-api/src/admin.rs#events
         - crates/alkahest/src/ps_cmd.rs#ps
+        - crates/alkahest-sched/src/scheduler.rs#load_progress
+        - crates/alkahest-sched/src/scheduler.rs#Scheduler::kill
+        - crates/alkahest-sysinfo/src/utilization.rs#UtilizationMonitor
+        - crates/alkahest-api/src/admin/runtime.rs#snapshot
       tests:
         - crates/alkahest-sched/tests/metrics.rs#ps
         - crates/alkahest-sched/tests/metrics.rs#counters_and_prometheus_text
@@ -111,6 +115,9 @@ requirements:
         - crates/alkahest-api/tests/admin.rs#status_events_follow_the_scheduler
         - crates/alkahest/tests/ps.rs#ps_lists_nothing_and_stop_refuses_an_idle_model
         - crates/alkahest/tests/serve_inference.rs#real_engine_answers_generate_chat_completions_and_embeddings
+        - crates/alkahest-sched/tests/metrics.rs#loading_models_report_estimated_progress
+        - crates/alkahest-api/tests/admin.rs#utilization_and_forced_kill
+        - crates/alkahest/tests/serve_tools.rs#forced_tool_calls_parse_on_a_small_hermes_model
 ---
 
 ## Purpose

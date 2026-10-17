@@ -5,7 +5,7 @@ title: API compatibility surface
 status: backlog
 labels: [api]
 created: 2026-10-16T22:37:35Z
-updated: 2026-10-17T04:18:56Z
+updated: 2026-10-17T07:49:05Z
 requirements:
   R1:
     status: backlog
@@ -22,6 +22,10 @@ requirements:
         - crates/alkahest-api/src/sampling.rs#ollama_options
         - crates/alkahest-api/src/pull.rs#PullService
         - crates/alkahest/src/serve_cmd.rs#serve
+        - crates/alkahest-api/src/generation.rs#ollama_logprob
+        - crates/alkahest-api/src/ollama/create.rs#create
+        - crates/alkahest-api/src/ollama/create.rs#post_blob
+        - crates/alkahest-store/src/create.rs#AlkahestStore::create_model
       tests:
         - crates/alkahest-api/tests/ollama.rs#ollama_client_chat_streams_ndjson
         - crates/alkahest-api/tests/ollama.rs#ollama_client_list_show_and_ps
@@ -33,6 +37,12 @@ requirements:
         - crates/alkahest-api/tests/ollama.rs#embed_and_legacy_embeddings
         - crates/alkahest-api/tests/ollama.rs#empty_prompt_loads_and_keep_alive_zero_unloads
         - crates/alkahest/tests/serve_inference.rs#real_engine_answers_generate_chat_completions_and_embeddings
+        - crates/alkahest-api/tests/ollama.rs#chat_logprobs_are_translated
+        - crates/alkahest-api/tests/ollama.rs#raw_generate_logprobs_use_n_probs
+        - crates/alkahest-api/tests/ollama.rs#blobs_upload_and_create_from_a_gguf
+        - crates/alkahest-api/tests/ollama.rs#create_from_an_ollama_model_overrides_layers
+        - crates/alkahest-api/tests/ollama.rs#blob_uploads_bypass_the_body_limit
+        - crates/alkahest/tests/serve_tools.rs#forced_tool_calls_parse_on_a_small_hermes_model
   R2:
     status: backlog
     trace:
@@ -48,6 +58,7 @@ requirements:
         - crates/alkahest-api/src/responses/store.rs#ResponseStore
         - crates/alkahest-api/src/images.rs#normalize_messages
         - crates/alkahest-api/src/images.rs#fetch_as_data_url
+        - crates/alkahest-api/src/tool_prefill.rs#apply
       tests:
         - crates/alkahest-api/tests/openai.rs#openai_sdk_streams_chunks_and_tool_calls
         - crates/alkahest-api/tests/openai.rs#include_usage_adds_the_usage_chunk
@@ -63,6 +74,8 @@ requirements:
         - crates/alkahest-api/tests/vision.rs#remote_images_are_fetched_into_data_urls_in_every_dialect
         - crates/alkahest-api/tests/vision.rs#private_addresses_are_refused_by_default
         - crates/alkahest-api/tests/vision.rs#models_without_vision_refuse_images_before_fetching
+        - crates/alkahest-api/tests/openai.rs#forced_tool_choice_prefills_hermes_marker
+        - crates/alkahest/tests/serve_tools.rs#forced_tool_calls_parse_on_a_small_hermes_model
   R3:
     status: backlog
     trace:
@@ -93,6 +106,8 @@ requirements:
         - crates/alkahest-engine/src/whisper_cpp.rs#WhisperCppEngine
         - crates/alkahest-engine/src/sd_cpp.rs#StableDiffusionCppEngine
         - crates/alkahest-hf/src/ggml.rs#pull_ggml
+        - crates/alkahest-store/src/manifest.rs#DiffusionComponent
+        - crates/alkahest-engine/src/capability.rs#kind_capabilities
       tests:
         - crates/alkahest-api/tests/rerank.rs#rerank_returns_jina_shape_sorted
         - crates/alkahest-api/tests/rerank.rs#rerank_options_and_errors
@@ -106,6 +121,8 @@ requirements:
         - crates/alkahest/tests/serve_images.rs#real_sd_turbo_generates_a_picture
         - crates/alkahest-engine/tests/whisper_cpp.rs#command_line_with_and_without_ffmpeg
         - crates/alkahest-engine/tests/sd_cpp.rs#command_line_in_order_with_extra_args_last
+        - crates/alkahest-engine/tests/sd_cpp.rs#multi_file_models_pass_their_components
+        - crates/alkahest-api/tests/ollama.rs#create_a_multi_file_diffusion_model
   R5:
     status: backlog
     trace:
@@ -141,6 +158,18 @@ requirements:
         - crates/alkahest-api/src/admin/settings.rs
         - crates/alkahest-api/src/admin/system.rs
         - crates/alkahest-client/src/admin.rs
+        - crates/alkahest-api/src/admin/discover.rs#ollama_tags
+        - crates/alkahest-api/src/admin/discover.rs#hf_estimate
+        - crates/alkahest-api/src/admin/engines.rs#put_override
+        - crates/alkahest-api/src/admin/engines.rs#reload
+        - crates/alkahest-api/src/admin/pulls.rs#job_log
+        - crates/alkahest-api/src/admin/runtime.rs#requests
+        - crates/alkahest-api/src/admin/runtime.rs#kill
+        - crates/alkahest-api/src/feed.rs#RequestFeed
+        - crates/alkahest-client/src/library_tags.rs
+        - crates/alkahest-client/src/engine_admin.rs
+        - crates/alkahest-client/src/monitor.rs
+        - crates/alkahest-client/src/hf_estimate.rs
       tests:
         - crates/alkahest-api/tests/admin_api.rs#openapi
         - crates/alkahest-api/tests/admin_api.rs#admin_routes_need_the_admin_scope_remotely_and_nothing_on_loopback
@@ -150,6 +179,12 @@ requirements:
         - crates/alkahest-api/tests/admin_api.rs#create_key_shows_the_secret_once_and_listing_never_does
         - crates/alkahest-api/tests/admin_api.rs#network_settings_are_saved_for_the_next_start
         - crates/alkahest-api/src/admin/mod.rs#openapi_describes_every_route
+        - crates/alkahest-api/tests/admin_api.rs#engine_removal_is_refused_while_a_loaded_model_uses_it
+        - crates/alkahest-api/tests/admin_api.rs#engine_admin_log_reload_and_override
+        - crates/alkahest-api/tests/admin_api.rs#hf_estimate_reads_the_remote_header
+        - crates/alkahest-api/tests/admin.rs#request_feed_records_inference_calls_without_content
+        - crates/alkahest-api/tests/admin.rs#utilization_and_forced_kill
+        - crates/alkahest-client/tests/client.rs#monitor_feed_utilization_and_kill
 ---
 
 ## Purpose

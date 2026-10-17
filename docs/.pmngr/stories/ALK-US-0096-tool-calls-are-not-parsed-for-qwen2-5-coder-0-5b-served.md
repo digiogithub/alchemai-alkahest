@@ -2,14 +2,15 @@
 id: ALK-US-0096
 type: story
 title: Tool calls are not parsed for qwen2.5-coder:0.5b served from the Ollama store
-status: in_progress
+status: done
 priority: medium
 parent: ALK-EP-0007
 author: mcp
 labels: [engine, api, bug]
 created: 2026-10-17T02:49:17Z
-updated: 2026-10-17T06:43:09Z
+updated: 2026-10-17T07:53:56Z
 started: 2026-10-17T06:43:09Z
+closed: 2026-10-17T07:53:56Z
 inbox:
   status: accepted
   source: mcp
