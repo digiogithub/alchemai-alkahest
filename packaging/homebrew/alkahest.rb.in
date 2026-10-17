@@ -1,0 +1,46 @@
+# Homebrew formula for the Alkahest CLI and server (ALK-US-0075). A template: the release
+# workflow fills the @...@ placeholders with scripts/release/homebrew-formula.sh and attaches the
+# result (`alkahest.rb`) to the draft release. A maintainer copies it into the tap
+# (digiogithub/homebrew-tap, `Formula/alkahest.rb`); nothing here pushes anywhere.
+#
+# The formula installs the headless archive (no GUI libraries): the `alkahest` command, the
+# server and the bundled CPU/Metal llama.cpp. The desktop app is the .dmg (a cask, not built yet).
+class Alkahest < Formula
+  desc "Local and on-premise AI model server and manager"
+  homepage "https://github.com/digiogithub/alkahest"
+  version "@VERSION@"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "@URL_ARM64@"
+      sha256 "@SHA_ARM64@"
+    end
+    on_intel do
+      url "@URL_X64@"
+      sha256 "@SHA_X64@"
+    end
+  end
+
+  def install
+    bin.install "alkahest"
+    # `<exe dir>/../lib/alkahest/engines` is where the binary looks for the bundled engine.
+    (lib/"alkahest").install "engines"
+    (lib/"alkahest").install "licenses"
+    doc.install "NOTICE", "THIRD_PARTY_LICENSES"
+    generate_completions_from_executable(bin/"alkahest", "completions")
+  end
+
+  # `brew services start alkahest` runs the server as the current user (a LaunchAgent).
+  service do
+    run [opt_bin/"alkahest", "serve"]
+    keep_alive true
+    log_path var/"log/alkahest.log"
+    error_log_path var/"log/alkahest.log"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/alkahest --version")
+    assert_predicate lib/"alkahest/engines/llama-cpp", :directory?
+  end
+end

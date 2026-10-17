@@ -27,6 +27,11 @@ GPUI and gpui-kit (desktop app): Apache-2.0, pulled from crates.io as
 dependencies (no code copied). The tokio bridge of the desktop app follows the
 pattern of Zed's Apache-2.0 `gpui_tokio` crate as an original implementation.
 
+Windows installer template (`packaging/windows/installer.nsi`): adapted from the default NSIS
+template of cargo-packager 0.11.8, copyright 2019-2023 Tauri Programme within The Commons
+Conservancy and 2023 CrabNebula Ltd., dual licensed Apache-2.0 / MIT
+(https://github.com/crabnebula-dev/cargo-packager). The file keeps that attribution in its header.
+
 Engines (llama.cpp, the PrismML fork, whisper.cpp, stable-diffusion.cpp: MIT; vLLM:
 Apache-2.0) run as separate processes. Their licence texts are in packaging/licenses/, are
 copied next to every installed engine and are reproduced in THIRD_PARTY_LICENSES.

@@ -5,6 +5,8 @@ extend-exclude = [
     # Generated from third-party sources (cargo xtask notice) and their verbatim licence texts.
     "THIRD_PARTY_LICENSES",
     "packaging/licenses/**",
+    # NSIS script: StrCpy and friends are instructions, not words.
+    "packaging/windows/installer.nsi",
     "docs/.pmngr/**",
     # Product owner notes and the design hand-off are partly Spanish.
     "initial_requirements.md",

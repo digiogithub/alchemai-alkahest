@@ -527,12 +527,18 @@ pub fn remove_installed(
 }
 
 /// Directories shipped next to the binary that may hold bundled engines: `<exe dir>/engines`
-/// and `<exe dir>/../lib/alkahest/engines` (the layout of a system package).
+/// (Windows install directory, release archives), `<exe dir>/../lib/alkahest/engines` (the layout
+/// of a Linux system package) and `<exe dir>/../Resources/engines` (`Contents/MacOS` inside a
+/// macOS `.app` bundle, ALK-US-0075).
 pub fn bundled_roots(exe: &Path) -> Vec<PathBuf> {
     let Some(dir) = exe.parent() else {
         return Vec::new();
     };
-    vec![dir.join("engines"), dir.join("../lib/alkahest/engines")]
+    vec![
+        dir.join("engines"),
+        dir.join("../lib/alkahest/engines"),
+        dir.join("../Resources/engines"),
+    ]
 }
 
 /// Finds the newest installed `id` (and `variant` when given), looking first in `engines_dir`

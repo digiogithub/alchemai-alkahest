@@ -115,3 +115,30 @@ depends = [
     "libwayland-client0",
     "libasound2t64 | libasound2",
 ]
+
+# macOS (ALK-US-0075): `cargo xtask bundle` on a macOS host builds `Alkahest.app` and the dmg.
+# The icon set, product name and signing identity are set by xtask (`platform_config`); signing
+# and notarisation read APPLE_SIGNING_IDENTITY / APPLE_CERTIFICATE / APPLE_ID ... from the
+# environment and are skipped without them. Engines land in Contents/Resources/engines
+# (`alkahest_recipes::bundled_roots`). `background-app` stays false: the app keeps its Dock icon
+# next to the menu bar tray icon, so a closed window can be reopened from either (LSUIElement
+# would hide the Dock icon and the application menu).
+[package.metadata.packager.macos]
+minimum-system-version = "12.0"
+entitlements = "../../packaging/macos/entitlements.plist"
+info-plist-path = "../../packaging/macos/Info.plist"
+background-app = false
+
+[package.metadata.packager.dmg]
+window-size = { width = 640, height = 400 }
+app-position = { x = 180, y = 190 }
+app-folder-position = { x = 460, y = 190 }
+
+# Windows (ALK-US-0076): NSIS installer for all users (Program Files, HKLM). The template is a
+# modified copy of cargo-packager's own (components page, PATH, service, shortcuts that run
+# `alkahest desktop`); see packaging/windows/installer.nsi.
+[package.metadata.packager.nsis]
+install-mode = "perMachine"
+template = "../../packaging/windows/installer.nsi"
+languages = ["English"]
+compression = "lzma"
