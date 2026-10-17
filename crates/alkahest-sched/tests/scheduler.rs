@@ -235,6 +235,34 @@ async fn launch_request_has_explicit_context_and_slots() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn per_model_parallel_slots_override_the_scheduler_value() {
+    // ALK-US-0102: a model's effective `num_parallel` (overlay or request) wins over
+    // `scheduler.num_parallel` for the launch, the slot semaphore and the status.
+    let b = FakeBackend::with_models(&["m"]);
+    let opts = SchedulerOptions {
+        num_parallel: 2,
+        ..SchedulerOptions::default()
+    };
+    let s = sched_with(&b, opts);
+    let three = ModelSettings {
+        num_parallel: Some(3),
+        ..ModelSettings::default()
+    };
+    let (a, c, d) = tokio::join!(
+        s.acquire("m", &three, None),
+        s.acquire("m", &three, None),
+        s.acquire("m", &three, None)
+    );
+    // Three slots: all three leases run at once on one engine.
+    let (_a, _c, _d) = (a.unwrap(), c.unwrap(), d.unwrap());
+    assert_eq!(b.launches(), 1);
+    assert_eq!(b.last_request().num_parallel, Some(3));
+    let q = s.queues();
+    assert_eq!(q[0].slots, 3);
+    assert_eq!(q[0].active, 3);
+}
+
+#[tokio::test(start_paused = true)]
 async fn crash() {
     // Scenario ALK-SP-0004.R6 "crash": in-flight requests get 502 and the next request
     // reloads the model.

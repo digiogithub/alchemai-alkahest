@@ -408,6 +408,15 @@ async fn catalog_lists_kind_source_engine_context_paths_and_runtime() {
     let (status, d) = send(&h, "GET", "/alkahest/v1/models/llama3.2", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(d["template"], "{{ .Prompt }}");
+    // ALK-US-0103: the row's parameter-count label and the params layer's default map
+    // never share a key, so each keeps one JSON type.
+    assert!(
+        d["parameters"].is_string() || d["parameters"].is_null(),
+        "{}",
+        d["parameters"]
+    );
+    assert!(d["default_parameters"].is_object(), "{d}");
+    assert_eq!(d["parameters"], doc["models"][0]["parameters"]);
     let (status, _) = send(&h, "GET", "/alkahest/v1/models/nope", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
@@ -801,6 +810,76 @@ async fn network_settings_are_saved_for_the_next_start() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(doc["restart_required"], false);
+}
+
+#[tokio::test]
+async fn server_settings_are_saved_and_env_locked_fields_are_refused() {
+    // Desktop screen 16 (ALK-US-0081): server settings saved for the next start; a field set
+    // by an `ALKAHEST_*` variable is reported as locked and cannot be saved.
+    let mut config = Config::default();
+    config.hf.endpoint = "http://127.0.0.1:9".into();
+    config.scheduler.max_queue = 64;
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = AdminContext::builder(config, paths(tmp.path()), tmp.path().join("config.toml"))
+        .env(Arc::new(|var: &str| {
+            (var == "ALKAHEST_MAX_QUEUE").then(|| "64".to_string())
+        }))
+        .hf_token_store(Arc::new(MemTokens::default()))
+        .ollama_library("http://127.0.0.1:9")
+        .system(system())
+        .sources(vec![
+            "built-in defaults".into(),
+            "environment ALKAHEST_MAX_QUEUE".into(),
+        ])
+        .build();
+    let a = Admin { tmp, ctx };
+    let h = harness(&a).await;
+    let (status, doc) = send(&h, "GET", "/alkahest/v1/settings/server", None).await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["running"]["max_queue"], 64);
+    assert_eq!(doc["locked"]["max_queue"], "ALKAHEST_MAX_QUEUE");
+    assert_eq!(doc["restart_required"], false);
+    assert_eq!(doc["sources"][1], "environment ALKAHEST_MAX_QUEUE");
+    assert!(doc["paths"]["models_dir"].is_string());
+
+    let (status, doc) = send(
+        &h,
+        "PUT",
+        "/alkahest/v1/settings/server",
+        Some(json!({"keep_alive": "30m", "max_loaded": 2, "auto_install": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["saved"]["keep_alive"], "30m");
+    assert_eq!(doc["running"]["keep_alive"], "5m");
+    assert_eq!(doc["restart_required"], true);
+    assert_eq!(
+        doc["changed"],
+        json!(["auto_install", "keep_alive", "max_loaded"])
+    );
+    let file = std::fs::read_to_string(a.tmp.path().join("config.toml")).unwrap();
+    let c = Config::from_toml_str(&file).unwrap();
+    assert_eq!(c.scheduler.max_loaded, 2);
+    assert!(c.engines.auto_install);
+    assert!(!file.contains("max_queue"), "{file}");
+
+    let (status, doc) = send(
+        &h,
+        "PUT",
+        "/alkahest/v1/settings/server",
+        Some(json!({"max_queue": 10})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{doc}");
+    assert!(doc.to_string().contains("ALKAHEST_MAX_QUEUE"), "{doc}");
+    let (status, _) = send(
+        &h,
+        "PUT",
+        "/alkahest/v1/settings/server",
+        Some(json!({"keep_alive": "soon"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

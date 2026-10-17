@@ -129,6 +129,11 @@ dashmap = "=6.1.0"
 # Desktop app (only `alkahest-desktop` may depend on it; `cargo xtask check-deps`). Same pin as
 # the reference apps Bitacora and Pando Assistant; it brings `gpui-pre` 0.3.8.
 gpui-kit = "=0.7.1"
+# Desktop system tray (ALK-US-0073), same crates as Pando Assistant: ksni (Unlicense,
+# StatusNotifierItem over zbus, already locked by gpui) on Linux, tray-icon (MIT OR Apache-2.0)
+# on macOS and Windows.
+ksni = { version = "=0.3.6", default-features = false, features = ["async-io"] }
+tray-icon = "=0.21.3"
 
 # Repository automation (xtask)
 cargo_metadata = "=0.23.1"

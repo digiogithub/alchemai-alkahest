@@ -142,6 +142,7 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         system.clone(),
     ));
     let admin = AdminContext::builder(config.clone(), paths.clone(), config_file)
+        .sources(loaded.sources.iter().map(ToString::to_string).collect())
         .engines(engines)
         .system(system)
         .build();

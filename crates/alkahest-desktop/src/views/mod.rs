@@ -2,10 +2,13 @@
 //! style from the generated tokens.
 
 pub mod discover;
+pub mod engines;
 pub mod icons;
+pub mod keys;
 pub mod library;
 pub mod model_settings;
 pub mod running;
+pub mod settings;
 pub mod shell;
 pub mod style;
 pub mod widgets;

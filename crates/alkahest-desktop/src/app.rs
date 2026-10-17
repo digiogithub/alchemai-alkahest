@@ -11,8 +11,12 @@ use crate::connection::{ConnectionHandle, ConnectionManager};
 use crate::launcher::{LocalLauncher, is_local_url};
 use crate::settings::{DesktopSettings, KeyringKeyStore, resolve_api_key};
 use crate::theme::tokens::size;
+use futures::StreamExt as _;
+
+use crate::tray::{self, TrayAction, TrayHandle, TrayModel};
 use crate::ui::{
-    self, App, AppContext as _, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px,
+    self, AnyWindowHandle, App, AppContext as _, Bounds, Entity, Global, TitlebarOptions,
+    WeakEntity, WindowBounds, WindowOptions, px,
 };
 use crate::views::shell::Shell;
 use crate::views::style::Theme;
@@ -47,6 +51,15 @@ pub fn run(options: LaunchOptions) -> Result<(), DesktopError> {
     }
 }
 
+/// App-wide state: the launch options (to reopen the window), the main window and the tray.
+struct AppState {
+    options: LaunchOptions,
+    window: Option<(AnyWindowHandle, WeakEntity<Shell>)>,
+    tray: Option<TrayHandle>,
+}
+
+impl Global for AppState {}
+
 fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
     let started = Instant::now();
     ui::init(cx);
@@ -54,42 +67,25 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
     tokio_bridge::init(cx)?;
     let settings = load_settings(options);
     Theme::install(cx, settings.theme, cx.window_appearance());
-    let (server_url, connection, client) = start_connection(cx, options, &settings)?;
+    cx.set_global(AppState {
+        options: options.clone(),
+        window: None,
+        tray: None,
+    });
+    let handle = open_window(cx)?;
 
-    let bounds = Bounds::centered(
-        None,
-        ui::size(px(size::DEFAULT_WINDOW.0), px(size::DEFAULT_WINDOW.1)),
-        cx,
-    );
-    let window_options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
-        window_min_size: Some(ui::size(px(size::MIN_WINDOW.0), px(size::MIN_WINDOW.1))),
-        titlebar: Some(TitlebarOptions {
-            title: Some(TITLE.into()),
-            ..Default::default()
-        }),
-        app_id: Some(APP_ID.into()),
-        ..Default::default()
-    };
-    let url_for_shell = server_url.clone();
-    let (handle, _shell) = ui::open_main_window(window_options, cx, move |window, cx| {
-        window
-            .observe_window_appearance(|window, cx| Theme::follow_appearance(window, cx))
-            .detach();
-        let ConnectionHandle {
-            commands,
-            snapshots,
-        } = connection;
-        let shell = cx.new(|cx| Shell::new(&url_for_shell, commands, client, window, cx));
-        Shell::follow(&shell, snapshots, cx);
-        shell
-    })
-    .map_err(DesktopError::Window)?;
-    tracing::info!(server = %server_url, "desktop window opened");
-
-    // Closing the window ends the app (no tray yet: ALK-US-0073).
+    // The tray keeps the app alive when the window closes; the smoke test runs without one,
+    // and `ALKAHEST_DESKTOP_TRAY=0` turns it off (desktops without a tray host, kiosks).
+    if !options.smoke_test && tray_wanted(&|k| std::env::var(k).ok()) {
+        start_tray(cx);
+    }
+    // Without a registered tray, closing the window ends the app.
     cx.on_window_closed(|cx, _| {
-        if cx.windows().is_empty() {
+        let tray_active = cx
+            .try_global::<AppState>()
+            .and_then(|s| s.tray.as_ref())
+            .is_some_and(TrayHandle::is_active);
+        if cx.windows().is_empty() && !tray_active {
             cx.quit();
         }
     })
@@ -124,6 +120,110 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
     Ok(())
 }
 
+/// Whether the tray should start: on unless `ALKAHEST_DESKTOP_TRAY` is `0`, `false` or `off`.
+fn tray_wanted(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    !env("ALKAHEST_DESKTOP_TRAY").is_some_and(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no"
+        )
+    })
+}
+
+/// Opens the main window with a new connection and shell (at start, and from the tray after
+/// the window was closed).
+fn open_window(cx: &mut App) -> Result<AnyWindowHandle, DesktopError> {
+    let options = cx.global::<AppState>().options.clone();
+    let (server_url, connection, client) = connect(cx, &options)?;
+    let bounds = Bounds::centered(
+        None,
+        ui::size(px(size::DEFAULT_WINDOW.0), px(size::DEFAULT_WINDOW.1)),
+        cx,
+    );
+    let window_options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        window_min_size: Some(ui::size(px(size::MIN_WINDOW.0), px(size::MIN_WINDOW.1))),
+        titlebar: Some(TitlebarOptions {
+            title: Some(TITLE.into()),
+            ..Default::default()
+        }),
+        app_id: Some(APP_ID.into()),
+        ..Default::default()
+    };
+    let url_for_shell = server_url.clone();
+    let (handle, shell) = ui::open_main_window(window_options, cx, move |window, cx| {
+        window
+            .observe_window_appearance(|window, cx| Theme::follow_appearance(window, cx))
+            .detach();
+        let ConnectionHandle {
+            commands,
+            snapshots,
+        } = connection;
+        let shell = cx.new(|cx| Shell::new(options, &url_for_shell, commands, client, window, cx));
+        Shell::follow(&shell, snapshots, cx);
+        shell
+    })
+    .map_err(DesktopError::Window)?;
+    cx.global_mut::<AppState>().window = Some((handle, shell.downgrade()));
+    tracing::info!(server = %server_url, "desktop window opened");
+    Ok(handle)
+}
+
+/// Starts the tray and handles its clicks on the GPUI thread.
+fn start_tray(cx: &mut App) {
+    let (actions_tx, mut actions) = futures::channel::mpsc::unbounded::<TrayAction>();
+    let handle = tray::spawn(TrayModel::default(), actions_tx);
+    cx.global_mut::<AppState>().tray = Some(handle);
+    cx.spawn(async move |cx| {
+        while let Some(action) = actions.next().await {
+            cx.update(|cx| on_tray_action(action, cx));
+        }
+    })
+    .detach();
+}
+
+/// The live shell and its window, if the window is open.
+fn live_window(cx: &App) -> Option<(AnyWindowHandle, Entity<Shell>)> {
+    let (handle, weak) = cx.global::<AppState>().window.clone()?;
+    let shell = weak.upgrade()?;
+    Some((handle, shell))
+}
+
+fn on_tray_action(action: TrayAction, cx: &mut App) {
+    if action == TrayAction::Quit {
+        cx.quit();
+        return;
+    }
+    let window = match live_window(cx) {
+        Some(w) => w,
+        None => {
+            if let Err(e) = open_window(cx) {
+                tracing::warn!("cannot reopen the window: {e}");
+                return;
+            }
+            match live_window(cx) {
+                Some(w) => w,
+                None => return,
+            }
+        }
+    };
+    let (handle, shell) = window;
+    match action {
+        TrayAction::Open => {
+            let _ = handle.update(cx, |_, window, _| window.activate_window());
+        }
+        other => shell.update(cx, |shell, cx| shell.tray_action(other, cx)),
+    }
+}
+
+/// Pushes a new tray model (the shell calls this with every snapshot).
+pub(crate) fn update_tray(model: TrayModel, cx: &App) {
+    if let Some(t) = cx.try_global::<AppState>().and_then(|s| s.tray.as_ref()) {
+        t.update(model);
+        tray::apply_pending();
+    }
+}
+
 /// The desktop settings; an unreadable file is logged and the defaults are used, so a typo
 /// never keeps the app from opening.
 fn load_settings(options: &LaunchOptions) -> DesktopSettings {
@@ -136,14 +236,15 @@ fn load_settings(options: &LaunchOptions) -> DesktopSettings {
     })
 }
 
-/// Builds the client for the effective server and starts the connection manager on the tokio
-/// runtime. It stops by itself when the window (holding the handle) goes away. The client is
-/// returned too: the screens send their own requests (model list, actions) with it.
-fn start_connection(
+/// Builds the client for the effective server (desktop settings and keyring read again, so a
+/// reconnect picks up a new URL or key) and starts the connection manager on the tokio
+/// runtime. It stops by itself when its handle goes away (window closed, reconnect). The
+/// client is returned too: the screens send their own requests (model list, actions) with it.
+pub(crate) fn connect(
     cx: &mut App,
     options: &LaunchOptions,
-    settings: &DesktopSettings,
 ) -> Result<(String, ConnectionHandle, Client), DesktopError> {
+    let settings = load_settings(options);
     let server_url = settings
         .effective_server_url(&options.server_url)
         .to_string();
@@ -166,4 +267,17 @@ fn start_connection(
     let (manager, handle) = ConnectionManager::new(client.clone(), launcher, url.clone());
     tokio_bridge::handle(cx).spawn(manager.run());
     Ok((url, handle, client))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_tray_is_on_unless_turned_off() {
+        assert!(tray_wanted(&|_| None));
+        assert!(!tray_wanted(&|_| Some("0".into())));
+        assert!(!tray_wanted(&|_| Some("Off".into())));
+        assert!(tray_wanted(&|_| Some("1".into())));
+    }
 }

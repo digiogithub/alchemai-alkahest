@@ -92,6 +92,7 @@ fn overlay(base: &ModelSettings, req: &ModelSettings) -> ModelSettings {
         kv_cache_type_v,
         gpu_layers,
         flash_attention,
+        num_parallel,
         temperature,
         top_p,
         keep_alive,

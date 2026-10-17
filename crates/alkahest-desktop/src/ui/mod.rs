@@ -19,6 +19,12 @@ pub use gpui_kit::{
 };
 pub use gpui_kit::{BoxShadow, ScrollHandle, point, relative};
 
+/// The system clipboard (copy a key secret, a command).
+pub use gpui_kit::ClipboardItem;
+
+/// Focus handles of kit widgets (focus a field when a form opens).
+pub use gpui_kit::Focusable;
+
 /// Flex-row and flex-column shorthands.
 pub use gpui_kit::component::{h_flex, v_flex};
 

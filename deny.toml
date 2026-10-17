@@ -27,6 +27,8 @@ allow = [
     "OpenSSL",
     # libbz2-rs-sys (Rust port of bzip2), reached through gpui-kit's zip support; permissive.
     "bzip2-1.0.6",
+    # ksni (Linux tray, ALK-US-0073): public-domain dedication, OSI approved, no copyleft.
+    "Unlicense",
 ]
 # Embedded fonts (crates/alkahest-desktop/assets/fonts) are SIL OFL 1.1 data files, not crates,
 # so cargo-deny does not scan them and "OFL-1.1" is intentionally not in this list. Their
@@ -56,6 +58,9 @@ ignore = [
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained; transitive via gpui-kit" },
     { id = "RUSTSEC-2026-0206", reason = "rustybuzz unmaintained; transitive via gpui-pre" },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained; transitive via gpui-pre" },
+    # tray-icon's Linux backend (gtk 0.18 -> gtk3-macros) is in the lock file but never
+    # compiled: tray-icon is a macOS/Windows-only dependency, Linux uses ksni (ALK-US-0073).
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained; only via tray-icon's unused Linux GTK backend" },
 ]
 
 [sources]

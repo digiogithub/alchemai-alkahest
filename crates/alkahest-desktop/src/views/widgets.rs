@@ -6,8 +6,8 @@ use alkahest_gguf::ModelKind;
 use crate::present::{FormatTag, Pill, kind_label, kind_token};
 use crate::theme::tokens::{Palette, SHADOW_OVERLAY, radius, size, space, text};
 use crate::ui::{
-    BoxShadow, Div, ElementId, FontWeight, Hsla, InteractiveElement, ParentElement, SharedString,
-    Stateful, Styled, div, h_flex, point, px, svg_icon, v_flex,
+    AnyElement, BoxShadow, Div, ElementId, FontWeight, Hsla, InteractiveElement, ParentElement,
+    SharedString, Stateful, Styled, div, h_flex, point, px, svg_icon, v_flex,
 };
 use crate::views::style::{TextStyleExt, c};
 
@@ -228,50 +228,6 @@ pub fn overlay_shadow() -> BoxShadow {
     }
 }
 
-/// A modal confirmation: scrim over the content area and a raised card with title, body and
-/// the buttons the caller passes (cancel first, then the destructive one).
-pub fn confirm_dialog(
-    title: impl Into<SharedString>,
-    body: impl Into<SharedString>,
-    buttons: Vec<Stateful<Div>>,
-    p: &Palette,
-) -> Stateful<Div> {
-    let mut actions = h_flex().gap(px(space::S2)).justify_end().pt(px(space::S2));
-    for b in buttons {
-        actions = actions.child(b);
-    }
-    div()
-        .id("confirm-scrim")
-        .absolute()
-        .inset_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        // The overlay shadow colour doubles as the scrim: no extra token needed.
-        .bg(c(SHADOW_OVERLAY.color))
-        .occlude()
-        .child(
-            v_flex()
-                .id("confirm-dialog")
-                .w(px(420.0))
-                .p(px(size::CARD_PADDING))
-                .gap(px(space::S3))
-                .rounded(px(radius::XL))
-                .bg(c(p.bg_raised))
-                .border_1()
-                .border_color(c(p.line_default))
-                .shadow(vec![overlay_shadow()])
-                .child(div().type_style(text::H2).child(title.into()))
-                .child(
-                    div()
-                        .type_style(text::SMALL)
-                        .text_color(c(p.text_secondary))
-                        .child(body.into()),
-                )
-                .child(actions),
-        )
-}
-
 /// One segment of a segmented control (`Hugging Face | Ollama library`, template source).
 /// The active segment is raised on the track; the caller adds the click handler.
 pub fn segment(
@@ -412,4 +368,197 @@ pub fn field_label(label: impl Into<SharedString>, p: &Palette) -> Div {
         .type_style(text::SMALL)
         .text_color(c(p.text_secondary))
         .child(label.into())
+}
+
+/// A check box (verdigris when on, as the design's toggles); the caller adds the click.
+pub fn checkbox(id: impl Into<ElementId>, checked: bool, p: &Palette) -> Stateful<Div> {
+    let mut el = h_flex()
+        .id(id)
+        .flex_shrink_0()
+        .size(px(18.0))
+        .items_center()
+        .justify_center()
+        .rounded(px(radius::XS))
+        .border_1()
+        .cursor_pointer()
+        .type_style(text::CAPTION)
+        .font_weight(FontWeight::BOLD);
+    if checked {
+        el = el
+            .bg(c(p.ok_default))
+            .border_color(c(p.ok_default))
+            .text_color(c(p.bg_base))
+            .child("\u{2713}");
+    } else {
+        let hover = c(p.accent_border);
+        el = el
+            .bg(c(p.bg_sidebar))
+            .border_color(c(p.line_strong))
+            .hover(move |s| s.border_color(hover));
+    }
+    el
+}
+
+/// A brass warning banner (plain HTTP, restart required, connection lost): never cinnabar,
+/// which is kept for destructive actions and failures.
+pub fn warning_banner(message: impl Into<SharedString>, p: &Palette) -> Div {
+    h_flex()
+        .items_start()
+        .gap(px(space::S3))
+        .px(px(14.0))
+        .py(px(space::S3))
+        .rounded(px(radius::LG))
+        .bg(c(p.accent_subtle))
+        .border_1()
+        .border_color(c(p.accent_border))
+        .text_color(c(p.accent_text))
+        .type_style(text::SMALL)
+        .child(div().flex_shrink_0().child("\u{26a0}"))
+        .child(div().flex_1().min_w_0().child(message.into()))
+}
+
+/// A confirmation dialog laid out as screen 17.9-17.14: the title asks a question naming
+/// the object, `facts` lists it in mono, `body` states the consequences, `extra` holds an
+/// optional field (type the key name), then the buttons right aligned: Cancel first (the
+/// default), an optional safer alternative, the confirming action last.
+pub fn dialog(
+    title: impl Into<SharedString>,
+    facts: Option<SharedString>,
+    body: impl Into<SharedString>,
+    extra: Option<AnyElement>,
+    buttons: Vec<Stateful<Div>>,
+    p: &Palette,
+) -> Stateful<Div> {
+    let mut actions = h_flex().gap(px(space::S2)).justify_end().pt(px(space::S2));
+    for b in buttons {
+        actions = actions.child(b);
+    }
+    let mut card = v_flex()
+        .id("dialog")
+        .w(px(380.0))
+        .p(px(size::CARD_PADDING))
+        .gap(px(space::S3))
+        .rounded(px(radius::XL))
+        .bg(c(p.bg_overlay))
+        .border_1()
+        .border_color(c(p.line_default))
+        .shadow(vec![overlay_shadow()])
+        .child(div().type_style(text::H2).child(title.into()));
+    if let Some(f) = facts {
+        card = card.child(
+            div()
+                .type_style(text::MONO)
+                .text_size(px(text::CAPTION.size))
+                .text_color(c(p.text_muted))
+                .child(f),
+        );
+    }
+    card = card.child(
+        div()
+            .type_style(text::SMALL)
+            .text_color(c(p.text_secondary))
+            .child(body.into()),
+    );
+    if let Some(e) = extra {
+        card = card.child(e);
+    }
+    div()
+        .id("dialog-scrim")
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        // Backdrop: `bg.code` at 72 % (screen 17).
+        .bg(c(p.bg_code).opacity(0.72))
+        .occlude()
+        .child(card.child(actions))
+}
+
+/// A section title inside a card with an optional muted note at the right.
+pub fn card_title(title: impl Into<SharedString>, note: Option<SharedString>, p: &Palette) -> Div {
+    let mut row = h_flex()
+        .items_center()
+        .gap(px(space::S2))
+        .child(div().flex_1().type_style(text::TITLE).child(title.into()));
+    if let Some(n) = note {
+        row = row.child(
+            div()
+                .type_style(text::CAPTION)
+                .text_color(c(p.text_muted))
+                .child(n),
+        );
+    }
+    row
+}
+
+/// Mono caption text (paths, ids, versions).
+pub fn mono_caption(s: impl Into<SharedString>, p: &Palette) -> Div {
+    div()
+        .type_style(text::MONO)
+        .text_size(px(text::CAPTION.size))
+        .text_color(c(p.text_muted))
+        .child(s.into())
+}
+
+/// An outlined mono tag (scopes, recipe version), neutral border.
+pub fn tag(s: impl Into<SharedString>, p: &Palette) -> Div {
+    div()
+        .flex_shrink_0()
+        .px(px(6.0))
+        .py(px(2.0))
+        .rounded(px(radius::XS))
+        .border_1()
+        .border_color(c(p.line_strong))
+        .text_color(c(p.text_secondary))
+        .type_style(text::MONO)
+        .text_size(px(text::CAPTION.size))
+        .whitespace_nowrap()
+        .child(s.into())
+}
+
+/// A dashed empty-state block (screens 17.1, 17.2): icon, title, explanation, actions and
+/// an optional mono hint.
+pub fn empty_block(
+    id: impl Into<ElementId>,
+    icon: &'static [u8],
+    title: impl Into<SharedString>,
+    body: impl Into<SharedString>,
+    actions: Vec<Stateful<Div>>,
+    hint: Option<SharedString>,
+    p: &Palette,
+) -> Stateful<Div> {
+    let mut row = h_flex().gap(px(space::S3)).justify_center();
+    let has_actions = !actions.is_empty();
+    for a in actions {
+        row = row.child(a);
+    }
+    let mut el = v_flex()
+        .id(id)
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .gap(px(space::S3))
+        .p(px(space::S8))
+        .rounded(px(radius::XL))
+        .border_1()
+        .border_dashed()
+        .border_color(c(p.line_dashed))
+        .child(svg_icon(icon, 40.0, c(p.text_faint)))
+        .child(div().type_style(text::TITLE).child(title.into()))
+        .child(
+            div()
+                .max_w(px(460.0))
+                .text_center()
+                .type_style(text::SMALL)
+                .text_color(c(p.text_muted))
+                .child(body.into()),
+        );
+    if has_actions {
+        el = el.child(row.pt(px(space::S2)));
+    }
+    if let Some(h) = hint {
+        el = el.child(mono_caption(h, p));
+    }
+    el
 }

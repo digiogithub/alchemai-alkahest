@@ -19,6 +19,7 @@ use parking_lot::{Mutex, RwLock};
 use super::engines::EngineManager;
 use super::jobs::JobManager;
 use super::pulls::PullRunner;
+use super::server_settings::ServerSettings;
 use super::settings::NetworkSettings;
 use crate::dialect::ErrorKind;
 use crate::service::{HttpError, now_rfc3339};
@@ -45,6 +46,8 @@ pub struct AdminContext {
     pub(crate) ollama_library: String,
     pub(crate) system: RwLock<Option<SystemInfo>>,
     pub(crate) saved_network: Mutex<NetworkSettings>,
+    pub(crate) saved_server: Mutex<ServerSettings>,
+    pub(crate) sources: Vec<String>,
 }
 
 impl std::fmt::Debug for AdminContext {
@@ -76,6 +79,7 @@ impl AdminContext {
             ollama_library: None,
             system: None,
             jobs: JobManager::new(),
+            sources: Vec::new(),
         }
     }
 
@@ -124,6 +128,7 @@ pub struct AdminContextBuilder {
     ollama_library: Option<String>,
     system: Option<SystemInfo>,
     jobs: JobManager,
+    sources: Vec<String>,
 }
 
 impl std::fmt::Debug for AdminContextBuilder {
@@ -172,6 +177,13 @@ impl AdminContextBuilder {
         self
     }
 
+    /// The configuration sources the server loaded, lowest precedence first (`built-in
+    /// defaults`, `user file ...`, `environment ALKAHEST_MAX_QUEUE`), for the Settings screen.
+    pub fn sources(mut self, sources: Vec<String>) -> Self {
+        self.sources = sources;
+        self
+    }
+
     /// Finishes the context.
     pub fn build(self) -> Arc<AdminContext> {
         let ollama_library = self
@@ -179,6 +191,7 @@ impl AdminContextBuilder {
             .or_else(|| (self.env)("ALKAHEST_OLLAMA_LIBRARY"))
             .unwrap_or_else(|| DEFAULT_LIBRARY_URL.to_string());
         let saved = NetworkSettings::from_config(&self.config);
+        let saved_server = ServerSettings::from_config(&self.config);
         Arc::new(AdminContext {
             config: self.config,
             paths: self.paths,
@@ -193,6 +206,8 @@ impl AdminContextBuilder {
             ollama_library,
             system: RwLock::new(self.system),
             saved_network: Mutex::new(saved),
+            saved_server: Mutex::new(saved_server),
+            sources: self.sources,
         })
     }
 }

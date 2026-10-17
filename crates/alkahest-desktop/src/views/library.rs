@@ -22,8 +22,8 @@ use crate::theme::tokens::{Palette, radius, size, space, text};
 use crate::tokio_bridge;
 use crate::ui::input::{Input, InputEvent, InputState};
 use crate::ui::{
-    Anchor, AnyElement, AppContext as _, Context, Div, Entity, EventEmitter, FontWeight,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    Anchor, AnyElement, AppContext as _, ClipboardItem, Context, Div, Entity, EventEmitter,
+    FontWeight, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Task, Window, anchored, deferred, div, h_flex, px,
     svg_icon, v_flex,
 };
@@ -31,7 +31,7 @@ use crate::views::icons;
 use crate::views::model_settings::{ModelSettingsView, SettingsEvent};
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
-    ButtonKind, button, column_label, confirm_dialog, format_tag, icon_button, kind_badge,
+    ButtonKind, button, column_label, dialog, empty_block, format_tag, icon_button, kind_badge,
     overlay_shadow, pill,
 };
 
@@ -281,20 +281,24 @@ impl LibraryView {
                             .child(Input::new(&self.search).appearance(false).cleanable(true)),
                     ),
             )
-            .child(
-                button(
-                    "library-add-model",
-                    "Add model",
-                    ButtonKind::Primary,
-                    size::CONTROL,
-                    false,
-                    p,
-                )
-                .child(svg_icon(icons::PLUS, 16.0, c(p.text_on_accent)))
-                .flex_row_reverse()
-                .on_click(cx.listener(|_, _, _, cx| {
-                    cx.emit(LibraryEvent::Navigate(Screen::Discover));
-                })),
+            .children(
+                // An empty library offers "Discover models" in its empty block (17.1): one
+                // brass button per view.
+                self.offers_add().then(|| {
+                    button(
+                        "library-add-model",
+                        "Add model",
+                        ButtonKind::Primary,
+                        size::CONTROL,
+                        false,
+                        p,
+                    )
+                    .child(svg_icon(icons::PLUS, 16.0, c(p.text_on_accent)))
+                    .flex_row_reverse()
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.emit(LibraryEvent::Navigate(Screen::Discover));
+                    }))
+                }),
             )
     }
 
@@ -672,8 +676,7 @@ impl LibraryView {
         el
     }
 
-    /// Empty, loading, failed and disconnected states (not designed yet: ALK-US-0081 designs
-    /// them; until then a tokenised card says what is going on and what to do).
+    /// Empty (17.1), no-match, loading, failed and disconnected states.
     fn empty_state(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let filtered = !self.state.models().is_empty();
         let (title, body): (&str, String) = match self.state.status() {
@@ -684,69 +687,99 @@ impl LibraryView {
             ListStatus::Loading => ("Loading models\u{2026}", String::new()),
             ListStatus::Failed(e) => ("The model list could not be loaded", e.clone()),
             ListStatus::Ready if filtered => (
-                "No models match the filters",
+                "No models match",
                 "Change the kind, source or format filters, or clear the text filter.".into(),
             ),
             ListStatus::Ready => (
                 "No models yet",
-                "Find one in Discover, or pull one from a terminal: alkahest pull qwen3:8b".into(),
+                "Download one from Hugging Face or the Ollama library. Models in an existing \
+                 Ollama store appear here on their own, read-only."
+                    .into(),
             ),
         };
-        let mut card = v_flex()
-            .id("library-empty")
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .gap(px(space::S3))
-            .p(px(space::S8))
-            .rounded(px(radius::XL))
-            .border_1()
-            .border_color(c(p.line_default))
-            .bg(c(p.bg_raised))
-            .child(svg_icon(icons::MARK_SMALL, 40.0, c(p.text_faint)))
-            .child(div().type_style(text::TITLE).child(title));
-        if !body.is_empty() {
-            card = card.child(
-                div()
-                    .type_style(text::SMALL)
-                    .text_color(c(p.text_muted))
-                    .child(body),
-            );
-        }
+        let mut actions = Vec::new();
+        let mut hint = None;
         match self.state.status() {
-            ListStatus::Failed(_) => {
-                card = card.child(
+            ListStatus::Failed(_) => actions.push(
+                button(
+                    "library-retry",
+                    "Retry",
+                    ButtonKind::Secondary,
+                    size::CONTROL,
+                    false,
+                    p,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+            ),
+            ListStatus::Ready if filtered => actions.push(
+                button(
+                    "library-clear-filters",
+                    "Clear filters",
+                    ButtonKind::Secondary,
+                    size::CONTROL,
+                    false,
+                    p,
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.state.filter = Default::default();
+                    this.search.update(cx, |s, cx| s.set_value("", window, cx));
+                    cx.notify();
+                })),
+            ),
+            ListStatus::Ready => {
+                actions.push(
                     button(
-                        "library-retry",
-                        "Retry",
-                        ButtonKind::Secondary,
-                        size::CONTROL_SMALL,
+                        "library-discover",
+                        "Discover models",
+                        ButtonKind::Primary,
+                        size::CONTROL,
                         false,
                         p,
                     )
-                    .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                );
-            }
-            ListStatus::Ready if filtered => {
-                card = card.child(
-                    button(
-                        "library-clear-filters",
-                        "Clear filters",
-                        ButtonKind::Secondary,
-                        size::CONTROL_SMALL,
-                        false,
-                        p,
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.state.filter = Default::default();
-                        this.search.update(cx, |s, cx| s.set_value("", window, cx));
-                        cx.notify();
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.emit(LibraryEvent::Navigate(Screen::Discover));
                     })),
                 );
+                actions.push(
+                    button(
+                        "library-point-ollama",
+                        "Point to an Ollama store",
+                        ButtonKind::Secondary,
+                        size::CONTROL,
+                        false,
+                        p,
+                    )
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.emit(LibraryEvent::Navigate(Screen::Settings));
+                    })),
+                );
+                hint = Some(SharedString::from(
+                    "or in a terminal: alkahest pull qwen3:8b",
+                ));
             }
             _ => {}
         }
-        card.into_any_element()
+        empty_block(
+            "library-empty",
+            icons::MARK_SMALL,
+            title,
+            body,
+            actions,
+            hint,
+            p,
+        )
+        .into_any_element()
+    }
+
+    /// Whether the header offers the brass "Add model": not while disconnected (the
+    /// connection banner holds the primary action) nor for an empty library (its empty block
+    /// offers "Discover models").
+    fn offers_add(&self) -> bool {
+        match self.state.status() {
+            ListStatus::Idle => false,
+            ListStatus::Ready => !self.state.models().is_empty(),
+            ListStatus::Loading | ListStatus::Failed(_) => true,
+        }
     }
 
     /// Opens screen 12 for `name` (the model settings editor).
@@ -824,26 +857,66 @@ impl Render for LibraryView {
                 false,
                 p,
             )
+            .border_color(c(p.accent_default))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.state.cancel_delete();
                 cx.notify();
             }));
             let confirm = button(
                 "delete-confirm",
-                "Delete",
+                "Delete model",
                 ButtonKind::Danger,
                 size::CONTROL_SMALL,
                 false,
                 p,
             )
             .on_click(cx.listener(|this, _, _, cx| this.confirm_delete(cx)));
-            root = root.child(confirm_dialog(
+            root = root.child(dialog(
                 format!("Delete {name}?"),
+                Some(SharedString::from(self.state.delete_facts(&name))),
                 format!(
-                    "Its files ({size}) are removed from the Alkahest store and it is unloaded if \
-                     it runs. This cannot be undone."
+                    "Frees {size} in the Alkahest store. Blobs shared with other models are \
+                     kept. Unloads it first if it is running."
                 ),
+                None,
                 vec![cancel, confirm],
+                p,
+            ));
+        }
+        if let Some(name) = self.state.refused_delete().map(str::to_string) {
+            let close = button(
+                "refused-close",
+                "Close",
+                ButtonKind::Secondary,
+                size::CONTROL_SMALL,
+                false,
+                p,
+            )
+            .border_color(c(p.accent_default))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.state.dismiss_refused();
+                cx.notify();
+            }));
+            let command = crate::library::ollama_rm_command(&name);
+            let copy = button(
+                "refused-copy",
+                "Copy command",
+                ButtonKind::Secondary,
+                size::CONTROL_SMALL,
+                false,
+                p,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(command.clone()));
+                this.state.dismiss_refused();
+                cx.notify();
+            }));
+            root = root.child(dialog(
+                format!("{name} is in the Ollama store"),
+                Some("ollama store \u{b7} read-only".into()),
+                crate::library::read_only_hint(&name),
+                None,
+                vec![close, copy],
                 p,
             ));
         }
@@ -892,6 +965,8 @@ mod tests {
             }),
             can_start: false,
             service_unit: None,
+            notice: None,
+            manages_server: false,
             runtime: None,
         }
     }
@@ -951,11 +1026,7 @@ mod tests {
         cx.run_until_parked();
         view.read_with(cx, |v, _| {
             assert!(v.state.confirming_delete().is_none());
-            assert!(
-                v.state
-                    .notice()
-                    .is_some_and(|n| n.text.contains("ollama rm"))
-            );
+            assert_eq!(v.state.refused_delete(), Some("theirs:1"), "17.10 dialog");
         });
         view.update(cx, |v, cx| {
             v.state.request_delete("mine:1");
