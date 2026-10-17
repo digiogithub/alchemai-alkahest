@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-api",
  "alkahest-client",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-core",
  "alkahest-decision",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-stream",
  "bytes",
@@ -273,7 +273,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "directories",
  "serde",
@@ -288,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-decision"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-engine",
  "alkahest-gguf",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-client",
  "alkahest-gguf",
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-core",
  "alkahest-fetch",
@@ -349,7 +349,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-fetch"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures",
  "hex",
@@ -368,14 +368,14 @@ dependencies = [
 
 [[package]]
 name = "alkahest-gguf"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "alkahest-hf"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-core",
  "alkahest-fetch",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-ollama"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-fetch",
  "alkahest-pull",
@@ -420,7 +420,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-pull"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-fetch",
  "alkahest-store",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-recipes"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-fetch",
  "alkahest-sysinfo",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-sched"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-core",
  "alkahest-engine",
@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alkahest-core",
  "alkahest-gguf",
@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "alkahest-sysinfo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libloading 0.9.0",
  "serde",
@@ -10971,7 +10971,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "cargo_metadata",
