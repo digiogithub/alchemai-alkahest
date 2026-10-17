@@ -146,5 +146,8 @@ whisper-server, sd-server). Alkahest proxies and translates; it does not embed i
 
 ## 6. Open questions
 
-1. Ollama models stored with Go TEMPLATE layers: v1 uses the GGUF jinja template when present
-   and a Go-template subset renderer otherwise; settled by the spike story in E3.
+1. ~~Ollama models stored with Go TEMPLATE layers~~ Settled by ALK-US-0015, see
+   [[development/decisions/0001-chat-template-strategy]]: Jinja through llama-server is the
+   only v1 template path (per-model override, then GGUF `tokenizer.chat_template`, then a
+   built-in llama.cpp template name mapped from the Go template). A Go-template renderer
+   in Rust is deferred until a real model needs it.
