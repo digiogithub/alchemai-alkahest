@@ -1,4 +1,5 @@
-//! `cargo xtask engines-check [--fail-on-update]`: compares the engine pins in `recipes/*.toml`
+//! `cargo xtask engines-check [--fail-on-update]`: compares the engine pins in `catalog/engines/*.toml`
+//! (or `recipes/*.toml` when there is no catalog)
 //! with the upstream releases (ALK-US-0053) and reports what is newer.
 //!
 //! Sources: GitHub releases for recipes whose homepage is a GitHub repository (llama.cpp, the
@@ -130,8 +131,9 @@ pub fn run(root: &Path, rest: &[String]) -> Result<bool> {
         }
     }
     report.push_str(
-        "\nTo bump a pin: edit `recipes/<id>.toml` (`version`, URLs, `sha256`, `size`), run the \
-         opt-in install tests (`ALKAHEST_TEST_NET=1`, `ALKAHEST_TEST_GPU=1`) and `cargo xtask notice`.\n",
+        "\nTo bump a pin: edit `catalog/engines/<id>.toml` (`version`, URLs, `sha256`, `size`), run \
+         `cargo xtask catalog-index --sync-recipes`, the opt-in install tests (`ALKAHEST_TEST_NET=1`, \
+         `ALKAHEST_TEST_GPU=1`) and `cargo xtask notice`.\n",
     );
     println!("{report}");
     if let Ok(path) = std::env::var("GITHUB_STEP_SUMMARY")
@@ -292,9 +294,15 @@ fn render_newer(pin: &Pin, n: &Newer) -> String {
     out
 }
 
-/// Reads the pins from `recipes/*.toml`.
+/// Reads the pins from `catalog/engines/*.toml`, falling back to `recipes/*.toml`.
 pub fn read_pins(root: &Path) -> Result<Vec<Pin>> {
-    let dir = root.join("recipes");
+    // `catalog/engines/` is the source of truth (ALK-US-0121); `recipes/` is its built-in copy.
+    let catalog = root.join("catalog").join("engines");
+    let dir = if catalog.is_dir() {
+        catalog
+    } else {
+        root.join("recipes")
+    };
     let mut files: Vec<_> = fs::read_dir(&dir)
         .with_context(|| format!("reading {}", dir.display()))?
         .filter_map(|e| e.ok().map(|e| e.path()))

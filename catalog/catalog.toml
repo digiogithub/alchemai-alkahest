@@ -1,0 +1,9 @@
+# Manifest of the official Alkahest catalog (ALK-SP-0011.R2). Alkahest reads this folder from
+# git (ref `main`, subdir `catalog`). Validate with `cargo xtask catalog-check`; regenerate
+# `index.toml` with `cargo xtask catalog-index --sync-recipes` after any change.
+schema_version = "1.0"
+name = "official"
+description = "Official Alkahest catalog: engine recipes and curated model entries."
+min_alkahest = ">=0.1.0"
+homepage = "https://github.com/digiogithub/alchemai-alkahest"
+maintainers = ["Digio"]
