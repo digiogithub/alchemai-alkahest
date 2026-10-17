@@ -19,10 +19,18 @@
     "Discover.dc.html": {
       "expand": "fill",
       "h": 900,
-      "title": "Discover (Hugging Face / Ollama)",
+      "title": "Discover \u00b7 Hugging Face",
       "w": 1440,
       "x": 1520,
       "y": 2140
+    },
+    "DiscoverCatalog.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "Discover \u00b7 Catalog",
+      "w": 1440,
+      "x": 6080,
+      "y": 3460
     },
     "Engines.dc.html": {
       "expand": "fill",
@@ -66,13 +74,21 @@
     "Settings.dc.html": {
       "expand": "fill",
       "h": 900,
-      "title": "Settings",
+      "title": "Settings \u00b7 General",
       "w": 1440,
       "x": 1520,
       "y": 3460
     },
+    "SettingsCatalogs.dc.html": {
+      "expand": "fill",
+      "h": 1040,
+      "title": "Settings \u00b7 Catalogs",
+      "w": 1440,
+      "x": 4560,
+      "y": 3460
+    },
     "States.dc.html": {
-      "h": 3100,
+      "h": 4120,
       "title": "States & confirmations",
       "w": 1440,
       "x": 3040,
@@ -106,8 +122,8 @@
     },
     "more": {
       "kind": "title1",
-      "maxW": 4480,
-      "text": "Engines, settings & app states",
+      "maxW": 7520,
+      "text": "Engines, settings, catalogs & app states",
       "w": 240,
       "x": 0,
       "y": 3160
@@ -123,7 +139,9 @@
     "ApiKeys.dc.html",
     "Engines.dc.html",
     "Settings.dc.html",
-    "States.dc.html"
+    "SettingsCatalogs.dc.html",
+    "States.dc.html",
+    "DiscoverCatalog.dc.html"
   ],
   "pages": [],
   "title": "Alkahest Desktop Design",

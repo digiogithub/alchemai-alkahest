@@ -80,11 +80,13 @@ completeness; v1 can ship dark only.
 | 01 | Design system | `screens/01-design-system.html` | tokens and components |
 | 10 | Library | `screens/10-library.html` | local models |
 | 11 | Discover | `screens/11-discover.html` | Hugging Face and Ollama search and download |
+| 11b | Discover · Catalog | `screens/11b-discover-catalog.html` | git catalog models (`alkahest/<ns>/<model>`) search and pull |
 | 12 | Model settings | `screens/12-model-settings.html` | per-model runtime config |
 | 13 | Running | `screens/13-running.html` | loaded models, hardware, live requests |
 | 14 | API keys & network | `screens/14-api-keys.html` | external access, keys, endpoints, HF token |
 | 15 | Engines | `screens/15-engines.html` | engine recipes, installed builds per accelerator, install jobs |
-| 16 | Settings | `screens/16-settings.html` | storage, model loading, server connection, theme, logging |
+| 16 | Settings · General | `screens/16-settings.html` | storage, model loading, server connection, theme, logging |
+| 16b | Settings · Catalogs | `screens/16b-settings-catalogs.html` | git catalogs: list, sync, add, remove, enable, limits |
 | 17 | States & confirmations | `screens/17-states.html` | empty, first-run, connection, failure states; destructive dialogs |
 
 The previews contain sample data only (model names, sizes and counters are
@@ -103,8 +105,10 @@ illustrative).
 
 ### 11 Discover
 
-- Segmented control: Hugging Face, Ollama library, Paste repo / URL. HF token
-  status pill.
+- Segmented source control: All, Hugging Face, Ollama library, Catalog,
+  Paste repo / URL. HF token status pill. "All" lists catalog rows first, then
+  Hugging Face and Ollama, each card with its source chip (as
+  `alkahest search --source all`); "Catalog" is screen 11b.
 - Search field (focused state shown) and filters: task, format, "fits in N GB"
   (from detected VRAM), sort.
 - Result list (repo, downloads, kind, format, meta); selected item has the
@@ -114,6 +118,38 @@ illustrative).
   (context, sampling, KV cache, template, engine, estimated VRAM) applied on
   download; destination folder; brass download button.
 - Downloads strip at the bottom: progress, speed, ETA, sha256 verification.
+
+### 11b Discover · Catalog
+
+Data: `GET /alkahest/v1/catalog/search?q=&catalog=&limit=` (local snapshots
+only; one row per tag with `name`, `tag`, `reference`, `default`,
+`description`, `license`, `homepage`, `tags`, `format`, `quant`, `engine`,
+`size`, `catalog`, `commit`); pull with `POST /alkahest/v1/pulls`
+`{"name": "alkahest/<ns>/<model>:<tag>", "catalog": "<name>"}` and the pull
+job / events APIs for the downloads strip.
+
+- Header: the Catalog segment selected; a status pill linking to Settings ›
+  Catalogs (number of enabled catalogs; cinnabar dot and text when one failed
+  to sync, neutral otherwise).
+- Filters: search field; a **Catalog** selector (`all (n)` or one name, sent
+  as `catalog=`) shown only when more than one catalog is enabled; format and
+  "fits in N GB".
+- Result cards: one card per model entry (rows grouped client-side by
+  `catalog` + `name`): `alkahest/` muted + `<ns>/<model>` in mono, catalog
+  name chip, description, kind badge (derived from tags), licence in mono,
+  tags, and one variant tag per row (`tag · QUANT · size`; the default tag has
+  the brass-subtle border, ternary quants the brass border, safetensors
+  variants dashed and "listed only" because `pull` refuses them today).
+- Detail panel: `alkahest / <ns>` path, model name in mono, description,
+  licence, tags, homepage link; variant radio list (tag, format · quant,
+  size, fit estimate, `Default`); "From the catalog entry": engine (with the
+  installed build or "not installed"), template, parameters, files (count,
+  kind, short sha256), origin (catalog, commit short id, last sync). The CLI
+  equivalent in mono and the brass **Pull `<tag>` · size** (the one primary
+  action). Selecting a non-default catalog for a duplicated entry passes
+  `catalog`.
+- Downloads strip as on screen 11; catalog pulls show the mirror in use.
+- Failure banner and empty/offline state: 17.17 and 17.18.
 
 ### 12 Model settings
 
@@ -184,8 +220,23 @@ Data: the engine catalog and installed builds (`alkahest engines ls` /
     install on request (dashed), unsupported on this host (dashed, faint,
     reason as the note). A click on an available chip installs that variant;
     a menu on it offers "Build from source".
+- Recipe origin chip next to the recipe version (`built-in` dashed,
+  `catalog <name> @ <commit>`, `recipes/`, `user dir`): the layer the recipe
+  was read from (`RecipeLayer`; CLI `engines ls` origin column).
+- Native builds: a `cpu-native` build row carries the tag
+  `native · built for this CPU` (neutral) or `built for another CPU`
+  (brass-subtle warning, from `InstalledEngine::native_stale`) with a
+  secondary "Rebuild for this CPU" (`engines install --native --force`). The
+  `cpu-native` variant chip is never "recommended": it is source-only and
+  never selected automatically; stale state = dashed brass border.
+- Dependencies row (only when the recipe has any): one chip per dependency of
+  the installed variants, `optional` ones with a small secondary "Install"
+  (`engines install <id> --with <dep>`), installed ones verdigris; a hint
+  line from the variant notes.
 - Footnote: models use the newest installed build unless pinned in model
-  settings (`engine = "llama-cpp@b11669"`); recipe directories.
+  settings (`engine = "llama-cpp@b11669"`); recipe layers lowest to highest
+  (built-in › catalogs › binary `recipes/` › user recipes dir), link to
+  Settings › Catalogs.
 
 ### 16 Settings
 
@@ -193,6 +244,9 @@ Data: the server configuration (admin settings API over `config.toml`) and
 the desktop's own `desktop.toml`. Network settings (bind, port, CORS,
 endpoints) and the HF token stay on screen 14; Settings links there.
 
+- Section tabs under the header: **General** (this screen) and **Catalogs**
+  (16b) with the catalog count and a cinnabar dot when a catalog's last sync
+  failed. Selected tab = brass underline + accent text.
 - Header: which files are written; dirty state ("2 unsaved changes · 1 needs
   a restart", brass dot); Discard (secondary) and brass "Save" — the label
   becomes "Save & restart server" when a changed field needs a restart.
@@ -213,6 +267,38 @@ endpoints) and the HF token stay on screen 14; Settings links there.
   segmented, applies at once, `desktop.toml`), Logging (level, format, log
   folder + rotation, "Open folder"), and "Loaded from" listing the
   configuration sources in precedence order.
+
+### 16b Settings · Catalogs
+
+Data: the `[[catalogs]]` sources and their snapshot state (`alkahest catalog
+ls`: name, url, ref, subdir, pin, enabled, refresh_interval, commit,
+fetched_at, checked_at, engine/model counts, last_error, warnings) and
+`[catalog_limits]`. **No admin endpoint exists for this yet** (see Backend
+gaps below).
+
+- Header: where catalogs are written and snapshots kept; secondary "Sync
+  all"; brass **Add catalog** (opens 17.15). Catalog actions apply at once
+  (no Save), unlike the General tab.
+- One card per catalog in configured order (the position number is the layer
+  order; later wins): name in mono, `private · token in keyring` chip when a
+  token exists, status pill, Sync now, Edit…, Remove (cinnabar outline,
+  opens 17.16; not offered for `official`, which `catalog rm` only disables),
+  enable toggle (verdigris). Second line: url, ref, subdir, commit short id
+  (`· pinned` when pinned). Third line: fetched / checked relative times,
+  counts, refresh interval.
+- Status pill: `Up to date` (verdigris subtle), `Syncing…` (signal blue, with
+  a progress bar and the step in mono: resolving ref, downloading changed
+  files n / m, extracting archive, validating), `Sync failed` (cinnabar pill,
+  the error in cinnabar mono text, and a note that the previous snapshot stays
+  in use and when the next try is), `Disabled` (neutral, card at 72 %
+  opacity, Sync disabled). Warnings (lenient sync stripped keys, branch-like
+  `source.rev`) fold under a brass "n warnings" disclosure.
+- "Advanced · snapshot limits" disclosure: `max_snapshot_bytes`,
+  `max_file_bytes`, `max_archive_bytes` with the defaults (16 MiB, 1 MiB,
+  256 MiB) and the background refresh note (`ALKAHEST_CATALOG_AUTO_SYNC=0`).
+- Side column: "Recipe layers" (the effective order, disabled catalogs
+  marked) and "Private catalogs" (keyring service/user, the env override,
+  never shown; Replace… per catalog with a token).
 
 ### 17 States & confirmations
 
@@ -257,10 +343,62 @@ area; rail and service card are as on the other screens.
   "Unload instead"); revoke key (type the key name to enable Revoke when the
   key was used in the last 24 h); remove engine build (fallback named); stop
   all models (alternative "Unload idle").
+- 17.15 Add catalog: form dialog (480 px): name (focused), repository URL
+  (`https://` or `file://`, no credentials), ref, subdir, refresh interval,
+  optional pin (full commit id), optional access token (password field; goes
+  to the OS keyring as `alkahest` / `catalog:<name>`, never to
+  `config.toml`, never shown again); note that a new catalog goes last and
+  wins. Cancel and brass "Add & sync". Server-side validation errors show
+  under the field.
+- 17.16 Remove catalog: dialog anatomy as 17.9–17.14; subject = url, ref,
+  counts; consequences (snapshot deleted, pulled models and installed builds
+  kept, keyring token left in place); alternative "Disable instead";
+  cinnabar "Remove catalog".
+- 17.17 Catalog sync failed: brass-subtle warning banner on Discover ›
+  Catalog and Engines, shown once per new error (`error_reported`): title,
+  error in cinnabar mono, the snapshot still in use and the retry time
+  (15 min after an error); "Set token…" (when 401/403), "Retry", dismiss.
+- 17.18 Offline / never fetched: neutral info strip on Engines ("Engines use
+  the built-in recipes …", Sync now) and the empty Discover › Catalog block
+  (no catalog models yet; secondary Sync now and Catalog settings; no brass).
 - Colour rule recap: cinnabar fills only the confirming button of a
   destructive action, the destructive outline buttons, and failure pills/text;
   warnings use the brass subtle banner; nothing in these states adds a second
   brass button to a view.
+
+### Backend gaps for the catalog screens
+
+The desktop talks only to the admin API (`alkahest-client`); these endpoints
+do not exist yet and are needed before 11b, 15 and 16b can be built as drawn:
+
+1. `GET /alkahest/v1/catalogs`: configured sources plus snapshot state (the
+   `catalog ls --json` document: url, ref, subdir, pin, enabled,
+   refresh_interval, commit, fetched_at, checked_at, error_at, last_error,
+   warnings, engine and model counts, whether a token is present — never the
+   token) and the effective `catalog_limits`.
+2. `POST /alkahest/v1/catalogs/sync` (all) and
+   `POST /alkahest/v1/catalogs/{name}/sync`: start a sync as a job (job API /
+   events stream) with step progress, so 16b can show `Syncing…`.
+3. `POST /alkahest/v1/catalogs` (add, same validation as `catalog add`),
+   `DELETE /alkahest/v1/catalogs/{name}` (remove; `official` becomes
+   disabled), `PATCH /alkahest/v1/catalogs/{name}` (enabled, ref, subdir,
+   pin, refresh_interval; there is no CLI for enable/disable or edit today).
+4. `PUT` / `DELETE /alkahest/v1/catalogs/{name}/token`: write or clear the
+   keyring entry `catalog:<name>`, like `/alkahest/v1/hf/token`; no CLI sets
+   it today either.
+5. `[catalog_limits]` read/write in the server settings API
+   (`/alkahest/v1/settings/server`).
+6. Catalog model detail: `GET /alkahest/v1/catalog/models/{ns}/{model}`
+   (optional `catalog`) with every variant's template, params and files
+   (kind, size, sha256); the search rows carry neither template, params nor
+   files.
+7. Engines listing (`GET /alkahest/v1/engines`): recipe origin layer
+   (`built-in`, `catalog:<name>` + commit, `dir:<path>`), `native` flag per
+   variant, `native_stale` per installed build, and dependencies per variant
+   (id, optional, size, installed). `POST /alkahest/v1/engines/install` needs
+   `with: [<dep id>]` and `native: true`.
+8. A server event when a background sync fails for the first time, so 17.17
+   can be shown once without polling.
 
 ### Not designed yet
 
@@ -279,7 +417,7 @@ google-chrome --headless=new --hide-scrollbars --virtual-time-budget=4000 \
   --window-size=1440,1080 --screenshot=png/10-library.png "file://$PWD/10-library.html"
 ```
 
-`17-states.html` is a tall sheet: render it with `--window-size=1440,3100`.
+`17-states.html` is a tall sheet: render it with `--window-size=1440,4120`.
 The exported `.html` files differ from the canvas sources only by the
 template tag (`<x-dc>` becomes `<script type="text/x-dc-template">`), the root
 `min-height: 100vh` and the link targets (`Library.dc.html` becomes

@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Alkahest · Settings · Catalogs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#C9CDD1;text-decoration:none}a:hover{color:#E8E6E1}
+summary{cursor:pointer}
+</style>
+</helmet>
+<div style="min-height: 900px; background: #0F1214; color: #E8E6E1; font-family: 'Schibsted Grotesk', system-ui, sans-serif; display: flex; flex-wrap: wrap">
+
+  <nav aria-label="Main" style="flex: 1 0 232px; box-sizing: border-box; padding: 18px 14px; background: #121518; border-right: 1px solid #2A3036; display: flex; flex-direction: column; gap: 4px">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 6px 10px 20px">
+      <svg viewBox="0 0 64 64" width="26" height="26" fill="none" stroke="#E3A63B" stroke-width="6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M6 12 H58"></path><path d="M13 12 L32 52 L51 12"></path><circle cx="32" cy="27" r="7" fill="#E3A63B" stroke="none"></circle></svg>
+      <span style="font-size: 20px; font-weight: 600; letter-spacing: -0.04em">alkahest</span>
+    </div>
+    <a href="Library.dc.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l8-3 8 3-8 3z"></path><path d="M4 12l8 3 8-3"></path><path d="M4 18l8 3 8-3"></path></svg>Library<span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px">14</span></a>
+    <a href="Discover.dc.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>Discover<span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9CC4F0">2↓</span></a>
+    <a href="Running.dc.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"></path></svg>Running<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #6FD3BF"><span style="width: 7px; height: 7px; border-radius: 50%; background: #46B5A0"></span>4</span></a>
+    <a href="Engines.dc.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"></path></svg>Engines</a>
+    <a href="ApiKeys.dc.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"></circle><path d="M11 12l9-9M17 6l3 3M14 9l2 2"></path></svg>API keys</a>
+    <a href="Settings.dc.html" aria-current="page" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; background: #2B2414; color: #F2C46E; font-size: 14px; font-weight: 600"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"></path><circle cx="15" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg>Settings</a>
+    <div style="margin-top: auto; padding: 14px; border: 1px solid #2A3036; border-radius: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #A7ADB3">
+      <span style="display: flex; align-items: center; gap: 8px; color: #6FD3BF; font-weight: 600; font-size: 13px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #46B5A0"></span>Service running</span>
+      <span style="font-family: 'IBM Plex Mono', monospace">127.0.0.1:11435</span>
+      <span>systemd · alkahest.service</span>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 32px; display: flex; flex-direction: column; gap: 18px">
+    <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 4px; margin-right: auto">
+        <h1 style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em">Settings</h1>
+        <span style="font-size: 13px; color: #A7ADB3">Catalogs write <span style="font-family: 'IBM Plex Mono', monospace">[[catalogs]]</span> in <span style="font-family: 'IBM Plex Mono', monospace">~/.config/alkahest/config.toml</span> · snapshots in <span style="font-family: 'IBM Plex Mono', monospace">~/.local/share/alkahest/catalogs</span></span>
+      </div>
+      <button type="button" style="display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 8px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 14px 'Schibsted Grotesk', sans-serif"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.7-4.4L4 8"></path><path d="M4 3v5h5"></path><path d="M4 13a8 8 0 0 0 14.7 4.4L20 16"></path><path d="M20 21v-5h-5"></path></svg>Sync all</button>
+      <button type="button" style="display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 8px; border: none; background: #E3A63B; color: #1A1206; font: 600 14px 'Schibsted Grotesk', sans-serif"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add catalog</button>
+    </header>
+
+    <nav aria-label="Settings sections" style="display: flex; gap: 4px; border-bottom: 1px solid #2A3036">
+      <a href="Settings.dc.html" style="display: inline-flex; align-items: center; height: 40px; padding: 0 14px; margin-bottom: -1px; border-bottom: 2px solid transparent; font-size: 14px; font-weight: 500">General</a>
+      <a href="SettingsCatalogs.dc.html" aria-current="page" style="display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; margin-bottom: -1px; border-bottom: 2px solid #E3A63B; color: #F2C46E; font-size: 14px; font-weight: 600">Catalogs<span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #A7ADB3">4</span><span role="img" aria-label="1 catalog failed to sync" style="width: 7px; height: 7px; border-radius: 50%; background: #E5664F"></span></a>
+    </nav>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start">
+      <div style="flex: 2 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+        <span style="font-size: 13px; line-height: 1.5; color: #A7ADB3">Catalogs are git repositories of engine recipes and models, so new engines and models arrive without a new Alkahest release. Listed lowest to highest: when two catalogs define the same entry, the later one wins.</span>
+
+        <sc-for list="{{catalogs}}" as="c" hint-placeholder-count="4">
+          <article style="background: #161A1D; border: 1px solid #2A3036; border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; opacity: {{c.opacity}}">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #7C848C; width: 14px">{{c.pos}}</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 500">{{c.name}}</span>
+              <sc-if value="{{c.private}}" hint-placeholder-val="{{ false }}">
+                <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #22272C; color: #C9CDD1"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>private · token in keyring</span>
+              </sc-if>
+              <span style="display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: {{c.pillBg}}; color: {{c.pillFg}}"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{c.dot}}"></span>{{c.status}}</span>
+              <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 8px">
+                <button type="button" disabled="{{c.syncDisabled}}" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 12px 'Schibsted Grotesk', sans-serif">Sync now</button>
+                <button type="button" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: transparent; color: #E8E6E1; font: 500 12px 'Schibsted Grotesk', sans-serif">Edit…</button>
+                <sc-if value="{{c.removable}}" hint-placeholder-val="{{ true }}"><button type="button" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #6A2E25; background: transparent; color: #F08A75; font: 600 12px 'Schibsted Grotesk', sans-serif">Remove</button></sc-if>
+                <label style="display: inline-flex; align-items: center; gap: 8px; min-height: 30px; padding-left: 6px; font-size: 12px; color: #C9CDD1"><input type="checkbox" checked="{{c.enabled}}" aria-label="Enable catalog {{c.name}}" style="accent-color: #46B5A0; width: 18px; height: 18px; margin: 0">{{c.enabledLabel}}</label>
+              </span>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px 20px; padding-left: 26px; font-size: 12px; color: #A7ADB3">
+              <span style="font-family: 'IBM Plex Mono', monospace; color: #C9CDD1; overflow-wrap: anywhere">{{c.url}}</span>
+              <span>ref <span style="font-family: 'IBM Plex Mono', monospace; color: #C9CDD1">{{c.ref}}</span></span>
+              <span>subdir <span style="font-family: 'IBM Plex Mono', monospace; color: #C9CDD1">{{c.subdir}}</span></span>
+              <span>commit <span style="font-family: 'IBM Plex Mono', monospace; color: #C9CDD1">{{c.commit}}</span></span>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px 20px; padding-left: 26px; font-size: 12px; color: #A7ADB3">
+              <span>{{c.synced}}</span>
+              <span>{{c.counts}}</span>
+              <span>refresh <span style="font-family: 'IBM Plex Mono', monospace; color: #C9CDD1">{{c.refresh}}</span></span>
+            </div>
+            <sc-if value="{{c.progress}}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; flex-direction: column; gap: 6px; padding-left: 26px">
+                <div style="height: 4px; border-radius: 2px; background: #2A3036"><div style="height: 4px; border-radius: 2px; width: {{c.progress}}; background: #6EA8E6"></div></div>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9CC4F0">{{c.progressText}}</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{c.error}}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; flex-direction: column; gap: 4px; margin-left: 26px; padding: 8px 10px; border-radius: 8px; background: #0B0D0F">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #F08A75; overflow-wrap: anywhere">{{c.error}}</span>
+                <span style="font-size: 12px; color: #A7ADB3">{{c.errorNote}}</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{c.warnings}}" hint-placeholder-val="{{ false }}">
+              <details style="margin-left: 26px; font-size: 12px; color: #F2C46E">
+                <summary>{{c.warnings}}</summary>
+                <span style="display: block; padding: 6px 0 0 14px; font-family: 'IBM Plex Mono', monospace; color: #C9CDD1">{{c.warningText}}</span>
+              </details>
+            </sc-if>
+          </article>
+        </sc-for>
+
+        <details open style="background: #161A1D; border: 1px solid #2A3036; border-radius: 12px; padding: 14px 18px">
+          <summary style="font-size: 14px; font-weight: 600">Advanced · snapshot limits</summary>
+          <div style="display: flex; flex-direction: column; gap: 12px; padding-top: 14px">
+            <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+              <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #A7ADB3">Max snapshot size
+                <input type="text" value="16 MiB" style="height: 36px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px solid #343B42; background: #121518; color: #E8E6E1; font: 500 13px 'IBM Plex Mono', monospace">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px">max_snapshot_bytes</span>
+              </label>
+              <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #A7ADB3">Max file size
+                <input type="text" value="1 MiB" style="height: 36px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px solid #343B42; background: #121518; color: #E8E6E1; font: 500 13px 'IBM Plex Mono', monospace">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px">max_file_bytes</span>
+              </label>
+              <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #A7ADB3">Max archive size
+                <input type="text" value="256 MiB" style="height: 36px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px solid #343B42; background: #121518; color: #E8E6E1; font: 500 13px 'IBM Plex Mono', monospace">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px">max_archive_bytes</span>
+              </label>
+            </div>
+            <span style="font-size: 12px; line-height: 1.5; color: #A7ADB3">Limits protect against oversized or hostile catalogs; a sync that exceeds one fails and keeps the previous snapshot. Saved in <span style="font-family: 'IBM Plex Mono', monospace">[catalog_limits]</span>. Due catalogs refresh in the background every 10 min; <span style="font-family: 'IBM Plex Mono', monospace">ALKAHEST_CATALOG_AUTO_SYNC=0</span> turns that off.</span>
+          </div>
+        </details>
+      </div>
+
+      <aside style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+        <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 600">Recipe layers</h2>
+          <span style="font-size: 12px; color: #A7ADB3">Engines read recipes from these layers; the highest one that has a recipe wins. Engines shows each recipe's origin.</span>
+          <ol style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #C9CDD1">
+            <li>built-in</li>
+            <li>catalog official</li>
+            <li>catalog acme</li>
+            <li>catalog lab <span style="font-family: 'Schibsted Grotesk', sans-serif; color: #7C848C">· disabled</span></li>
+            <li>recipes/ beside the binary</li>
+            <li>~/.local/share/alkahest/recipes</li>
+          </ol>
+        </section>
+        <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 600">Private catalogs</h2>
+          <span style="font-size: 12px; line-height: 1.5; color: #A7ADB3">Tokens live in the OS keyring (<span style="font-family: 'IBM Plex Mono', monospace">alkahest</span> / <span style="font-family: 'IBM Plex Mono', monospace">catalog:&lt;name&gt;</span>) or in <span style="font-family: 'IBM Plex Mono', monospace">ALKAHEST_CATALOG_TOKEN_&lt;NAME&gt;</span>. They are never shown, logged or written to <span style="font-family: 'IBM Plex Mono', monospace">config.toml</span>, and are sent only to the repository's host after it asks for credentials.</span>
+          <div style="display: flex; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid #22272C">
+            <span style="flex: 1; font-size: 13px">acme <span style="font-family: 'IBM Plex Mono', monospace; color: #A7ADB3">token set</span></span>
+            <button type="button" style="height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 13px 'Schibsted Grotesk', sans-serif">Replace…</button>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const S = {
+      ok: { pillBg: '#15302B', pillFg: '#6FD3BF', dot: '#46B5A0' },
+      syncing: { pillBg: '#17263A', pillFg: '#9CC4F0', dot: '#6EA8E6' },
+      error: { pillBg: '#2A1714', pillFg: '#F08A75', dot: '#E5664F' },
+      off: { pillBg: '#22272C', pillFg: '#A7ADB3', dot: '#7C848C' }
+    };
+    const c = (o) => ({ private: false, progress: '', progressText: '', error: '', errorNote: '', warnings: '', warningText: '', removable: true, enabled: true, enabledLabel: 'On', opacity: '1', syncDisabled: false, ...S[o.state], ...o });
+    return {
+      catalogs: [
+        c({ pos: '1', name: 'official', state: 'ok', status: 'Up to date', url: 'https://github.com/digiogithub/alchemai-alkahest', ref: 'main', subdir: 'catalog', commit: 'c1c1877b', synced: 'fetched 12 min ago · checked 2 min ago', counts: '5 engine recipes · 1 model', refresh: '24h', removable: false }),
+        c({ pos: '2', name: 'acme', state: 'syncing', status: 'Syncing…', private: true, url: 'https://git.acme.internal/ml/alkahest-catalog', ref: 'v2.3', subdir: 'catalog', commit: '3f9a02e1', synced: 'fetched 2 days ago', counts: '2 engine recipes · 3 models', refresh: '24h', progress: '58%', progressText: 'downloading changed files · 7 / 12 · 412 KiB', syncDisabled: true, warnings: '2 warnings', warningText: 'models/acme/assistant.toml: unknown key variants.0.notes ignored · engines/acme-llama.toml: source.rev looks like a branch' }),
+        c({ pos: '3', name: 'lab', state: 'error', status: 'Sync failed', url: 'https://github.com/acme-lab/alkahest-catalog', ref: 'main', subdir: '.', commit: '9e01d4c7', synced: 'fetched 3 days ago · last try 40 min ago', counts: '0 engine recipes · 1 model', refresh: '7d', error: 'index.toml: models/lab/embed-small.toml sha256 does not match the downloaded file', errorNote: 'The previous snapshot 9e01d4c7 stays in use. Next try in 15 min.' }),
+        c({ pos: '4', name: 'mirror', state: 'off', status: 'Disabled', url: 'https://git.acme.internal/mirrors/alkahest-official', ref: 'main', subdir: 'catalog', commit: '7b2c9d40 · pinned', synced: 'fetched 9 days ago · pinned, never refreshed', counts: '5 engine recipes · 1 model', refresh: '—', enabled: false, enabledLabel: 'Off', opacity: '0.72', syncDisabled: true })
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

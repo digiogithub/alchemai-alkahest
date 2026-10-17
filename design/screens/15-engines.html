@@ -40,7 +40,7 @@ a{color:#C9CDD1;text-decoration:none}a:hover{color:#E8E6E1}
     <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
       <div style="display: flex; flex-direction: column; gap: 4px; margin-right: auto">
         <h1 style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em">Engines</h1>
-        <span style="font-size: 13px; color: #A7ADB3">3 engines · 4 builds installed · <span style="font-family: 'IBM Plex Mono', monospace">~/.local/share/alkahest/engines</span> · 1.9 GB</span>
+        <span style="font-size: 13px; color: #A7ADB3">3 engines · 6 builds installed · <span style="font-family: 'IBM Plex Mono', monospace">~/.local/share/alkahest/engines</span> · 2.6 GB</span>
       </div>
       <button type="button" style="height: 38px; padding: 0 16px; border-radius: 8px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 14px 'Schibsted Grotesk', sans-serif">Reload recipes</button>
       <button type="button" style="display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 8px; border: none; background: #E3A63B; color: #1A1206; font: 600 14px 'Schibsted Grotesk', sans-serif"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>Install recommended builds</button>
@@ -80,6 +80,7 @@ log: ~/.local/share/alkahest/engines/.logs/prism-llama-cpp-prism-b10777-e3de715-
               <span style="font-size: 12px; color: #A7ADB3">{{e.serves}}</span>
             </div>
             <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid #343B42; color: #C9CDD1">recipe {{e.version}}</span>
+            <span title="Recipe origin: the layer this recipe was read from" style="display: inline-flex; align-items: center; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px {{e.originStyle}} #4A5157; color: #C9CDD1"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.5"></circle><path d="M12 2v6.5M12 15.5V22"></path></svg>{{e.origin}}</span>
             <button type="button" style="height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 13px 'Schibsted Grotesk', sans-serif">Override…</button>
           </div>
           <sc-if value="{{e.hasBuilds}}" hint-placeholder-val="{{ true }}">
@@ -91,9 +92,9 @@ log: ~/.local/share/alkahest/engines/.logs/prism-llama-cpp-prism-b10777-e3de715-
                     <tr style="border-top: 1px solid #22272C">
                       <td style="padding: 10px 18px"><span style="display: flex; align-items: center; gap: 10px"><span style="font-family: 'IBM Plex Mono', monospace; font-weight: 500">{{b.version}} · {{b.variant}}</span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: {{b.tagBg}}; color: {{b.tagFg}}">{{b.tag}}</span></span></td>
                       <td style="padding: 10px 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #C9CDD1">{{b.origin}}</td>
-                      <td style="padding: 10px 8px; text-align: right; font-family: 'IBM Plex Mono', monospace">{{b.size}}</td>
-                      <td style="padding: 10px 8px; color: #C9CDD1">{{b.used}}</td>
-                      <td style="padding: 10px 18px; text-align: right; white-space: nowrap"><button type="button" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: transparent; color: #E8E6E1; font: 500 12px 'Schibsted Grotesk', sans-serif">Info</button><sc-if value="{{b.removable}}" hint-placeholder-val="{{ true }}"> <button type="button" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #6A2E25; background: transparent; color: #F08A75; font: 600 12px 'Schibsted Grotesk', sans-serif">Remove</button></sc-if></td>
+                      <td style="padding: 10px 8px; text-align: right; white-space: nowrap; font-family: 'IBM Plex Mono', monospace">{{b.size}}</td>
+                      <td style="padding: 10px 8px; white-space: nowrap; color: #C9CDD1">{{b.used}}</td>
+                      <td style="padding: 10px 18px; text-align: right; white-space: nowrap"><sc-if value="{{b.rebuild}}" hint-placeholder-val="{{ false }}"><button type="button" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 12px 'Schibsted Grotesk', sans-serif">Rebuild for this CPU</button> </sc-if><button type="button" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: transparent; color: #E8E6E1; font: 500 12px 'Schibsted Grotesk', sans-serif">Info</button><sc-if value="{{b.removable}}" hint-placeholder-val="{{ true }}"> <button type="button" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid #6A2E25; background: transparent; color: #F08A75; font: 600 12px 'Schibsted Grotesk', sans-serif">Remove</button></sc-if></td>
                     </tr>
                   </sc-for>
                 </tbody>
@@ -102,6 +103,15 @@ log: ~/.local/share/alkahest/engines/.logs/prism-llama-cpp-prism-b10777-e3de715-
           </sc-if>
           <sc-if value="{{e.noBuilds}}" hint-placeholder-val="{{ false }}">
             <div style="padding: 12px 18px; font-size: 13px; color: #A7ADB3">Not installed. Models that need it fail with <span style="font-family: 'IBM Plex Mono', monospace; color: #C9CDD1">alkahest engines install {{e.id}}</span> until a build is installed.</div>
+          </sc-if>
+          <sc-if value="{{e.hasDeps}}" hint-placeholder-val="{{ true }}">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 18px; border-top: 1px solid #22272C">
+              <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB3; margin-right: 6px">Dependencies</span>
+              <sc-for list="{{e.deps}}" as="d" hint-placeholder-count="1">
+                <span style="display: inline-flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 4px 0 10px; border-radius: 7px; border: 1px solid {{d.border}}; color: {{d.fg}}; font: 500 12px 'IBM Plex Mono', monospace">{{d.id}}<span style="font-family: 'Schibsted Grotesk', sans-serif; font-size: 11px; color: #A7ADB3">{{d.note}}</span><sc-if value="{{d.installable}}" hint-placeholder-val="{{ true }}"><button type="button" style="height: 24px; padding: 0 10px; border-radius: 6px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 12px 'Schibsted Grotesk', sans-serif">Install</button></sc-if><sc-if value="{{d.installed}}" hint-placeholder-val="{{ false }}"><span style="padding-right: 6px; font-family: 'Schibsted Grotesk', sans-serif; font-size: 11px; color: #6FD3BF">installed</span></sc-if></span>
+              </sc-for>
+              <span style="font-size: 12px; color: #A7ADB3">{{e.depsHint}}</span>
+            </div>
           </sc-if>
           <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid #22272C; background: #121518">
             <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB3; margin-right: 6px">Variants</span>
@@ -112,7 +122,7 @@ log: ~/.local/share/alkahest/engines/.logs/prism-llama-cpp-prism-b10777-e3de715-
         </article>
       </sc-for>
     </div>
-    <span style="font-size: 12px; color: #A7ADB3">Models use the newest installed build unless pinned in model settings (<span style="font-family: 'IBM Plex Mono', monospace">engine = "llama-cpp@b11669"</span>). Recipes load from the binary's <span style="font-family: 'IBM Plex Mono', monospace">recipes/</span> and <span style="font-family: 'IBM Plex Mono', monospace">~/.local/share/alkahest/recipes</span>.</span>
+    <span style="font-size: 12px; line-height: 1.5; color: #A7ADB3">Models use the newest installed build unless pinned in model settings (<span style="font-family: 'IBM Plex Mono', monospace">engine = "llama-cpp@b11669"</span>). Recipe origin, lowest to highest: <span style="font-family: 'IBM Plex Mono', monospace">built-in</span> › <a href="16b-settings-catalogs.html" style="color: #F2C46E">catalogs</a> in configured order › the binary's <span style="font-family: 'IBM Plex Mono', monospace">recipes/</span> › <span style="font-family: 'IBM Plex Mono', monospace">~/.local/share/alkahest/recipes</span>; the highest layer that has a recipe wins. Native variants are built from source for this CPU and are never picked automatically.</span>
   </main>
 </div>
 </script>
@@ -122,38 +132,58 @@ class Component extends DCLogic {
     const T = {
       inUse: { tagBg: '#15302B', tagFg: '#6FD3BF' },
       fallback: { tagBg: '#22272C', tagFg: '#C9CDD1' },
-      bundled: { tagBg: '#22272C', tagFg: '#C9CDD1' }
+      bundled: { tagBg: '#22272C', tagFg: '#C9CDD1' },
+      native: { tagBg: '#22272C', tagFg: '#C9CDD1' },
+      stale: { tagBg: '#2B2414', tagFg: '#F2C46E' }
     };
-    const b = (version, variant, tag, kind, origin, size, used) => ({ version, variant, tag, origin, size, used, removable: kind !== 'bundled', ...T[kind] });
+    const b = (version, variant, tag, kind, origin, size, used) => ({ version, variant, tag, origin, size, used, removable: kind !== 'bundled', rebuild: kind === 'stale', ...T[kind] });
     const V = {
       installed: { style: 'solid', border: '#46B5A0', fg: '#6FD3BF', noteFg: '#6FD3BF' },
       recommended: { style: 'solid', border: '#6B5320', fg: '#F2C46E', noteFg: '#F2C46E' },
       available: { style: 'solid', border: '#343B42', fg: '#C9CDD1', noteFg: '#A7ADB3' },
       building: { style: 'solid', border: '#6EA8E6', fg: '#9CC4F0', noteFg: '#9CC4F0' },
       source: { style: 'dashed', border: '#4A5157', fg: '#C9CDD1', noteFg: '#A7ADB3' },
+      stale: { style: 'dashed', border: '#6B5320', fg: '#F2C46E', noteFg: '#F2C46E' },
       unsupported: { style: 'dashed', border: '#2A3036', fg: '#7C848C', noteFg: '#7C848C' }
     };
     const v = (name, state, note) => ({ name, state, note, ...V[state] });
+    const D = {
+      optional: { border: '#343B42', fg: '#C9CDD1', installable: true, installed: false },
+      installed: { border: '#46B5A0', fg: '#6FD3BF', installable: false, installed: true }
+    };
+    const d = (id, note, state) => ({ id, note, ...D[state] });
     return {
       engines: [
         {
           name: 'llama.cpp', id: 'llama-cpp', version: 'b11669', serves: 'GGUF chat, embeddings, rerank, vision · mainline ggml-org',
+          origin: 'catalog official @ c1c1877b', originStyle: 'solid',
           hasBuilds: true, noBuilds: false,
           builds: [
             b('b11669', 'cuda12.8', 'in use', 'inUse', 'prebuilt · sha256 verified', '612 MB', '11 models'),
+            b('b11669', 'cpu-native', 'native · built for this CPU', 'native', 'built from source · AVX2 FMA F16C', '41 MB', 'not used'),
             b('b11669', 'cpu', 'bundled', 'bundled', 'shipped with alkahest', '38 MB', 'fallback')
           ],
-          variants: [v('cuda12.8', 'installed', 'installed'), v('cuda13.4', 'unsupported', 'driver too old'), v('vulkan', 'available', ''), v('cpu', 'installed', 'installed'), v('rocm', 'unsupported', 'no AMD GPU'), v('sycl', 'source', 'on request')]
+          hasDeps: true, deps: [d('cuda-runtime', 'optional · for cuda12.8 · 594 MB', 'optional')],
+          depsHint: 'Not needed when the CUDA 12 runtime is installed on the host.',
+          variants: [v('cuda12.8', 'installed', 'installed'), v('cuda13.4', 'unsupported', 'driver too old'), v('vulkan', 'available', ''), v('cpu', 'installed', 'installed'), v('cpu-native', 'installed', 'native'), v('rocm', 'unsupported', 'no AMD GPU'), v('sycl', 'source', 'on request')]
         },
         {
           name: 'prism llama.cpp', id: 'prism-llama-cpp', version: 'prism-b10777-e3de715', serves: 'Ternary GGUF (PQ2_0, PTQ1_0) · Bonsai models · PrismML fork',
+          origin: 'catalog official @ c1c1877b', originStyle: 'solid',
           hasBuilds: true, noBuilds: false,
-          builds: [b('prism-b10777-e3de715', 'cuda12.8', 'in use', 'inUse', 'prebuilt · sha256 verified', '208 MB', '2 models')],
-          variants: [v('cuda12.8', 'installed', 'installed'), v('cuda13.3', 'building', 'building…'), v('cuda12.4', 'available', ''), v('vulkan', 'available', ''), v('cpu', 'available', '')]
+          builds: [
+            b('prism-b10777-e3de715', 'cuda12.8', 'in use', 'inUse', 'prebuilt · sha256 verified', '208 MB', '2 models'),
+            b('prism-b10777-e3de715', 'cpu-native', 'built for another CPU', 'stale', 'built from source · other CPU', '44 MB', 'not used')
+          ],
+          hasDeps: true, deps: [d('cuda-runtime', 'with cuda12.8', 'installed')],
+          depsHint: '',
+          variants: [v('cuda12.8', 'installed', 'installed'), v('cuda13.3', 'building', 'building…'), v('cuda12.4', 'available', ''), v('vulkan', 'available', ''), v('cpu', 'available', ''), v('cpu-native', 'stale', 'built for another CPU')]
         },
         {
           name: 'vLLM', id: 'vllm', version: '0.11.0', serves: 'safetensors chat and embeddings · Linux + NVIDIA · needs uv or python3',
+          origin: 'built-in', originStyle: 'dashed',
           hasBuilds: false, noBuilds: true, builds: [],
+          hasDeps: false, deps: [], depsHint: '',
           variants: [v('cuda12.8', 'recommended', 'recommended · Python venv · ~10 GB'), v('metal', 'unsupported', 'macOS only')]
         }
       ]
