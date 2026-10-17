@@ -8,8 +8,9 @@
 //! - `icons`: render the platform icon sets from `design/brand/` into `packaging/icons/`.
 //! - `notice [--check]`: generate and verify THIRD_PARTY_LICENSES and NOTICE (ALK-US-0077).
 //! - `engines-check [--fail-on-update]`: report newer upstream engine releases (ALK-US-0053).
-//! - `bundle`: placeholder.
+//! - `bundle`: build the Linux release artefacts: headless tar.gz, desktop .deb and AppImage (ALK-US-0074).
 
+mod bundle;
 mod deps;
 mod engines;
 mod icons;
@@ -20,9 +21,6 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-
-/// Subcommands that exist but are implemented by later stories.
-const PLANNED: &[&str] = &["bundle"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -35,11 +33,8 @@ fn main() -> ExitCode {
         "tokens" => workspace_root().and_then(|root| tokens::run(&root, rest)),
         "icons" => workspace_root().and_then(|root| icons::run(&root, rest)),
         "engines-check" => workspace_root().and_then(|root| engines::run(&root, rest)),
+        "bundle" => workspace_root().and_then(|root| bundle::run(&root, rest)),
         "notice" => workspace_root().and_then(|root| notice::run(&root, rest)),
-        c if PLANNED.contains(&c) => {
-            println!("xtask {c}: not implemented yet");
-            Ok(true)
-        }
         other => {
             eprintln!("xtask: unknown command `{other}`");
             usage();
@@ -66,6 +61,6 @@ fn workspace_root() -> Result<PathBuf> {
 
 fn usage() {
     eprintln!(
-        "usage: cargo xtask <check-deps|tokens [--check] [--contrast]|icons|notice [--check]|engines-check [--fail-on-update]|bundle>"
+        "usage: cargo xtask <check-deps|tokens [--check] [--contrast]|icons|notice [--check]|engines-check [--fail-on-update]|bundle [--flavour ..] [--formats ..] [--no-build]>"
     );
 }
