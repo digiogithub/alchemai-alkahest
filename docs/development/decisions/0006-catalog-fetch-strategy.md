@@ -1,6 +1,7 @@
 # ADR 0006: how Alkahest fetches git catalogs
 
-Status: proposed 2026-10-17, pending product owner review (security-tagged epic). Story:
+Status: accepted 2026-10-17 by the product owner (security-tagged epic; see "Product owner
+review" at the end). Story:
 [[ALK-US-0117]]. Epic: [[ALK-EP-0015]]. Spec: [[ALK-SP-0011]] (R10, R11, R14). Plan:
 [[development/plans/ALK-EP-0015-git-catalogs]].
 
@@ -165,3 +166,21 @@ redacted in every error and log line (R14).
   `index.toml`.
 - Users of hosts outside GitHub, GitLab and Gitea/Forgejo set `raw_url` / `archive_url`
   templates.
+
+## Product owner review (2026-10-17)
+
+1. The ADR is accepted as written: HTTPS transport, generated `index.toml`, TLS plus commit
+   pinning for v1; index signing is not required in v1.
+2. Integrity follows what the Ollama registry and Hugging Face already do: Ollama manifests carry
+   a sha256 digest and size for every layer, and Hugging Face LFS files expose sha256 and size.
+   Catalog entries therefore keep sha256 and size mandatory, and `tofu` stays local-only.
+3. Catalog models use the pseudo-host `alkahest` instead of `catalog`: they are referenced, pulled
+   and stored as `alkahest/<namespace>/<model>[:<tag>]`, parsed like `hf.co/<org>/<repo>` names
+   (the first of three segments is the host). The `catalog:` reference prefix of ALK-SP-0011.R13 is
+   dropped because `alkahest:` already scopes a lookup to the Alkahest store
+   (ALK-SP-0001.R3); a specific catalog source is chosen with a `--catalog <name>` option, otherwise
+   the layer order of R12 decides. The host `alkahest` is never contacted as an OCI registry.
+   ALK-US-0120 updates R13 accordingly.
+4. Snapshot size limits (16 MiB per snapshot, 1 MiB per file) protect against a broken or hostile
+   catalog filling the disk; the product owner had no preference, so the defaults stay and are
+   configurable.
