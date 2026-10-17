@@ -108,9 +108,15 @@ dependencies = [
 name = "alkahest-decision"
 version = "0.1.0"
 dependencies = [
+ "alkahest-engine",
+ "alkahest-gguf",
+ "axum",
+ "futures",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

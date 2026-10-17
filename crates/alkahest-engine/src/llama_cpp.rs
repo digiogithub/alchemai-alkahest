@@ -28,6 +28,11 @@ use crate::locator::EngineInstall;
 /// builds only integers, and 999 exceeds any model's layer count.
 const ALL_LAYERS: i32 = 999;
 
+/// Slots a decision model gets when the scheduler did not choose: decision requests are many
+/// short single-pass scorings, so llama.cpp serves them from many slots over one unified KV
+/// pool (ALK-US-0062).
+pub const DECISION_SLOTS: u32 = 16;
+
 /// Built-in chat templates of `llama-server` b11669 (`--chat-template` list in `--help`).
 pub const BUILTIN_TEMPLATES: &[&str] = &[
     "bailing",
@@ -215,7 +220,10 @@ impl LlamaCppEngine {
 
         // Each slot gets the configured context (Ollama semantics), so the total grows with
         // the number of slots.
-        let slots = req.num_parallel.filter(|n| *n > 0);
+        let slots = req
+            .num_parallel
+            .filter(|n| *n > 0)
+            .or((req.kind == ModelKind::Decision).then_some(DECISION_SLOTS));
         if let Some(ctx) = s.context_length.filter(|c| *c > 0) {
             let total = ctx.saturating_mul(u64::from(slots.unwrap_or(1)));
             a.extend(["-c".into(), total.to_string()]);
@@ -251,6 +259,12 @@ impl LlamaCppEngine {
             ModelKind::Embeddings => a.push("--embeddings".into()),
             ModelKind::Rerank => {
                 a.extend(["--reranking".into(), "--pooling".into(), "rank".into()]);
+            }
+            ModelKind::Decision => {
+                // One KV pool shared by the slots, and no prompt cache: scoring prompts are
+                // short and repeated answers must stay bit-identical (ALK-SP-0007.R3).
+                a.extend(["--kv-unified".into(), "--cache-ram".into(), "0".into()]);
+                template_args(req, &mut a)?;
             }
             _ => template_args(req, &mut a)?,
         }

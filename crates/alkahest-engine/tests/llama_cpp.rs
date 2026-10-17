@@ -123,6 +123,30 @@ fn embedding_and_rerank_kinds() {
     assert!(!a.contains(&"--jinja".to_string()));
 }
 
+#[test]
+fn decision_kind_gets_slots_unified_kv_and_no_prompt_cache() {
+    let mut d = LaunchRequest::new(
+        "tev1:0.8b",
+        "/m/d.gguf",
+        ModelFormat::Gguf,
+        ModelKind::Decision,
+    );
+    d.settings.context_length = Some(2048);
+    let a = args(&d);
+    assert_eq!(pair(&a, "-np").as_deref(), Some("16"));
+    assert_eq!(pair(&a, "-c").as_deref(), Some("32768"));
+    assert!(a.contains(&"--kv-unified".to_string()));
+    assert_eq!(pair(&a, "--cache-ram").as_deref(), Some("0"));
+    // The chat template still renders scoring prompts.
+    assert!(a.contains(&"--jinja".to_string()));
+    // A scheduler choice wins over the default slot count.
+    d.num_parallel = Some(4);
+    assert_eq!(pair(&args(&d), "-np").as_deref(), Some("4"));
+    // Other kinds are unchanged.
+    let c = args(&chat());
+    assert!(!c.contains(&"--kv-unified".to_string()) && pair(&c, "--cache-ram").is_none());
+}
+
 /// ADR 0001 flag table: GGUF template, override file, override string, Go template matched
 /// to a built-in.
 #[test]
