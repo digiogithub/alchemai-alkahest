@@ -93,6 +93,31 @@ pub struct SearchArgs {
     pub limit: u32,
 }
 
+/// Arguments of `alkahest run`.
+#[derive(Debug, Args)]
+pub struct RunArgs {
+    /// Model reference.
+    pub model: String,
+    /// One-shot prompt (words are joined with spaces, after any piped input).
+    pub prompt: Vec<String>,
+    /// Response format: `json`, or a JSON schema.
+    #[arg(long, value_name = "FORMAT")]
+    pub format: Option<String>,
+    /// Thinking for models that support it: `true`/`false`, or `high`/`medium`/`low`.
+    /// `--think` alone means `true`.
+    #[arg(long, value_name = "WHEN", num_args = 0..=1, default_missing_value = "true")]
+    pub think: Option<String>,
+    /// Do not print the model's thinking (it still thinks when `--think` asks for it).
+    #[arg(long)]
+    pub hidethinking: bool,
+    /// How long the model stays loaded after the last request (`5m`, `1h`, `0`, `-1`).
+    #[arg(long, value_name = "DURATION")]
+    pub keepalive: Option<String>,
+    /// Do not offer to start the server when it is not running.
+    #[arg(long)]
+    pub no_start: bool,
+}
+
 /// Arguments of `alkahest show`.
 #[derive(Debug, Args)]
 pub struct ShowArgs {
@@ -165,12 +190,12 @@ pub enum Command {
         destination: String,
     },
     /// Chat with a model interactively, or answer one prompt.
-    Run {
-        /// Model reference.
-        model: String,
-        /// Optional one-shot prompt.
-        prompt: Vec<String>,
-    },
+    ///
+    /// With a prompt, or with input piped on stdin, prints one answer and exits; otherwise
+    /// opens an interactive session (`/?` for help, `/bye` to leave). Needs a running
+    /// server (`alkahest serve`). For this command `--verbose` prints timing statistics
+    /// after each answer instead of raising the log level.
+    Run(RunArgs),
     /// Unload a running model.
     Stop {
         /// Model reference.
@@ -385,10 +410,10 @@ impl Command {
             Self::Search(_) => "ALK-US-0021",
             Self::Ls | Self::Show(_) => "ALK-US-0012",
             Self::Rm { .. } | Self::Cp { .. } | Self::Gc { .. } => "ALK-US-0013",
-            Self::Run { .. } => "ALK-US-0039",
             Self::Desktop => "ALK-US-0064",
             Self::Service { .. } => "ALK-US-0045",
             Self::Pull { .. }
+            | Self::Run(_)
             | Self::Ps
             | Self::Stop { .. }
             | Self::Config { .. }
@@ -414,7 +439,7 @@ impl Command {
             Self::Gc { .. } => "gc",
             Self::Show(_) => "show",
             Self::Cp { .. } => "cp",
-            Self::Run { .. } => "run",
+            Self::Run(_) => "run",
             Self::Stop { .. } => "stop",
             Self::Serve { .. } => "serve",
             Self::Desktop => "desktop",

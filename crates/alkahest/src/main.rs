@@ -11,6 +11,7 @@ mod model_config_cmd;
 mod models_cmd;
 mod ps_cmd;
 mod pull_cmd;
+mod run_cmd;
 mod search_cmd;
 mod serve_cmd;
 mod service_cmd;
@@ -74,11 +75,14 @@ fn run(cli: &Cli) -> Result<ExitCode> {
 
     // Only the long-running server writes log files; short commands stay on stderr.
     let is_serve = matches!(cli.command, Command::Serve { .. });
+    // `alkahest run --verbose` means timing statistics (as in Ollama), not debug logs that
+    // would interleave with the streamed answer.
+    let is_run = matches!(cli.command, Command::Run(_));
     let _log_guard = logging::init(
         &loaded.config.logging,
         &loaded.config.resolve_paths(&loaded.paths).log_dir,
         &LogOptions {
-            verbosity: cli.global.verbose,
+            verbosity: if is_run { 0 } else { cli.global.verbose },
             level: cli.global.log_level.clone(),
             stderr: true,
             file: Some(is_serve),
@@ -94,6 +98,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Command::Ls => models_cmd::ls(&loaded, cli.global.json),
         Command::Ps => ps_cmd::ps(&loaded, cli.global.json),
         Command::Stop { model } => ps_cmd::stop(model, &loaded, cli.global.json),
+        Command::Run(args) => run_cmd::run(args, &loaded, cli.global.verbose > 0),
         Command::Rm { models } => models_cmd::rm(models, &loaded, cli.global.json),
         Command::Cp {
             source,
