@@ -180,9 +180,21 @@ jobs:
       # Headless tar.gz, then Alkahest.app and the dmg. cargo-packager signs every Mach-O file in
       # the bundle (including the bundled llama-server) with the hardened runtime and
       # packaging/macos/entitlements.plist, notarises and staples the .app, and signs the dmg.
+      # hdiutil on hosted runners intermittently fails to eject the scratch image ("Resource
+      # busy") while Spotlight or XProtect scan it: turn indexing off and retry once (the
+      # second attempt reuses the built binaries, so it only repeats the packaging).
       - name: Bundle (tar.gz, .app, .dmg)
         run: |
-          cargo xtask bundle
+          sudo mdutil -a -i off || true
+          if ! cargo xtask bundle; then
+            echo "::warning::bundling failed, retrying once (hdiutil eject is flaky on hosted runners)"
+            hdiutil info | grep -E '^/dev/disk[0-9]+' | awk '{print $1}' | sort -u | while read -r d; do
+              hdiutil detach -force "$d" || true
+            done
+            rm -f target/packager/rw.*.dmg
+            sleep 10
+            cargo xtask bundle
+          fi
           ls -la target/packager
 
       - name: Smoke test the bundle
