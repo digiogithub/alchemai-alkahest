@@ -1034,3 +1034,26 @@ async fn openapi() {
         }
     }
 }
+
+#[tokio::test]
+async fn tls_is_toggled_in_the_network_settings() {
+    // ALK-US-0044: the admin API switches HTTPS for the next start and warns while the
+    // certificate is missing; plain-HTTP warnings stop once TLS is on.
+    let a = admin_ctx(Config::default(), false);
+    let h = harness(&a).await;
+    let (status, doc) = send(
+        &h,
+        "PUT",
+        "/alkahest/v1/settings/network",
+        Some(json!({"host": "0.0.0.0", "tls": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    assert_eq!(doc["saved"]["tls"], true);
+    assert_eq!(doc["running"]["tls"], false);
+    let warnings = doc["warnings"].to_string();
+    assert!(!warnings.contains("plain HTTP"), "{warnings}");
+    assert!(warnings.contains("certs generate"), "{warnings}");
+    let file = std::fs::read_to_string(a.tmp.path().join("config.toml")).unwrap();
+    assert!(Config::from_toml_str(&file).unwrap().server.tls.enabled);
+}

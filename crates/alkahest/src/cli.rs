@@ -241,6 +241,12 @@ pub enum Command {
         #[command(subcommand)]
         action: EnginesAction,
     },
+    /// Manage TLS certificates for HTTPS (`[server.tls]`).
+    Certs {
+        /// Certificate action.
+        #[command(subcommand)]
+        action: CertsAction,
+    },
     /// Install or control the background service.
     Service {
         /// Service action.
@@ -297,6 +303,25 @@ pub enum KeysAction {
     Revoke {
         /// Key id (`abcd1234` or `alk_abcd1234`) or active key name.
         id: String,
+    },
+}
+
+/// `alkahest certs ...`
+#[derive(Debug, Subcommand)]
+pub enum CertsAction {
+    /// Write a self-signed server certificate, its key (owner only) and the CA clients trust
+    /// to the `[server.tls]` paths (default `<data_dir>/tls/`).
+    Generate {
+        /// Extra DNS name or IP address the certificate must cover (localhost, the loopback
+        /// addresses and this host's name are always included). Repeatable.
+        #[arg(long = "name", value_name = "NAME")]
+        hosts: Vec<String>,
+        /// Validity in days (at most 825, the limit Apple platforms accept).
+        #[arg(long, default_value_t = 397)]
+        days: u32,
+        /// Replace existing files.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -438,6 +463,7 @@ impl Command {
             | Self::Serve { .. }
             | Self::Keys { .. }
             | Self::Engines { .. }
+            | Self::Certs { .. }
             | Self::Hf { .. }
             | Self::Desktop(_) => {
                 return None;
@@ -463,6 +489,7 @@ impl Command {
             Self::Hf { .. } => "hf",
             Self::Keys { .. } => "keys",
             Self::Engines { .. } => "engines",
+            Self::Certs { .. } => "certs",
             Self::Service { .. } => "service",
             Self::Sysinfo => "sysinfo",
             Self::Config { .. } => "config",

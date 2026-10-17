@@ -44,6 +44,9 @@ pub struct NetworkSettings {
     pub cors_origins: Vec<String>,
     /// Served API families.
     pub endpoints: EndpointsConfig,
+    /// HTTPS (`server.tls.enabled`, ALK-SP-0006.R6).
+    #[serde(default)]
+    pub tls: bool,
 }
 
 impl NetworkSettings {
@@ -56,6 +59,7 @@ impl NetworkSettings {
             require_on_loopback: config.auth.require_on_loopback,
             cors_origins: config.server.cors_origins.clone(),
             endpoints: config.server.endpoints,
+            tls: config.server.tls.enabled,
         }
     }
 
@@ -90,6 +94,8 @@ struct NetworkPatch {
     require_on_loopback: Option<bool>,
     cors_origins: Option<Vec<String>>,
     endpoints: Option<EndpointsPatch>,
+    /// Serve HTTPS with the configured (or generated) certificate.
+    tls: Option<bool>,
     /// Required to save a network bind without key checks.
     #[serde(default)]
     confirm_unauthenticated: bool,
@@ -153,6 +159,9 @@ fn apply(base: &NetworkSettings, patch: &NetworkPatch) -> Result<NetworkSettings
         ep.anthropic = e.anthropic.unwrap_or(ep.anthropic);
         ep.decisions = e.decisions.unwrap_or(ep.decisions);
     }
+    if let Some(v) = patch.tls {
+        s.tls = v;
+    }
     if !s.is_loopback() && !s.require_key_for_remote && !patch.confirm_unauthenticated {
         return Err(HttpError::bad_request(
             "a network bind without API keys lets anyone on the network use and administer this \
@@ -205,6 +214,8 @@ pub(crate) fn write_settings(path: &Path, s: &NetworkSettings) -> Result<(), Htt
         ep["openai"] = toml_edit::value(s.endpoints.openai);
         ep["anthropic"] = toml_edit::value(s.endpoints.anthropic);
         ep["decisions"] = toml_edit::value(s.endpoints.decisions);
+        let tls = ensure_table(server, "tls");
+        tls["enabled"] = toml_edit::value(s.tls);
     }
     {
         let auth = ensure_table(doc.as_item_mut(), "auth");
@@ -257,12 +268,27 @@ fn document(ctx: &AdminContext) -> Value {
                 .into(),
         );
     }
-    if !saved.is_loopback() {
+    if !saved.is_loopback() && !saved.tls {
         warnings.push(
-            "traffic is plain HTTP: API keys and prompts cross the network unencrypted; use a \
-             TLS reverse proxy or a trusted network"
+            "traffic is plain HTTP: API keys and prompts cross the network unencrypted; enable \
+             TLS, use a TLS reverse proxy or a trusted network"
                 .into(),
         );
+    }
+    if saved.tls {
+        let tls = &ctx.config.server.tls;
+        for path in [
+            tls.cert_path(&ctx.paths.data_dir),
+            tls.key_path(&ctx.paths.data_dir),
+        ] {
+            if !path.exists() {
+                warnings.push(format!(
+                    "TLS is enabled but {} does not exist; the server will not start until it \
+                     does (`alkahest certs generate` writes a self-signed certificate)",
+                    path.display()
+                ));
+            }
+        }
     }
     for var in ["ALKAHEST_HOST", "ALKAHEST_PORT"] {
         if (ctx.env)(var).is_some() {

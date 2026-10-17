@@ -3,6 +3,7 @@
 //! Commands whose story is not built yet print `not implemented yet (ALK-US-xxxx)` and exit
 //! with code 2. Exit codes: 0 success, 1 runtime error, 2 not implemented or usage error.
 
+mod certs_cmd;
 mod cli;
 mod engines_cmd;
 mod hf_cmd;
@@ -126,6 +127,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         } => serve_cmd::run(&loaded, *allow_unauthenticated),
         Command::Keys { action } => keys_cmd::run(action, &loaded, cli.global.json),
         Command::Service { action } => service_cmd::run(action, &loaded, cli.global.json),
+        Command::Certs { action } => certs_cmd::run(action, &loaded, cli.global.json),
         Command::Desktop(args) => desktop(args, &cli.global, &loaded),
         other => Ok(not_implemented(other)),
     }

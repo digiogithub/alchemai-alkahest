@@ -34,6 +34,11 @@ pub const DEFAULT_PORT: u16 = 11435;
 /// Environment variable read by the CLI for the API key of a remote server.
 pub const API_KEY_ENV: &str = "ALKAHEST_API_KEY";
 
+/// Environment variable naming a PEM file of CA certificates the CLI trusts, in addition to
+/// the system roots, when it talks to an HTTPS server (ALK-SP-0006.R6), for example the
+/// `ca.pem` written by `alkahest certs generate`.
+pub const CA_CERT_ENV: &str = "ALKAHEST_CA_CERT";
+
 /// Client failures.
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -66,6 +71,27 @@ pub enum ClientError {
     /// The base URL is not valid.
     #[error("invalid server URL `{0}`")]
     InvalidUrl(String),
+    /// The TLS connection failed: untrusted or mismatching certificate, or the server does
+    /// not speak TLS. Not reported as [`ClientError::NotRunning`], because something does
+    /// listen there.
+    #[error(
+        "TLS connection to {url} failed: {message} (a server with a self-signed certificate \
+         needs its CA in {CA_CERT_ENV})"
+    )]
+    Tls {
+        /// The base URL.
+        url: String,
+        /// What failed.
+        message: String,
+    },
+    /// A CA certificate could not be read or parsed.
+    #[error("CA certificate {path}: {message}")]
+    CaCert {
+        /// File (or `<memory>`).
+        path: String,
+        /// What is wrong.
+        message: String,
+    },
 }
 
 /// Result alias using [`ClientError`].
@@ -468,6 +494,25 @@ pub struct ChatChunk {
     pub stats: Stats,
 }
 
+/// The TLS part of a transport error, when there is one: certificate problems and
+/// handshake failures surface as connect errors in reqwest, but they mean something answered.
+fn tls_failure(e: &reqwest::Error) -> Option<String> {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(e);
+    while let Some(s) = source {
+        let text = s.to_string();
+        let lower = text.to_ascii_lowercase();
+        if lower.contains("certificate")
+            || lower.contains("handshake")
+            || lower.contains("tls")
+            || lower.contains("corrupt message")
+        {
+            return Some(text);
+        }
+        source = s.source();
+    }
+    None
+}
+
 /// Client of one Alkahest server.
 #[derive(Debug, Clone)]
 pub struct Client {
@@ -499,13 +544,53 @@ impl Client {
     /// A client for a server bound to `host:port`. Wildcard binds (`0.0.0.0`, `::`) are
     /// reached through loopback.
     pub fn for_bind(host: &str, port: u16) -> Result<Self> {
+        Self::for_server(host, port, false)
+    }
+
+    /// Like [`Client::for_bind`], over HTTPS when `https` (the server has `[server.tls]`
+    /// enabled).
+    pub fn for_server(host: &str, port: u16, https: bool) -> Result<Self> {
         let host = match host.trim() {
             "" | "0.0.0.0" => "127.0.0.1".to_string(),
             "::" | "[::]" => "[::1]".to_string(),
             h if h.contains(':') && !h.starts_with('[') => format!("[{h}]"),
             h => h.to_string(),
         };
-        Self::new(&format!("http://{host}:{port}"))
+        let scheme = if https { "https" } else { "http" };
+        Self::new(&format!("{scheme}://{host}:{port}"))
+    }
+
+    /// Trusts the CA certificates in `pem` (one or more PEM blocks) in addition to the
+    /// system roots, for servers with a private or self-signed certificate.
+    pub fn with_ca_cert_pem(mut self, pem: &[u8]) -> Result<Self> {
+        let bad = |message: String| ClientError::CaCert {
+            path: "<memory>".into(),
+            message,
+        };
+        let certs = reqwest::Certificate::from_pem_bundle(pem).map_err(|e| bad(e.to_string()))?;
+        if certs.is_empty() {
+            return Err(bad("no PEM certificate found".into()));
+        }
+        self.http = reqwest::Client::builder()
+            .tls_certs_merge(certs)
+            .build()
+            .map_err(|e| bad(e.to_string()))?;
+        Ok(self)
+    }
+
+    /// [`Client::with_ca_cert_pem`] with the contents of `path`.
+    pub fn with_ca_cert_file(self, path: &std::path::Path) -> Result<Self> {
+        let pem = std::fs::read(path).map_err(|e| ClientError::CaCert {
+            path: path.display().to_string(),
+            message: e.to_string(),
+        })?;
+        self.with_ca_cert_pem(&pem).map_err(|e| match e {
+            ClientError::CaCert { message, .. } => ClientError::CaCert {
+                path: path.display().to_string(),
+                message,
+            },
+            other => other,
+        })
     }
 
     /// Sends `key` as `Authorization: Bearer` (needed for non-loopback servers).
@@ -529,7 +614,12 @@ impl Client {
 
     async fn send(&self, req: reqwest::RequestBuilder, path: &str) -> Result<reqwest::Response> {
         let resp = req.send().await.map_err(|e| {
-            if e.is_connect() {
+            if let Some(message) = tls_failure(&e) {
+                ClientError::Tls {
+                    url: self.base.clone(),
+                    message,
+                }
+            } else if e.is_connect() {
                 ClientError::NotRunning {
                     url: self.base.clone(),
                 }
@@ -849,6 +939,25 @@ mod tests {
             "http://localhost:9"
         );
         assert!(Client::new("").is_err());
+        assert_eq!(
+            Client::for_server("0.0.0.0", 11435, true)
+                .unwrap()
+                .base_url(),
+            "https://127.0.0.1:11435"
+        );
+    }
+
+    #[test]
+    fn ca_certificates_must_be_pem() {
+        let c = Client::new("https://localhost:1").unwrap();
+        assert!(matches!(
+            c.clone().with_ca_cert_pem(b"nothing"),
+            Err(ClientError::CaCert { .. })
+        ));
+        assert!(matches!(
+            c.with_ca_cert_file(std::path::Path::new("/nonexistent/ca.pem")),
+            Err(ClientError::CaCert { .. })
+        ));
     }
 
     #[test]

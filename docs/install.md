@@ -72,3 +72,28 @@ system service after installing the `.deb` or the archive, ask for it explicitly
 `alkahest service install --user`. The bundled engine in `/usr/lib/alkahest/engines` (or
 `engines/` next to the binary) is found automatically; `alkahest engines install` still adds GPU
 builds into the data directory, which win over the bundled copy.
+
+## HTTPS
+
+The server speaks plain HTTP on loopback by default. To expose it on a network with TLS
+(ALK-SP-0006.R6):
+
+```sh
+alkahest certs generate --name myhost.lan   # CA + server certificate in <data_dir>/tls/
+```
+
+```toml
+[server]
+host = "0.0.0.0"
+
+[server.tls]
+enabled = true
+# cert = "/etc/alkahest/tls/cert.pem"    # defaults: <data_dir>/tls/cert.pem and key.pem
+# key = "/etc/alkahest/tls/key.pem"
+# reload_interval_secs = 60             # 0 = reload on SIGHUP only
+```
+
+A renewed certificate (for example from an ACME client) is picked up on `SIGHUP` or when the
+files change; open connections keep the old one. The CLI switches to `https://` by itself and
+trusts the generated `ca.pem` when it shares the data directory; elsewhere set
+`ALKAHEST_CA_CERT=/path/to/ca.pem`. The key file is written with mode 0600.

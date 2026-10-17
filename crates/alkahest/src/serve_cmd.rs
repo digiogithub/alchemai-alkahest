@@ -21,7 +21,8 @@ use alkahest_api::audit::{AuditLog, UsageTracker, usage_path};
 use alkahest_api::keys::{FileKeyVerifier, KeyStore, KeyVerifier};
 use alkahest_api::pull::PullService;
 use alkahest_api::{
-    ApiRouter, ApiSettings, AppState, Exposure, ServeOptions, ServerInfo, check_exposure,
+    ApiRouter, ApiSettings, AppState, Exposure, ServeOptions, Server, ServerInfo, TlsAcceptor,
+    check_exposure,
 };
 use alkahest_core::Source;
 use alkahest_core::config::Loaded;
@@ -66,6 +67,21 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         Some(verifier.as_ref()),
         allow_unauthenticated,
     )?;
+
+    // HTTPS (ALK-SP-0006.R6): a missing or broken certificate stops the start here, before
+    // anything else is opened, rather than leaving a server nobody can reach.
+    let tls = if config.server.tls.enabled {
+        let cert = config.server.tls.cert_path(&paths.data_dir);
+        let key = config.server.tls.key_path(&paths.data_dir);
+        let acceptor = TlsAcceptor::from_files(&cert, &key)
+            .context("loading the TLS certificate (`alkahest certs generate` writes one)")?
+            .with_reload_interval(Some(Duration::from_secs(
+                config.server.tls.reload_interval_secs,
+            )));
+        Some(acceptor)
+    } else {
+        None
+    };
 
     // Models, engines and the scheduler. Hardware detection may probe GPU libraries, so it
     // runs on the blocking pool.
@@ -196,19 +212,25 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
         Exposure::KeyProtected => "network, API key required",
         Exposure::Unprotected => "network, NO AUTHENTICATION",
     };
-    eprintln!("alkahest serve: listening on http://{addr} ({note})");
-    tracing::info!(%addr, ?exposure, "server started");
-    let report = alkahest_api::serve_with(
-        listener,
-        app,
-        async move {
+    let scheme = if tls.is_some() { "https" } else { "http" };
+    eprintln!("alkahest serve: listening on {scheme}://{addr} ({note})");
+    if exposure != Exposure::LoopbackOnly && tls.is_none() {
+        eprintln!(
+            "alkahest serve: warning: plain HTTP on a network address; API keys and prompts \
+             cross the network unencrypted (enable [server.tls] or use a TLS reverse proxy)"
+        );
+        tracing::warn!("plain HTTP on a network address");
+    }
+    tracing::info!(%addr, ?exposure, tls = tls.is_some(), "server started");
+    let report = Server::new(listener, app)
+        .tls(tls)
+        .options(options)
+        .hooks(hooks)
+        .run(async move {
             let signal = stop.await;
             tracing::info!(signal, "stop signal received");
-        },
-        options,
-        hooks,
-    )
-    .await?;
+        })
+        .await?;
     tracing::info!(
         drained = report.drained,
         hooks = report.hooks.len(),
