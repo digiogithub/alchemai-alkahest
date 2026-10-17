@@ -63,6 +63,10 @@ struct GenerateRequest {
     options: Option<Map<String, Value>>,
     #[serde(default)]
     think: Option<Value>,
+    #[serde(default)]
+    logprobs: bool,
+    #[serde(default)]
+    top_logprobs: i64,
 }
 
 /// Ollama `ChatRequest`.
@@ -84,6 +88,10 @@ struct ChatRequest {
     options: Option<Map<String, Value>>,
     #[serde(default)]
     think: Option<Value>,
+    #[serde(default)]
+    logprobs: bool,
+    #[serde(default)]
+    top_logprobs: i64,
 }
 
 /// Ollama `Message`.
@@ -150,6 +158,7 @@ async fn generate_inner(
     let started = Instant::now();
     let req: GenerateRequest = parse(&body)?;
     let opts = ollama_options(req.options.as_ref())?;
+    let logprobs = logprob_request(req.logprobs, req.top_logprobs)?;
     if req.template.as_deref().is_some_and(|t| !t.is_empty()) {
         tracing::debug!("ignoring the per-request Go template (ADR 0001)");
     }
@@ -191,6 +200,7 @@ async fn generate_inner(
         b.insert("prompt".into(), json!(""));
         b.insert("stream".into(), json!(true));
         b.insert("cache_prompt".into(), json!(true));
+        native_logprobs(&mut b, logprobs);
         for (k, v) in &opts.passthrough {
             b.insert(k.clone(), v.clone());
         }
@@ -215,6 +225,7 @@ async fn generate_inner(
         b.insert("model".into(), json!(lease.model()));
         b.insert("messages".into(), Value::Array(messages));
         chat_body_common(&mut b, response_format, kwargs, &opts.passthrough);
+        chat_logprobs(&mut b, logprobs);
         apply_sampling(&mut b, lease.settings(), LimitField::MaxTokens);
         let resp = post_json(
             &client,
@@ -238,6 +249,7 @@ async fn generate_inner(
         if let Some(schema) = json_schema(req.format.as_ref())? {
             b.insert("json_schema".into(), schema);
         }
+        native_logprobs(&mut b, logprobs);
         for (k, v) in &opts.passthrough {
             b.insert(k.clone(), v.clone());
         }
@@ -252,6 +264,7 @@ async fn generate_inner(
         started,
         acquired.load,
         pieces,
+        logprobs,
     )
     .await
 }
@@ -264,6 +277,7 @@ async fn chat_inner(
     let started = Instant::now();
     let req: ChatRequest = parse(&body)?;
     let opts = ollama_options(req.options.as_ref())?;
+    let logprobs = logprob_request(req.logprobs, req.top_logprobs)?;
     if req.messages.is_empty() {
         return load_or_unload(
             state,
@@ -306,6 +320,7 @@ async fn chat_inner(
         b.insert("tools".into(), Value::Array(tools));
     }
     chat_body_common(&mut b, response_format, kwargs, &opts.passthrough);
+    chat_logprobs(&mut b, logprobs);
     apply_sampling(&mut b, lease.settings(), LimitField::MaxTokens);
     let client = service::upstream(state);
     let resp = post_json(
@@ -324,8 +339,38 @@ async fn chat_inner(
         started,
         acquired.load,
         pieces,
+        logprobs,
     )
     .await
+}
+
+/// Ollama `logprobs` / `top_logprobs` validated: `Some(top)` when log probabilities were
+/// asked for (`top` alternatives per position, 0 = the chosen token only).
+fn logprob_request(logprobs: bool, top: i64) -> Result<Option<u32>, HttpError> {
+    let top = u32::try_from(top)
+        .ok()
+        .filter(|t| *t <= 20)
+        .ok_or_else(|| HttpError::bad_request("top_logprobs must be between 0 and 20"))?;
+    Ok(logprobs.then_some(top))
+}
+
+/// Log probabilities on llama-server's OpenAI chat route: passed as OpenAI fields.
+fn chat_logprobs(b: &mut Map<String, Value>, logprobs: Option<u32>) {
+    if let Some(top) = logprobs {
+        b.insert("logprobs".into(), json!(true));
+        b.insert("top_logprobs".into(), json!(top));
+    }
+}
+
+/// Log probabilities on llama-server's native `/completion` and `/infill`: `n_probs` asks for
+/// the top-N candidates (at least one, so the chosen token's own probability comes back);
+/// `post_sampling_probs: false` keeps them as log probabilities of the full distribution, as
+/// Ollama reports them.
+fn native_logprobs(b: &mut Map<String, Value>, logprobs: Option<u32>) {
+    if let Some(top) = logprobs {
+        b.insert("n_probs".into(), json!(top.max(1)));
+        b.insert("post_sampling_probs".into(), json!(false));
+    }
 }
 
 /// Fields every engine chat request carries.
@@ -396,12 +441,19 @@ async fn finish_response(
     started: Instant,
     load: std::time::Duration,
     pieces: std::pin::Pin<Box<dyn Stream<Item = Result<Piece, HttpError>> + Send>>,
+    logprob_top: Option<u32>,
 ) -> Result<Response, HttpError> {
     if stream {
         let mut tool_index = 0usize;
         let lines = pieces.map(move |p| match p {
-            Ok(Piece::Text { content, thinking }) => {
-                chunk(&model, shape, &content, &thinking, Vec::new())
+            Ok(Piece::Text {
+                content,
+                thinking,
+                logprobs,
+            }) => {
+                let mut doc = chunk(&model, shape, &content, &thinking, Vec::new());
+                attach_logprobs(&mut doc, logprobs, logprob_top);
+                doc
             }
             Ok(Piece::ToolCalls(calls)) => {
                 let calls = calls
@@ -421,15 +473,18 @@ async fn finish_response(
     }
     let mut pieces = pieces;
     let (mut content, mut thinking, mut calls) = (String::new(), String::new(), Vec::new());
+    let mut all_logprobs = Vec::new();
     let mut finish = Finish::default();
     while let Some(p) = pieces.next().await {
         match p? {
             Piece::Text {
                 content: c,
                 thinking: t,
+                logprobs: l,
             } => {
                 content.push_str(&c);
                 thinking.push_str(&t);
+                all_logprobs.extend(l);
             }
             Piece::ToolCalls(tc) => calls.extend(tc),
             Piece::Finished(f) => finish = f,
@@ -440,7 +495,7 @@ async fn finish_response(
         .enumerate()
         .map(|(i, c)| ollama_tool_call(i, c))
         .collect();
-    let doc = final_chunk(
+    let mut doc = final_chunk(
         &model,
         shape,
         started,
@@ -448,7 +503,25 @@ async fn finish_response(
         &finish,
         Some((content, thinking, calls)),
     );
+    attach_logprobs(&mut doc, all_logprobs, logprob_top);
     Ok(Json(doc).into_response())
+}
+
+/// Adds Ollama's top-level `logprobs` array to a response object when there are any.
+/// With `top_logprobs: 0` the alternatives the native route returns anyway (it needs
+/// `n_probs >= 1`) are dropped, as Ollama returns only the chosen token then.
+fn attach_logprobs(doc: &mut Value, mut logprobs: Vec<Value>, top: Option<u32>) {
+    if logprobs.is_empty() || top.is_none() {
+        return;
+    }
+    if top == Some(0) {
+        for l in &mut logprobs {
+            if let Value::Object(o) = l {
+                o.remove("top_logprobs");
+            }
+        }
+    }
+    doc["logprobs"] = Value::Array(logprobs);
 }
 
 /// One intermediate NDJSON object.

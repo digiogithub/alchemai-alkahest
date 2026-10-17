@@ -1,11 +1,12 @@
 //! Ollama native API (ALK-SP-0005.R1): `/api/generate`, `/api/chat`, `/api/embed`,
 //! `/api/embeddings`, `/api/tags`, `/api/show`, `/api/ps`, `/api/pull`, `/api/delete`,
-//! `/api/copy`, `/api/create` (501). `/api/version` is a base route of the router.
+//! `/api/copy`, `/api/create`, `/api/blobs/:digest`. `/api/version` is a base route of the router.
 //!
 //! Request and response shapes follow Ollama's `api/types.go`. Inference is proxied to the
 //! engine's OpenAI-compatible routes (`/v1/chat/completions`, `/v1/embeddings`) or, for raw
 //! prompts, llama-server's native `/completion`; streams are NDJSON by default.
 
+mod create;
 mod embed;
 mod generate;
 mod models;
@@ -33,7 +34,11 @@ pub fn routes() -> Router<AppState> {
         .route("/api/pull", post(models::pull))
         .route("/api/delete", delete(models::delete))
         .route("/api/copy", post(models::copy))
-        .route("/api/create", post(models::create))
+        .route("/api/create", post(create::create))
+        .route(
+            "/api/blobs/{digest}",
+            post(create::post_blob).head(create::head_blob),
+        )
 }
 
 /// A streamed NDJSON response (`application/x-ndjson`), one JSON object per line.

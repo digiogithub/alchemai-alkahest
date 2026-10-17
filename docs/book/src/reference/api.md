@@ -20,18 +20,19 @@ server (`scripts/conformance.sh`).
 
 | Route | Notes |
 |---|---|
-| `POST /api/generate` | streaming (NDJSON) or `stream: false`; `system`, `template`, `raw`, `options`, `keep_alive`, `format` (`json` or a schema), `images`, `suffix` (fill-in-the-middle through the engine's infill) |
-| `POST /api/chat` | messages, `tools`, `think`, `format`, `options`, `keep_alive`; the model's own system prompt is prepended unless the conversation starts with one |
+| `POST /api/generate` | streaming (NDJSON) or `stream: false`; `system`, `template`, `raw`, `options`, `keep_alive`, `format` (`json` or a schema), `images`, `suffix` (fill-in-the-middle through the engine's infill), `logprobs` / `top_logprobs` |
+| `POST /api/chat` | messages, `tools`, `think`, `format`, `options`, `keep_alive`, `logprobs` / `top_logprobs`; the model's own system prompt is prepended unless the conversation starts with one |
 | `POST /api/embed`, `POST /api/embeddings` | batch (`input` array) and legacy single prompt |
 | `GET /api/tags` | local models |
 | `POST /api/show` | details, template, parameters, licence, capabilities |
 | `GET /api/ps` | loaded models with `expires_at` and `size_vram` |
 | `POST /api/pull` | streaming progress |
 | `POST /api/copy`, `DELETE /api/delete` | models of the Ollama store are read-only (403) |
-| `POST /api/create` | answers 501: build a model by copying and configuring (`alkahest config model`) |
+| `HEAD`, `POST /api/blobs/:digest` | upload a GGUF into the Alkahest store, verified against the digest (no body size limit) |
+| `POST /api/create` | from a model (`from`) or one uploaded GGUF (`files`), with `template`, `system`, `parameters`, `license`, or a Modelfile with `FROM`, `PARAMETER`, `TEMPLATE`, `SYSTEM`, `LICENSE`; `ADAPTER`, `MESSAGE`, quantisation and safetensors imports answer 400 |
 | `GET /api/version`, `GET /` | version; `/` answers "Alkahest is running" |
 
-`pull`, `copy`, `create` and `delete` need the admin scope for remote callers.
+`pull`, `copy`, `create`, blob uploads and `delete` need the admin scope for remote callers.
 
 ## OpenAI-compatible API
 

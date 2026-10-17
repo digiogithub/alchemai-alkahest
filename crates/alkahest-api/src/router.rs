@@ -16,6 +16,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
+use tower::{Layer, ServiceExt};
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
@@ -106,7 +107,10 @@ impl ApiRouter {
         let request_id = HeaderName::from_static(REQUEST_ID_HEADER);
         let mut router = self.routes.fallback(not_found);
         router = router
-            .layer(RequestBodyLimitLayer::new(self.settings.max_body_bytes))
+            .layer(middleware::from_fn_with_state(
+                self.settings.max_body_bytes,
+                body_limit,
+            ))
             .layer(DefaultBodyLimit::max(self.settings.max_body_bytes));
         if let Some(timeout) = self.settings.request_timeout {
             router = router.layer(TimeoutLayer::with_status_code(
@@ -144,6 +148,32 @@ impl ApiRouter {
                 HeaderName::from_static("x-api-key"),
             ]))
             .with_state(self.state)
+    }
+}
+
+/// Path prefix of the Ollama blob upload route, exempt from the body limit.
+const BLOB_UPLOAD_PREFIX: &str = "/api/blobs/";
+
+/// The request body limit, except for `POST /api/blobs/:digest`: blob uploads are whole GGUF
+/// files (gigabytes), streamed to disk and verified against their digest instead of
+/// buffered, and they need the admin scope (ALK-SP-0006.R4).
+async fn body_limit(
+    State(limit): State<usize>,
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    if req.method() == Method::POST && req.uri().path().starts_with(BLOB_UPLOAD_PREFIX) {
+        return next.run(req).await;
+    }
+    // `RequestBodyLimit` hands the inner service a `Limited` body; `Next` wants axum's.
+    let inner = next.map_request(|r: Request<_>| r.map(axum::body::Body::new));
+    match RequestBodyLimitLayer::new(limit)
+        .layer(inner)
+        .oneshot(req)
+        .await
+    {
+        Ok(resp) => resp.map(axum::body::Body::new),
+        Err(never) => match never {},
     }
 }
 
