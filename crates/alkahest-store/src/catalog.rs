@@ -7,7 +7,7 @@
 //! selects the Ollama copy explicitly.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::SystemTime;
 
@@ -108,7 +108,7 @@ impl CatalogEntry {
             loadable: i.loadable,
             complete: i.complete,
             also_in: self.shadows.iter().map(|o| o.as_str().to_owned()).collect(),
-            model_path: e.model_path().map(Path::to_path_buf),
+            model_path: e.weights_path(),
         }
     }
 }

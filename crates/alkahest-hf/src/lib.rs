@@ -21,6 +21,7 @@ mod error;
 pub mod gguf;
 pub mod pull;
 mod recommended;
+pub mod safetensors;
 mod token;
 mod types;
 

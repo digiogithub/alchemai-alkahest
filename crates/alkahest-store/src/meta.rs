@@ -170,7 +170,8 @@ impl ModelInfo {
         let has_projector = entry.projector_path().is_some();
         let remote = entry.is_remote();
         let complete = entry.is_complete();
-        let tensor_model = entry.layers.iter().any(|l| l.kind == LayerKind::Tensor);
+        let tensor_model =
+            entry.layers.iter().any(|l| l.kind == LayerKind::Tensor) || entry.is_snapshot();
 
         let format = if facts.is_some() {
             ModelFormat::Gguf

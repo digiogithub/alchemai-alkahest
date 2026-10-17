@@ -81,6 +81,20 @@ pub enum HfPullError {
         /// What exists.
         available: String,
     },
+    /// The repository has no `.safetensors` weights.
+    #[error("`{0}` contains no safetensors weights")]
+    NoSafetensors(String),
+    /// A safetensors repository without `config.json` cannot be served by vLLM.
+    #[error("`{0}` has no config.json; vLLM cannot load it")]
+    NoConfig(String),
+    /// A file is not what the Hub listed (size mismatch, path outside the repository).
+    #[error("`{file}`: {reason}")]
+    BadFile {
+        /// File path.
+        file: String,
+        /// What is wrong.
+        reason: String,
+    },
     /// A file has no SHA-256 on the Hub, so it cannot be verified.
     #[error("the Hub reports no SHA-256 for `{0}`; refusing to store an unverifiable file")]
     NoDigest(String),
@@ -169,16 +183,70 @@ fn digest_of(file: &RepoFile) -> Result<Digest, HfPullError> {
         })
 }
 
+/// Which kind of weights a pull takes from a repository.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PullFormat {
+    /// GGUF when the repository has any (or a quant/file was named), otherwise a safetensors
+    /// snapshot. A `:safetensors` selector forces the snapshot.
+    #[default]
+    Auto,
+    /// Only GGUF.
+    Gguf,
+    /// A safetensors snapshot for vLLM (`pull --safetensors`).
+    Safetensors,
+}
+
 /// Pulls `hf` into the store behind `transfer`, downloading from `client`'s Hub. When
 /// `overlays` is given, the recommended parameters are also persisted there (ALK-T-0073).
+/// Equivalent to [`pull_hf_with`] with [`PullFormat::Auto`].
 pub async fn pull_hf(
     transfer: &Transfer,
     client: &HfClient,
     hf: &HfRef,
     overlays: Option<&ModelOverlays>,
 ) -> Result<HfPullOutcome, HfPullError> {
+    pull_hf_with(transfer, client, hf, overlays, PullFormat::Auto).await
+}
+
+/// [`pull_hf`] with an explicit weight format (ALK-SP-0002.R2).
+pub async fn pull_hf_with(
+    transfer: &Transfer,
+    client: &HfClient,
+    hf: &HfRef,
+    overlays: Option<&ModelOverlays>,
+    format: PullFormat,
+) -> Result<HfPullOutcome, HfPullError> {
     let repo = hf.repo_id();
     let info = client.model_info(&repo, None).await?;
+    let files: Vec<RepoFile> = info.siblings.iter().map(RepoFile::from).collect();
+    let snapshot = match format {
+        PullFormat::Safetensors => true,
+        PullFormat::Gguf => false,
+        PullFormat::Auto => {
+            let forced = matches!(hf.selector(),
+                Some(HfSelector::Quant(q)) if q.eq_ignore_ascii_case(crate::safetensors::TAG));
+            forced
+                || (hf.selector().is_none()
+                    && gguf_variants(&files).is_empty()
+                    && crate::safetensors::has_safetensors(&files))
+        }
+    };
+    if snapshot {
+        crate::safetensors::pull_snapshot(transfer, client, hf, overlays, &info).await
+    } else {
+        pull_gguf(transfer, client, hf, overlays, info).await
+    }
+}
+
+/// The GGUF half of [`pull_hf_with`].
+async fn pull_gguf(
+    transfer: &Transfer,
+    client: &HfClient,
+    hf: &HfRef,
+    overlays: Option<&ModelOverlays>,
+    info: crate::ModelInfo,
+) -> Result<HfPullOutcome, HfPullError> {
+    let repo = hf.repo_id();
     let revision = info.sha.clone();
     let files: Vec<RepoFile> = info.siblings.iter().map(RepoFile::from).collect();
     let sel = select_files(&repo, &files, hf.selector())?;
