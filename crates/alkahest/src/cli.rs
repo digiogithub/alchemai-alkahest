@@ -150,6 +150,30 @@ pub struct ShowArgs {
     pub system: bool,
 }
 
+/// Arguments of `alkahest update`.
+#[derive(Debug, Args)]
+pub struct UpdateArgs {
+    /// Install exactly this release (`X.Y.Z` or `vX.Y.Z`), which may be a downgrade or a
+    /// reinstall; pre-release versions are allowed here. Without it, the newest stable
+    /// release.
+    #[arg(value_name = "VERSION")]
+    pub version: Option<String>,
+    /// Only report what would change; exit 10 when another release would be installed.
+    #[arg(long)]
+    pub check: bool,
+    /// Consider pre-releases (GitHub pre-release flag or a `-rc.N` style tag) when looking for
+    /// the newest release.
+    #[arg(long)]
+    pub prerelease: bool,
+    /// Replace the binary even when a package manager owns it (deb/rpm, Homebrew, the app
+    /// bundle, the Windows installer, an AppImage) or it is a development build.
+    #[arg(long)]
+    pub force: bool,
+    /// Do not ask for confirmation (required when stdin is not a terminal).
+    #[arg(short, long)]
+    pub yes: bool,
+}
+
 /// Every command of the tool. Variants that are not built yet name their owning story in
 /// [`Command::owner`].
 #[derive(Debug, Subcommand)]
@@ -259,6 +283,18 @@ pub enum Command {
     },
     /// Report CPU, memory and accelerators.
     Sysinfo,
+    /// Update alkahest to the newest stable GitHub release (or a given version).
+    ///
+    /// Downloads the headless archive for this platform from the GitHub releases of
+    /// digiogithub/alchemai-alkahest, verifies it against the release SHA256SUMS and replaces
+    /// the running binary, plus `engines/` and the licence files when they sit next to it.
+    /// Nothing installed changes before the download is verified. Installs owned by a package
+    /// manager are refused with the right upgrade command unless `--force` is given.
+    /// Exit codes: 0 updated or up to date, 1 failure, 3 refused or cancelled, 4 verification
+    /// failed, 10 `--check` found another release. `GITHUB_TOKEN` raises the API rate limit;
+    /// `ALKAHEST_UPDATE_API_URL` and `ALKAHEST_UPDATE_REPO` point at another release source.
+    #[command(disable_version_flag = true)]
+    Update(UpdateArgs),
     /// Inspect the effective configuration.
     Config {
         /// Config action.
@@ -495,6 +531,7 @@ impl Command {
             | Self::Config { .. }
             | Self::Completions { .. }
             | Self::Sysinfo
+            | Self::Update(_)
             | Self::Serve { .. }
             | Self::Keys { .. }
             | Self::Engines { .. }
@@ -527,6 +564,7 @@ impl Command {
             Self::Certs { .. } => "certs",
             Self::Service { .. } => "service",
             Self::Sysinfo => "sysinfo",
+            Self::Update(_) => "update",
             Self::Config { .. } => "config",
             Self::Completions { .. } => "completions",
         }

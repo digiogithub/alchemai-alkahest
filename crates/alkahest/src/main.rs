@@ -19,6 +19,7 @@ mod service_cmd;
 mod service_launchd;
 mod service_windows;
 mod sysinfo_cmd;
+mod update;
 // The renderer is consumed by the listing commands (`ls`, `ps`, ...) of ALK-US-0012/0031.
 #[allow(dead_code)]
 mod output;
@@ -42,6 +43,12 @@ fn main() -> ExitCode {
         std::env::args_os().collect(),
         std::env::current_exe().ok().as_deref(),
     ));
+    // Windows cannot delete a running image, so `alkahest update` leaves `.alkahest.exe.old`
+    // behind; the next start removes it.
+    #[cfg(windows)]
+    if let Ok(exe) = std::env::current_exe() {
+        update::apply::cleanup_old(&exe);
+    }
     // Completions need no configuration or logging.
     if let Command::Completions { shell } = &cli.command {
         write_completions(*shell, &mut std::io::stdout());
@@ -129,6 +136,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
     match &cli.command {
         Command::Config { action } => config_command(action, &cli.global, &loaded),
         Command::Sysinfo => sysinfo_cmd::run(cli.global.json),
+        Command::Update(args) => update::run(args, &loaded, cli.global.json),
         Command::Hf { action } => hf_cmd::run(action, &loaded.config, cli.global.json),
         Command::Ls => models_cmd::ls(&loaded, cli.global.json),
         Command::Ps => ps_cmd::ps(&loaded, cli.global.json),

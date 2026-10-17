@@ -109,6 +109,48 @@ Then install an engine (the headless build does not bundle one):
 target/release/alkahest engines install llama-cpp
 ```
 
+## Update
+
+An install from a release archive or the setup scripts updates itself:
+
+```sh
+alkahest update --check      # what would change; exit 10 when a newer release exists
+alkahest update              # newest stable release, asks for confirmation
+alkahest update --yes        # no question (scripts, cron)
+alkahest update v0.2.1       # exactly that release: a downgrade or a reinstall
+```
+
+`alkahest update` looks at the GitHub releases of `digiogithub/alchemai-alkahest`, ignores
+drafts and pre-releases (the GitHub flag or a `-rc.N` style tag; `--prerelease` includes them) and
+picks the newest release with a headless archive for this platform. It downloads the archive,
+checks its size and SHA-256 against the release `SHA256SUMS` (there is no way to skip this),
+and only then replaces the binary by renaming it aside, which also works for the running
+`alkahest.exe` on Windows. `engines/`, `licenses/` and the licence files are refreshed too when
+they sit next to the binary. A running `alkahest serve` or service keeps the old version until
+it is restarted.
+
+Installs that a package manager owns are refused with the right command instead: the deb and rpm
+packages (`/usr/bin`), Homebrew, `Alkahest.app`, the Windows installer and the AppImage. `--force`
+replaces the binary anyway, which the package manager then does not know about. A development
+build under `target/` only accepts an explicit version.
+
+| Option | Effect |
+|---|---|
+| `VERSION` | install this release (`X.Y.Z` or `vX.Y.Z`) instead of the newest stable one |
+| `--check` | report only; exit 0 when up to date, 10 when another release would be installed |
+| `--prerelease` | consider pre-releases when looking for the newest |
+| `--yes`, `-y` | do not ask; required when stdin is not a terminal |
+| `--force` | replace a package-manager or development install |
+| `--json` | one JSON object (`action`: `up_to_date`, `available`, `updated`, `refused`, `failed`) |
+
+Exit codes: 0 updated or up to date, 1 failure, 3 refused or cancelled, 4 verification failed,
+10 `--check` found another release. If the install directory is not writable, run the command
+with the rights that installed it (for example `sudo`); alkahest never escalates by itself.
+`GITHUB_TOKEN` raises the GitHub API rate limit (it is sent to `api.github.com` only).
+`ALKAHEST_UPDATE_API_URL` and `ALKAHEST_UPDATE_REPO` point the command at another
+GitHub-compatible release source, such as a mirror; with a custom API URL the token is not sent
+and plain HTTP download links are accepted.
+
 ## Uninstall
 
 Remove the binary, then the data directory if you want to delete downloaded models and engines

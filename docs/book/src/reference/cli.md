@@ -45,6 +45,7 @@ Every command accepts these (`serve` binds `--host`, the client commands target 
 | [`certs`](#alkahest-certs) | Manage TLS certificates for HTTPS (`[server.tls]`) |
 | [`service`](#alkahest-service) | Install or control the background service |
 | [`sysinfo`](#alkahest-sysinfo) | Report CPU, memory and accelerators |
+| [`update`](#alkahest-update) | Update alkahest to the newest stable GitHub release (or a given version) |
 | [`config`](#alkahest-config) | Inspect the effective configuration |
 
 ## alkahest completions
@@ -680,6 +681,38 @@ Report CPU, memory and accelerators
 
 ```text
 alkahest sysinfo [OPTIONS]
+```
+
+## alkahest update
+
+Update alkahest to the newest stable GitHub release (or a given version).
+
+Downloads the headless archive for this platform from the GitHub releases of digiogithub/alchemai-alkahest, verifies it against the release SHA256SUMS and replaces the running binary, plus `engines/` and the licence files when they sit next to it. Nothing installed changes before the download is verified. Installs owned by a package manager are refused with the right upgrade command unless `--force` is given. Exit codes: 0 updated or up to date, 1 failure, 3 refused or cancelled, 4 verification failed, 10 `--check` found another release. `GITHUB_TOKEN` raises the API rate limit; `ALKAHEST_UPDATE_API_URL` and `ALKAHEST_UPDATE_REPO` point at another release source.
+
+```text
+alkahest update [OPTIONS] [VERSION]
+```
+
+Arguments:
+
+```text
+  [VERSION]
+          Install exactly this release (`X.Y.Z` or `vX.Y.Z`), which may be a downgrade or a reinstall; pre-release versions are allowed here. Without it, the newest stable release
+```
+
+Options (besides the global ones):
+
+```text
+      --check
+          Only report what would change; exit 10 when another release would be installed
+      --prerelease
+          Consider pre-releases (GitHub pre-release flag or a `-rc.N` style tag) when looking for the newest release
+      --force
+          Replace the binary even when a package manager owns it (deb/rpm, Homebrew, the app bundle, the Windows installer, an AppImage) or it is a development build
+  -y, --yes
+          Do not ask for confirmation (required when stdin is not a terminal)
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## alkahest config
