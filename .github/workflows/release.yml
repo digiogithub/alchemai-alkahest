@@ -1,0 +1,144 @@
+# Tag-driven Linux release (ALK-US-0074). Pushing `vX.Y.Z` (or `vX.Y.Z-rc.N`) builds:
+#
+#   headless tar.gz  x86_64 and aarch64: `alkahest-<version>-<target>.tar.gz` with the binary,
+#                    the bundled CPU llama.cpp (engines/), systemd unit templates, licences.
+#                    This is the archive scripts/setup/install.sh downloads.
+#   desktop          x86_64: .deb and .AppImage (cargo-packager).
+#   SHA256SUMS       over every artefact, in the `<hash>  <file>` format install.sh checks.
+#
+# The final job creates a DRAFT release; a maintainer reviews and publishes it. Nothing is
+# signed yet (Linux has no gatekeeper; integrity is SHA256SUMS). macOS and Windows artefacts
+# belong to their own stories. Not run on the development machine: the first real run is the
+# first tag.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build into a draft release."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  meta:
+    name: validate tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - id: check
+        name: Tag must equal the workspace version
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "alkahest") | .version')"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match the workspace version $version"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
+
+  linux:
+    name: linux (${{ matrix.target }})
+    needs: meta
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, desktop: true }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, desktop: false }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Licences are current
+        run: cargo xtask notice --check
+
+      - name: Size and startup budgets (headless)
+        run: scripts/binary-size.sh
+
+      # The headless binary must not link GPU or windowing libraries.
+      - name: Headless binary links no GUI libraries
+        run: |
+          ldd target/release/alkahest | tee ldd.txt
+          if grep -Ei 'libX11|libxcb|libxkbcommon|libwayland|libvulkan|libfontconfig|libGL|libasound' ldd.txt; then
+            echo "::error::the headless binary links GUI/GPU libraries"; exit 1
+          fi
+
+      - name: Desktop build dependencies
+        if: matrix.desktop
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxcb1-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libasound2-dev \
+            libfontconfig-dev libfuse2t64 file
+      - uses: taiki-e/install-action@v2
+        if: matrix.desktop
+        with:
+          tool: cargo-packager@0.11.8
+
+      - name: Bundle (headless tar.gz, and .deb + .AppImage on x86_64)
+        run: |
+          if [ "${{ matrix.desktop }}" = "true" ]; then
+            cargo xtask bundle --formats deb,appimage
+          else
+            cargo xtask bundle --flavour headless
+          fi
+          ls -la target/packager
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux-${{ matrix.target }}
+          path: |
+            target/packager/*.tar.gz
+            target/packager/*.deb
+            target/packager/*.AppImage
+          if-no-files-found: error
+
+  release:
+    name: draft release
+    needs: [meta, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+      - name: SHA256SUMS
+        working-directory: dist
+        run: |
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.meta.outputs.prerelease }}
+        run: |
+          flags=(--draft --title "Alkahest ${TAG#v}" --generate-notes)
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" dist/* "${flags[@]}" --repo "$GITHUB_REPOSITORY"

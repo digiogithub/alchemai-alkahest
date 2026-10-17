@@ -43,7 +43,7 @@ param(
     [switch]$NoEngine,
     [switch]$Service,
     [string]$Version = $(if ($env:ALKAHEST_VERSION) { $env:ALKAHEST_VERSION } else { 'latest' }),
-    [string]$BaseUrl = $(if ($env:ALKAHEST_RELEASE_BASE_URL) { $env:ALKAHEST_RELEASE_BASE_URL } else { 'https://github.com/digio-es/alkahest/releases/download' }),
+    [string]$BaseUrl = $(if ($env:ALKAHEST_RELEASE_BASE_URL) { $env:ALKAHEST_RELEASE_BASE_URL } else { 'https://github.com/digiogithub/alkahest/releases/download' }),
     [string]$FromLocal = ''
 )
 

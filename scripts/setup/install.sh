@@ -8,12 +8,12 @@
 # Safety: nothing downloaded is ever executed or piped into a shell before its checksum
 # matches. Run `install.sh --dry-run` to see every step without changing anything.
 #
-# NOTE: the release URLs below are placeholders until the release pipeline (ALK-US-0074)
-# publishes archives; use --from-local or --base-url until then.
+# Archives and SHA256SUMS are produced by .github/workflows/release.yml (ALK-US-0074); the
+# repository below is the planned public home, override it with --base-url until it exists.
 set -euo pipefail
 
-# Placeholder release location; override with --base-url or ALKAHEST_RELEASE_BASE_URL.
-DEFAULT_BASE_URL="https://github.com/digio-es/alkahest/releases/download"
+# Release location; override with --base-url or ALKAHEST_RELEASE_BASE_URL.
+DEFAULT_BASE_URL="https://github.com/digiogithub/alkahest/releases/download"
 DEFAULT_VERSION="latest"
 
 DRY_RUN=0
@@ -194,8 +194,16 @@ else
   else
     command -v curl >/dev/null 2>&1 || die "curl is required to download the release"
     TMP="$(mktemp -d)"
+    if [ "$VERSION" = latest ]; then
+      # Archives are named after the version, so resolve what `latest` points to first.
+      tag="$(curl -fsSLI --proto '=https' --tlsv1.2 -o /dev/null -w '%{url_effective}' \
+        "${BASE_URL%/download}/latest")" || die "could not resolve the latest release"
+      resolved="${tag##*/}"
+      ARCHIVE="alkahest-${resolved#v}-$TARGET.tar.gz"
+      info "latest release: ${resolved}"
+    fi
     curl -fsSL --proto '=https' --tlsv1.2 -o "$TMP/SHA256SUMS" "$URL_DIR/SHA256SUMS" \
-      || die "could not fetch the checksum file (release URLs are placeholders until ALK-US-0074; try --from-local)"
+      || die "could not fetch the checksum file (is the release published? try --base-url or --from-local)"
     curl -fsSL --proto '=https' --tlsv1.2 -o "$TMP/$ARCHIVE" "$URL_DIR/$ARCHIVE" \
       || die "could not fetch $ARCHIVE"
     want="$(awk -v f="$ARCHIVE" '$2 == f || $2 == "*" f {print $1}' "$TMP/SHA256SUMS")"

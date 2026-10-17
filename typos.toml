@@ -2,6 +2,9 @@
 extend-exclude = [
     "Cargo.lock",
     "LICENSE",
+    # Generated from third-party sources (cargo xtask notice) and their verbatim licence texts.
+    "THIRD_PARTY_LICENSES",
+    "packaging/licenses/**",
     "docs/.pmngr/**",
     # Product owner notes and the design hand-off are partly Spanish.
     "initial_requirements.md",

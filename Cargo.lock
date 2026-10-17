@@ -10148,6 +10148,7 @@ dependencies = [
  "resvg 0.45.1",
  "serde_json",
  "tempfile",
+ "toml 1.1.8+spec-1.1.0",
  "walkdir",
 ]
 

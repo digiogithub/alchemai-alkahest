@@ -54,3 +54,21 @@ afterwards. No administrator rights are needed. CUDA variants on Windows need th
 DLLs; see [[ALK-US-0086]] (`engines install --with-runtime`).
 
 Related: [[plan/alkahest-v1-plan]].
+
+## Release packages (Linux)
+
+Tagged releases (`.github/workflows/release.yml`, built with `cargo xtask bundle`) publish, next
+to `SHA256SUMS`:
+
+| File | Content |
+|---|---|
+| `alkahest-<version>-<target>.tar.gz` | headless binary (no GUI libraries), bundled CPU llama.cpp under `engines/`, systemd unit templates under `systemd/`, `LICENSE`, `NOTICE`, `THIRD_PARTY_LICENSES`, `licenses/`. What `install.sh` downloads. Targets: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`. |
+| `alkahest_<version>_amd64.deb` | desktop build (`alkahest desktop`, menu entry, icons), CLI and server in `/usr/bin/alkahest`, engine and licences in `/usr/lib/alkahest/`. |
+| `alkahest_<version>_x86_64.AppImage` | the same desktop build, self-contained. |
+
+The packages never run maintainer scripts and create no user or service. To run the server as a
+system service after installing the `.deb` or the archive, ask for it explicitly:
+`sudo alkahest service install` (system user `alkahest`, ALK-SP-0009.R2) or
+`alkahest service install --user`. The bundled engine in `/usr/lib/alkahest/engines` (or
+`engines/` next to the binary) is found automatically; `alkahest engines install` still adds GPU
+builds into the data directory, which win over the bundled copy.

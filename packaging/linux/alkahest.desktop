@@ -1,0 +1,13 @@
+[Desktop Entry]
+Categories={{categories}}
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}} desktop
+Icon={{icon}}
+Name=Alkahest
+Terminal=false
+Type=Application
+StartupNotify=true
+# The window app_id set by alkahest-desktop, so the shell matches window and icon.
+StartupWMClass=es.digio.alkahest
