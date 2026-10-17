@@ -374,6 +374,35 @@ async fn embed_and_legacy_embeddings() {
     assert_eq!(resp.status(), 400);
 }
 
+/// Ollama clients that concatenate a base URL ending in `/` (Pando's `base + "/api/tags"`) send
+/// `//api/tags`; Ollama redirects such paths to the clean one, Alkahest serves them directly.
+#[tokio::test]
+async fn doubled_and_trailing_slashes_reach_the_clean_route() {
+    let h = Harness::start(&models()).await;
+    for p in [
+        "//api/tags",
+        "/api/tags/",
+        "//v1/models",
+        "/v1//models/",
+        "//api/version",
+    ] {
+        let resp = h.get(p).await;
+        assert_eq!(resp.status(), 200, "{p}");
+    }
+    let v: Value = h.get("//api/tags").await.json().await.unwrap();
+    assert_eq!(v["models"][0]["name"], "llama3.2:latest");
+    let v: Value = h.get("//v1/models?limit=1").await.json().await.unwrap();
+    assert_eq!(v["object"], "list");
+    let v: Value = h
+        .post("//api/show", json!({"model": "llama3.2"}))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(v["details"]["format"], "gguf");
+    assert_eq!(h.get("/no/such/route/").await.status(), 404);
+}
+
 /// Scenario "ollama client" (list part): `/api/tags`, `/api/show`, `/api/ps`.
 #[tokio::test]
 async fn ollama_client_list_show_and_ps() {

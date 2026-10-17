@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use alkahest_core::Config;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderName, HeaderValue, Method, Request, StatusCode, header};
+use axum::http::uri::PathAndQuery;
+use axum::http::{HeaderName, HeaderValue, Method, Request, StatusCode, Uri, header};
 use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -151,7 +152,7 @@ impl ApiRouter {
             // are answered.
             router = router.layer(cors);
         }
-        router
+        let router: Router = router
             .layer(PropagateRequestIdLayer::new(request_id.clone()))
             .layer(TraceLayer::new_for_http().make_span_with(make_span))
             .layer(SetRequestIdLayer::new(request_id, MakeRequestUuid))
@@ -161,8 +162,45 @@ impl ApiRouter {
                 header::COOKIE,
                 HeaderName::from_static("x-api-key"),
             ]))
-            .with_state(self.state)
+            .with_state(self.state);
+        // Outside the routed stack: a `Router::layer` runs after the route match, so the path
+        // has to be cleaned by a service in front of the router to change which route matches.
+        Router::new().fallback_service(router.map_request(normalize_path))
     }
+}
+
+/// Collapses repeated slashes and drops a trailing slash before routing, so `//api/tags` and
+/// `/api/tags/` reach `/api/tags`. Ollama's server (gin) answers such paths with a redirect to
+/// the clean path, and clients built against it depend on that: Pando, for one, requests
+/// `base + "/api/tags"`, which becomes `//api/tags` when the configured base URL ends in `/`.
+/// Serving the clean route directly works for every client, including those that do not follow
+/// redirects. No route has an empty segment or a meaningful trailing slash.
+pub(crate) fn normalize_path<B>(mut req: Request<B>) -> Request<B> {
+    let path = req.uri().path();
+    if !path.contains("//") && !(path.len() > 1 && path.ends_with('/')) {
+        return req;
+    }
+    let mut clean = String::with_capacity(path.len());
+    for segment in path.split('/').filter(|s| !s.is_empty()) {
+        clean.push('/');
+        clean.push_str(segment);
+    }
+    if clean.is_empty() {
+        clean.push('/');
+    }
+    if let Some(query) = req.uri().query() {
+        clean.push('?');
+        clean.push_str(query);
+    }
+    let mut parts = req.uri().clone().into_parts();
+    let Ok(path_and_query) = PathAndQuery::try_from(clean) else {
+        return req;
+    };
+    parts.path_and_query = Some(path_and_query);
+    if let Ok(uri) = Uri::from_parts(parts) {
+        *req.uri_mut() = uri;
+    }
+    req
 }
 
 /// Path prefix of the Ollama blob upload route, exempt from the body limit.
