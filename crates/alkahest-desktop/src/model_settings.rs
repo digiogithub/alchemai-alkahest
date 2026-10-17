@@ -18,8 +18,8 @@
 //!   partial offload / does not fit);
 //! - [`SettingsForm::launch_line`] previews the engine command line.
 //!
-//! Parallel slots are not a per-model setting on the server (scheduler-wide
-//! `scheduler.num_parallel`); the form keeps them for the estimate only.
+//! Parallel slots (`num_parallel`) are a per-model overlay field since ALK-US-0102; unset, the
+//! server's `scheduler.num_parallel` applies (shown with the "global default" origin).
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -137,7 +137,7 @@ pub struct FieldSpec {
 }
 
 /// Every overlay field the editor shows, in form order.
-pub const FIELDS: [FieldSpec; 18] = [
+pub const FIELDS: [FieldSpec; 19] = [
     FieldSpec {
         key: "engine",
         label: "Engine",
@@ -175,6 +175,11 @@ pub const FIELDS: [FieldSpec; 18] = [
         key: "flash_attention",
         label: "Flash attention",
         kind: FieldKind::Toggle,
+    },
+    FieldSpec {
+        key: "num_parallel",
+        label: "Parallel slots",
+        kind: FieldKind::Integer { min: 1, max: 64 },
     },
     FieldSpec {
         key: "tools_enabled",
@@ -516,8 +521,6 @@ pub struct SettingsForm {
     draft: Map<String, Value>,
     errors: BTreeMap<&'static str, String>,
     recommended: Map<String, Value>,
-    /// Parallel slots for the estimate (not saved per model).
-    pub parallel: u32,
 }
 
 impl SettingsForm {
@@ -529,15 +532,12 @@ impl SettingsForm {
             doc,
             errors: BTreeMap::new(),
             recommended,
-            parallel: 1,
         }
     }
 
     /// Takes a fresh document after a save or reset; the draft becomes the saved overlay.
     pub fn reload(&mut self, doc: ModelSettingsDoc) {
-        let parallel = self.parallel;
         *self = Self::new(doc);
-        self.parallel = parallel;
     }
 
     /// The model name.
@@ -719,6 +719,16 @@ impl SettingsForm {
         self.display(key).value
     }
 
+    /// Effective parallel slots: the model's `num_parallel`, else the global default, else 1
+    /// (the scheduler's "automatic").
+    pub fn parallel(&self) -> u32 {
+        self.effective("num_parallel")
+            .and_then(|v| v.as_u64())
+            .and_then(|n| u32::try_from(n).ok())
+            .unwrap_or(1)
+            .clamp(1, 64)
+    }
+
     /// Effective context window, if any layer sets one.
     pub fn context_length(&self) -> Option<u64> {
         self.effective("context_length").and_then(|v| v.as_u64())
@@ -772,7 +782,7 @@ impl SettingsForm {
         if let Some(c) = self.context_length() {
             q.push(("context_length", c.to_string()));
         }
-        q.push(("num_parallel", self.parallel.max(1).to_string()));
+        q.push(("num_parallel", self.parallel().to_string()));
         for key in ["kv_cache_type_k", "kv_cache_type_v"] {
             if let Some(Value::String(t)) = self.effective(key) {
                 q.push((key, t));
@@ -802,7 +812,7 @@ impl SettingsForm {
             if let Some(c) = self.context_length() {
                 parts.push(format!("--max-model-len {c}"));
             }
-            parts.push(format!("--max-num-seqs {}", self.parallel.max(1)));
+            parts.push(format!("--max-num-seqs {}", self.parallel()));
             self.push_extra(&mut parts);
             return parts.join(" ");
         }
@@ -813,10 +823,10 @@ impl SettingsForm {
         if let Some(c) = self.context_length() {
             parts.push(format!(
                 "-c {}",
-                c.saturating_mul(u64::from(self.parallel.max(1)))
+                c.saturating_mul(u64::from(self.parallel()))
             ));
         }
-        parts.push(format!("-np {}", self.parallel.max(1)));
+        parts.push(format!("-np {}", self.parallel()));
         if let Some(n) = self.effective("gpu_layers").and_then(|v| v.as_i64()) {
             parts.push(format!("-ngl {}", if n < 0 { 999 } else { n }));
         }
@@ -1068,6 +1078,27 @@ impl EstimateView {
     }
 }
 
+/// The model's default parameters (its params layer: `PARAMETER` lines of a Modelfile, the
+/// `params` blob of a pull) as one mono line, `stop "<|im_end|>" · temperature 0.7`; `None`
+/// when the model has none. Arrays repeat the key once per value, as a Modelfile does.
+pub fn default_parameters_line(params: &Map<String, Value>) -> Option<String> {
+    let mut parts = Vec::new();
+    for (key, value) in params {
+        let values: Vec<&Value> = match value {
+            Value::Array(items) => items.iter().collect(),
+            other => vec![other],
+        };
+        for v in values {
+            let text = match v {
+                Value::String(s) => format!("{s:?}"),
+                other => other.to_string(),
+            };
+            parts.push(format!("{key} {text}"));
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -1242,7 +1273,6 @@ mod tests {
     #[test]
     fn reload_takes_the_saved_overlay() {
         let mut f = SettingsForm::new(qwen3());
-        f.parallel = 4;
         f.set_text("top_k", "40");
         let mut saved = qwen3();
         saved.overlay.insert("top_k".into(), json!(40));
@@ -1251,13 +1281,17 @@ mod tests {
         f.reload(saved);
         assert!(!f.dirty());
         assert_eq!(f.display("top_k").origin, Origin::Model);
-        assert_eq!(f.parallel, 4);
     }
 
     #[test]
     fn launch_line_and_query_follow_the_draft() {
         let mut f = SettingsForm::new(qwen3());
-        f.parallel = 4;
+        // ALK-US-0102: parallel slots are a saved overlay field.
+        f.set_text("num_parallel", "4");
+        assert_eq!(f.to_save().unwrap()["num_parallel"], 4);
+        f.set_text("num_parallel", "0");
+        assert!(f.to_save().is_err());
+        f.set_text("num_parallel", "4");
         f.set_text("context_length", "32768");
         f.set_text("gpu_layers", "all");
         f.set_text("flash_attention", "on");
@@ -1334,5 +1368,17 @@ mod tests {
         assert_eq!(e.headline().1, "GB in system RAM");
         assert!(e.verdict().1.starts_with("Runs on the CPU"));
         assert!(EstimateView::parse(&json!({"error": "x"})).is_none());
+    }
+
+    #[test]
+    fn default_parameters_read_like_a_modelfile() {
+        let params =
+            serde_json::json!({"stop": ["<|im_end|>", "<|endoftext|>"], "temperature": 0.7});
+        let line = default_parameters_line(params.as_object().unwrap()).unwrap();
+        assert_eq!(
+            line,
+            "stop \"<|im_end|>\" \u{b7} stop \"<|endoftext|>\" \u{b7} temperature 0.7"
+        );
+        assert_eq!(default_parameters_line(&Map::new()), None);
     }
 }

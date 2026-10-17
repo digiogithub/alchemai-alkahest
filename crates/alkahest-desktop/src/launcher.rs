@@ -44,6 +44,20 @@ pub enum LaunchError {
     /// `systemctl --user start` failed.
     #[error("cannot start the systemd user service: {0}")]
     Systemd(String),
+    /// The server could not be stopped (no service unit and no process id, or the signal
+    /// failed).
+    #[error("cannot stop the server: {0}")]
+    Stop(String),
+}
+
+/// How a stop request was carried out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopMethod {
+    /// `systemctl --user stop` (or `restart`) ran to completion.
+    SystemdUser,
+    /// The process was asked to stop (SIGTERM / `taskkill`); it shuts down gracefully, so
+    /// the caller polls until the server stops answering.
+    Signalled,
 }
 
 /// Starts a server. Implemented by [`LocalLauncher`]; tests use a fake.
@@ -54,6 +68,16 @@ pub trait ServerLauncher: Send + Sync + 'static {
 
     /// Name of the installed service unit, if any (shown in the service card).
     fn service_unit(&self) -> Option<String>;
+
+    /// Asks the local server to stop: through the service unit when one is installed, else by
+    /// signalling `pid` (the server's own process id from `GET /alkahest/v1/info`). Must
+    /// return quickly; the caller polls until the server stops answering.
+    fn stop(&self, pid: Option<u32>) -> Result<StopMethod, LaunchError> {
+        let _ = pid;
+        Err(LaunchError::Stop(
+            "this launcher cannot stop servers".into(),
+        ))
+    }
 }
 
 /// The real launcher.
@@ -121,6 +145,53 @@ impl ServerLauncher for LocalLauncher {
 
     fn service_unit(&self) -> Option<String> {
         self.user_unit.as_ref().map(|_| USER_UNIT.to_string())
+    }
+
+    fn stop(&self, pid: Option<u32>) -> Result<StopMethod, LaunchError> {
+        if self.user_unit.is_some() {
+            let status = Command::new("systemctl")
+                .args(["--user", "stop", USER_UNIT])
+                .stdin(Stdio::null())
+                .status();
+            if status.is_ok_and(|s| s.success()) {
+                return Ok(StopMethod::SystemdUser);
+            }
+        }
+        let pid = pid.ok_or_else(|| {
+            LaunchError::Stop("the server's process id is unknown (no admin access?)".into())
+        })?;
+        signal_stop(pid)?;
+        Ok(StopMethod::Signalled)
+    }
+}
+
+/// Asks process `pid` to shut down gracefully: SIGTERM on Unix (the server drains requests
+/// and stops its engines), `taskkill` without `/F` on Windows.
+fn signal_stop(pid: u32) -> Result<(), LaunchError> {
+    if pid == 0 || pid == std::process::id() {
+        return Err(LaunchError::Stop(format!("refusing to signal pid {pid}")));
+    }
+    let status = if cfg!(windows) {
+        Command::new("taskkill")
+            .args(["/PID", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+    } else {
+        Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+    };
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(LaunchError::Stop(format!(
+            "signalling pid {pid} failed ({s})"
+        ))),
+        Err(e) => Err(LaunchError::Stop(e.to_string())),
     }
 }
 
@@ -235,6 +306,25 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         panic!("the child did not run");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn stop_signals_the_server_process() {
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let launcher = LocalLauncher {
+            program: PathBuf::from("/nonexistent/alkahest"),
+            args: Vec::new(),
+            user_unit: None,
+        };
+        assert!(matches!(launcher.stop(None), Err(LaunchError::Stop(_))));
+        assert_eq!(
+            launcher.stop(Some(child.id())).unwrap(),
+            StopMethod::Signalled
+        );
+        let status = child.wait().unwrap();
+        assert!(!status.success(), "terminated by the signal");
+        assert!(launcher.stop(Some(std::process::id())).is_err());
     }
 
     #[test]

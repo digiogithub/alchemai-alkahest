@@ -13,20 +13,23 @@ pub enum Screen {
     Discover,
     /// Loaded models, hardware, live requests (screen 13).
     Running,
-    /// Engine recipes and builds (not designed yet).
+    /// Engine recipes and builds (screen 15).
     Engines,
     /// External access, keys, endpoints, HF token (screen 14).
     ApiKeys,
+    /// Storage, model loading, server connection, theme, logging (screen 16).
+    Settings,
 }
 
 impl Screen {
     /// Rail order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Library,
         Self::Discover,
         Self::Running,
         Self::Engines,
         Self::ApiKeys,
+        Self::Settings,
     ];
 
     /// Label in the rail and screen title.
@@ -37,6 +40,7 @@ impl Screen {
             Self::Running => "Running",
             Self::Engines => "Engines",
             Self::ApiKeys => "API keys",
+            Self::Settings => "Settings",
         }
     }
 
@@ -48,6 +52,7 @@ impl Screen {
             Self::Running => "nav-running",
             Self::Engines => "nav-engines",
             Self::ApiKeys => "nav-api-keys",
+            Self::Settings => "nav-settings",
         }
     }
 
@@ -59,6 +64,7 @@ impl Screen {
             Self::Running => "ALK-US-0070",
             Self::Engines => "ALK-US-0072",
             Self::ApiKeys => "ALK-US-0071",
+            Self::Settings => "ALK-US-0081",
         }
     }
 }
@@ -73,6 +79,8 @@ pub struct NavCounters {
     pub downloads: Option<usize>,
     /// Models loaded in memory.
     pub loaded: Option<usize>,
+    /// Engine install jobs in flight.
+    pub installs: Option<usize>,
 }
 
 /// How a rail counter is drawn.
@@ -100,7 +108,11 @@ impl NavCounters {
                 .loaded
                 .filter(|n| *n > 0)
                 .map(|n| Counter::Live(n.to_string())),
-            Screen::Engines | Screen::ApiKeys => None,
+            Screen::Engines => self
+                .installs
+                .filter(|n| *n > 0)
+                .map(|n| Counter::Downloads(format!("{n}\u{2193}"))),
+            Screen::ApiKeys | Screen::Settings => None,
         }
     }
 }
@@ -160,11 +172,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rail_lists_the_five_designed_screens_in_order() {
+    fn rail_lists_the_six_designed_screens_in_order() {
         let labels: Vec<_> = Screen::ALL.iter().map(|s| s.label()).collect();
         assert_eq!(
             labels,
-            ["Library", "Discover", "Running", "Engines", "API keys"]
+            [
+                "Library", "Discover", "Running", "Engines", "API keys", "Settings"
+            ]
         );
     }
 
@@ -180,6 +194,7 @@ mod tests {
             models: Some(14),
             downloads: Some(2),
             loaded: Some(4),
+            installs: Some(1),
         };
         assert_eq!(
             c.counter(Screen::Library),
@@ -190,11 +205,16 @@ mod tests {
             Some(Counter::Downloads("2\u{2193}".into()))
         );
         assert_eq!(c.counter(Screen::Running), Some(Counter::Live("4".into())));
-        assert_eq!(c.counter(Screen::Engines), None);
+        assert_eq!(
+            c.counter(Screen::Engines),
+            Some(Counter::Downloads("1\u{2193}".into()))
+        );
+        assert_eq!(c.counter(Screen::Settings), None);
         let idle = NavCounters {
             models: Some(0),
             downloads: Some(0),
             loaded: Some(0),
+            installs: Some(0),
         };
         assert_eq!(
             idle.counter(Screen::Library),

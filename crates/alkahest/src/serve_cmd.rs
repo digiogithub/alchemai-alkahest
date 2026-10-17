@@ -223,6 +223,7 @@ async fn serve(
         system.clone(),
     ));
     let admin = AdminContext::builder(config.clone(), paths.clone(), config_file)
+        .sources(loaded.sources.iter().map(ToString::to_string).collect())
         .engines(engines)
         .system(system)
         .build();

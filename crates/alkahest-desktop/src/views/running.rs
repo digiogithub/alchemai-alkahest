@@ -19,13 +19,13 @@ use crate::tokio_bridge;
 use crate::ui::{
     AnyElement, Context, Div, Entity, EventEmitter, FontWeight, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Task, Window, div,
-    h_flex, px, svg_icon, v_flex,
+    h_flex, px, v_flex,
 };
 use crate::views::icons;
 use crate::views::library::LibraryView;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
-    ButtonKind, button, column_label, confirm_dialog, dot, kind_badge, meter, pill,
+    ButtonKind, button, column_label, dialog, dot, empty_block, kind_badge, meter, pill,
 };
 
 /// How often countdowns re-render.
@@ -414,11 +414,13 @@ impl RunningView {
             .child(h_flex().justify_end().child(unload))
     }
 
+    /// Empty states (17.2): hardware tiles stay live above; nothing to do here, so no brass.
     fn empty(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let (title, body) = match (&self.runtime, self.connected) {
             (Some(_), _) => (
-                "No models in memory",
-                "Models load on the first request, or from the Library.",
+                "Nothing loaded",
+                "Models load on their first request and leave memory after keep-alive. Load one \
+                 from the Library to keep it warm.",
             ),
             (None, true) => (
                 "Waiting for the scheduler status",
@@ -429,32 +431,14 @@ impl RunningView {
                 "Start or connect to an Alkahest server to see what it runs.",
             ),
         };
-        let mut card = v_flex()
-            .id("running-empty")
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .gap(px(space::S3))
-            .p(px(space::S8))
-            .rounded(px(radius::XL))
-            .border_1()
-            .border_color(c(p.line_default))
-            .bg(c(p.bg_raised))
-            .child(svg_icon(icons::RUNNING, 40.0, c(p.text_faint)))
-            .child(div().type_style(text::TITLE).child(title))
-            .child(
-                div()
-                    .type_style(text::SMALL)
-                    .text_color(c(p.text_muted))
-                    .child(body),
-            );
+        let mut actions = Vec::new();
         if self.runtime.is_some() {
-            card = card.child(
+            actions.push(
                 button(
                     "running-open-library",
-                    "Open the Library",
+                    "Open Library",
                     ButtonKind::Secondary,
-                    size::CONTROL_SMALL,
+                    size::CONTROL,
                     false,
                     p,
                 )
@@ -463,7 +447,16 @@ impl RunningView {
                 })),
             );
         }
-        card.into_any_element()
+        empty_block(
+            "running-empty",
+            icons::RUNNING,
+            title,
+            body,
+            actions,
+            None,
+            p,
+        )
+        .into_any_element()
     }
 }
 
@@ -536,10 +529,27 @@ impl Render for RunningView {
                 false,
                 p,
             )
+            .border_color(c(p.accent_default))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.state.cancel_stop_all();
                 cx.notify();
             }));
+            // The safer alternative (17.14): free memory without interrupting anyone.
+            let idle = button(
+                "stop-all-unload-idle",
+                "Unload idle",
+                ButtonKind::Secondary,
+                size::CONTROL_SMALL,
+                false,
+                p,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.state.cancel_stop_all();
+                this.unload_idle(cx);
+                cx.notify();
+            }));
+            let active: u64 = cards.iter().map(|c| c.active).sum();
+            let queued: u64 = cards.iter().map(|c| c.queued).sum();
             let confirm = button(
                 "stop-all-confirm",
                 "Stop all",
@@ -549,14 +559,19 @@ impl Render for RunningView {
                 p,
             )
             .on_click(cx.listener(|this, _, _, cx| this.stop_all(cx)));
-            root = root.child(confirm_dialog(
-                "Stop all models?",
+            root = root.child(dialog(
                 format!(
-                    "Every loaded model ({}) is unloaded now. Requests in flight fail and \
-                     waiting ones are refused.",
-                    cards.len()
+                    "Stop all {} running model{}?",
+                    cards.len(),
+                    if cards.len() == 1 { "" } else { "s" }
                 ),
-                vec![cancel, confirm],
+                Some(SharedString::from(format!(
+                    "{active} active requests \u{b7} {queued} queued"
+                ))),
+                "Every engine process is stopped. Active requests fail, queued ones get 503. \
+                 Use Unload idle to free memory without interrupting anyone.",
+                None,
+                vec![cancel, idle, confirm],
                 p,
             ));
         }
@@ -613,6 +628,8 @@ mod tests {
             }),
             can_start: false,
             service_unit: None,
+            notice: None,
+            manages_server: false,
             runtime: Some(RuntimeSnapshot {
                 status: Arc::new(SchedulerStatus {
                     models: vec![busy, idle],

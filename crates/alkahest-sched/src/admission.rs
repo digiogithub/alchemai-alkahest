@@ -197,7 +197,7 @@ pub fn placement(
         Some(profile) => {
             let cfg = EstimateConfig {
                 context_length: context_length(model, opts),
-                num_parallel: opts.parallel(),
+                num_parallel: crate::scheduler::parallel_slots(model, opts),
                 cache_type_k: kv(&s.kv_cache_type_k),
                 cache_type_v: kv(&s.kv_cache_type_v),
                 flash_attention: s.flash_attention.unwrap_or(false),
@@ -223,7 +223,7 @@ pub fn placement(
                 return crate::safetensors::estimate_vllm(
                     &p,
                     context_length(model, opts),
-                    opts.parallel(),
+                    crate::scheduler::parallel_slots(model, opts),
                 );
             }
             // whisper.cpp and stable-diffusion.cpp: weights file plus a documented overhead.

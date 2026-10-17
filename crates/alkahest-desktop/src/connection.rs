@@ -121,6 +121,14 @@ pub enum ConnectionState {
         /// Why the last start attempt failed.
         error: Option<String>,
     },
+    /// We asked the local server to stop (and to start again when `restart`), and wait for
+    /// it to stop answering.
+    Stopping {
+        /// Start a server again once the old one is gone.
+        restart: bool,
+        /// When waiting gives up.
+        deadline: Instant,
+    },
     /// The server refuses our API key (or wants one).
     Unauthorized,
     /// The server answered with something unexpected.
@@ -163,6 +171,8 @@ pub struct Machine {
     /// Whether this app may start a server (the configured server is local and a launcher
     /// exists).
     can_start: bool,
+    /// A restart stopped the server and must start the next one.
+    restart_pending: bool,
 }
 
 impl Machine {
@@ -172,12 +182,34 @@ impl Machine {
             state: ConnectionState::Connecting,
             backoff: Backoff::default(),
             can_start,
+            restart_pending: false,
         }
     }
 
     /// The current state.
     pub fn state(&self) -> &ConnectionState {
         &self.state
+    }
+
+    /// Whether this app may start (and so stop or restart) the local server.
+    pub fn can_start(&self) -> bool {
+        self.can_start
+    }
+
+    /// The server was asked to stop at `now`; `restart` starts a new one once it is gone.
+    /// Returns the delay before the next probe.
+    pub fn on_stop_requested(&mut self, restart: bool, now: Instant) -> Duration {
+        self.state = ConnectionState::Stopping {
+            restart,
+            deadline: now + START_TIMEOUT,
+        };
+        START_POLL
+    }
+
+    /// True when a restart is waiting for the old server to be gone and it is: the caller
+    /// launches a new server now.
+    pub fn launch_due(&self) -> bool {
+        matches!(self.state, ConnectionState::NotRunning { .. }) && self.restart_pending
     }
 
     /// Whether "Start server" is offered right now.
@@ -188,6 +220,18 @@ impl Machine {
     /// Feeds a probe result at `now`; returns the delay before the next probe.
     pub fn on_probe(&mut self, result: Result<ServerInfo, ProbeError>, now: Instant) -> Duration {
         match (result, &self.state) {
+            // Still answering while it drains: keep waiting until the deadline.
+            (Ok(_), ConnectionState::Stopping { deadline, .. }) if now < *deadline => START_POLL,
+            (Err(_), ConnectionState::Stopping { restart, .. }) => {
+                self.restart_pending = *restart;
+                self.state = ConnectionState::NotRunning { error: None };
+                if self.restart_pending {
+                    // Give the old process a moment to release its port and store lock.
+                    START_POLL
+                } else {
+                    self.backoff.next_delay()
+                }
+            }
             (Ok(info), _) => {
                 self.backoff.reset();
                 self.state = ConnectionState::Connected(info);
@@ -239,6 +283,7 @@ impl Machine {
     /// A server was started with `method` at `now`; polls for readiness from here on.
     /// Returns the delay before the next probe.
     pub fn on_launched(&mut self, method: LaunchMethod, now: Instant) -> Duration {
+        self.restart_pending = false;
         self.state = ConnectionState::Starting {
             method,
             deadline: now + START_TIMEOUT,
@@ -248,6 +293,7 @@ impl Machine {
 
     /// Starting a server failed; returns the delay before the next probe.
     pub fn on_launch_failed(&mut self, error: String) -> Duration {
+        self.restart_pending = false;
         self.state = ConnectionState::NotRunning { error: Some(error) };
         self.backoff.next_delay()
     }
@@ -284,6 +330,10 @@ pub struct Snapshot {
     /// The latest scheduler snapshot while connected (`None` before the first one, when
     /// disconnected, or when the server refuses the admin routes to this key).
     pub runtime: Option<RuntimeSnapshot>,
+    /// Why the last stop or restart request failed, until the next one.
+    pub notice: Option<String>,
+    /// This app can start, stop and restart the server (it is local and a launcher exists).
+    pub manages_server: bool,
 }
 
 /// An action button on the service card.
@@ -340,6 +390,15 @@ impl Snapshot {
                     }
                 }),
             ),
+            ConnectionState::Stopping { restart, .. } => (
+                Tone::Info,
+                if *restart {
+                    "Restarting server\u{2026}".to_string()
+                } else {
+                    "Stopping server\u{2026}".to_string()
+                },
+                manager.unwrap_or_else(|| "waiting for the server to stop".to_string()),
+            ),
             ConnectionState::Unauthorized => (
                 Tone::Attention,
                 "API key needed".to_string(),
@@ -368,7 +427,8 @@ impl Snapshot {
             | ConnectionState::Error(_) => Some(CardAction::Retry),
             ConnectionState::Connecting
             | ConnectionState::Connected(_)
-            | ConnectionState::Starting { .. } => None,
+            | ConnectionState::Starting { .. }
+            | ConnectionState::Stopping { .. } => None,
         }
     }
 
@@ -379,6 +439,7 @@ impl Snapshot {
                 models: Some(info.models),
                 downloads: None,
                 loaded: Some(info.loaded),
+                installs: None,
             },
             _ => NavCounters::default(),
         }
@@ -392,6 +453,17 @@ pub enum Command {
     StartServer,
     /// Probe again now.
     Retry,
+    /// Stop the local server (tray "Stop server"); `pid` is the server's process id from
+    /// `GET /alkahest/v1/info`, used when no service unit manages it.
+    StopServer {
+        /// Server process id.
+        pid: Option<u32>,
+    },
+    /// Stop the local server and start it again (settings saved for the next start).
+    RestartServer {
+        /// Server process id.
+        pid: Option<u32>,
+    },
 }
 
 /// A boxed stream of live scheduler snapshots.
@@ -445,6 +517,7 @@ pub struct ConnectionManager<C, L> {
     commands: mpsc::UnboundedReceiver<Command>,
     snapshots: watch::Sender<Snapshot>,
     runtime: Option<RuntimeSnapshot>,
+    last_error: Option<String>,
 }
 
 /// The UI's ends of a [`ConnectionManager`].
@@ -468,6 +541,8 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
             state: machine.state().clone(),
             can_start: machine.offers_start(),
             service_unit: service_unit.clone(),
+            notice: None,
+            manages_server: can_start,
             runtime: None,
         };
         let (snap_tx, snap_rx) = watch::channel(first);
@@ -482,6 +557,7 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
                 commands: cmd_rx,
                 snapshots: snap_tx,
                 runtime: None,
+                last_error: None,
             },
             ConnectionHandle {
                 commands: cmd_tx,
@@ -499,6 +575,8 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
             state: self.machine.state().clone(),
             can_start: self.machine.offers_start(),
             service_unit: self.service_unit.clone(),
+            notice: self.last_error.clone(),
+            manages_server: self.machine.can_start(),
             runtime: self.runtime.clone(),
         };
         self.snapshots.send_if_modified(|cur| {
@@ -532,6 +610,12 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
             let result = self.api.probe().await;
             delay = self.machine.on_probe(result, now());
             self.publish();
+            if self.machine.launch_due() {
+                // The old server of a restart is gone: start the new one.
+                delay = self.launch();
+                self.publish();
+                continue;
+            }
             if matches!(self.machine.state(), ConnectionState::Connected(_)) {
                 match self.follow_events().await {
                     Some(d) => delay = d,
@@ -552,17 +636,51 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
                 if !self.machine.on_start_requested() {
                     return None;
                 }
-                let launcher = self.launcher.as_ref()?;
-                Some(match launcher.launch() {
-                    Ok(method) => {
-                        tracing::info!(method = %method.describe(), "started a server");
-                        self.machine.on_launched(method, now())
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "cannot start a server");
-                        self.machine.on_launch_failed(e.to_string())
-                    }
-                })
+                self.launcher.as_ref()?;
+                Some(self.launch())
+            }
+            Command::StopServer { pid } => {
+                self.last_error = None;
+                self.stop(pid, false)
+            }
+            Command::RestartServer { pid } => {
+                self.last_error = None;
+                self.stop(pid, true)
+            }
+        }
+    }
+
+    /// Starts a server with the launcher; returns the delay before the next probe.
+    fn launch(&mut self) -> Duration {
+        let Some(launcher) = self.launcher.as_ref() else {
+            return self.machine.on_launch_failed("no local launcher".into());
+        };
+        match launcher.launch() {
+            Ok(method) => {
+                tracing::info!(method = %method.describe(), "started a server");
+                self.machine.on_launched(method, now())
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot start a server");
+                self.machine.on_launch_failed(e.to_string())
+            }
+        }
+    }
+
+    /// Stops the local server (then starts it again when `restart`).
+    fn stop(&mut self, pid: Option<u32>, restart: bool) -> Option<Duration> {
+        let launcher = self.launcher.as_ref()?;
+        match launcher.stop(pid) {
+            Ok(method) => {
+                tracing::info!(?method, restart, "asked the server to stop");
+                Some(self.machine.on_stop_requested(restart, now()))
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot stop the server");
+                // Nothing changed: report through the state on the next probe.
+                self.machine.on_retry();
+                self.last_error = Some(e.to_string());
+                Some(Duration::ZERO)
             }
         }
     }
@@ -613,6 +731,12 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
                 cmd = self.commands.recv() => match cmd {
                     Some(Command::Retry) => return Some(Duration::ZERO),
                     Some(Command::StartServer) => {}
+                    Some(cmd @ (Command::StopServer { .. } | Command::RestartServer { .. })) => {
+                        if let Some(d) = self.handle(cmd) {
+                            self.publish();
+                            return Some(d);
+                        }
+                    }
                     None => return None,
                 },
             }
@@ -751,6 +875,8 @@ mod tests {
             state,
             can_start,
             service_unit: None,
+            notice: None,
+            manages_server: false,
             runtime: None,
         }
     }
@@ -859,6 +985,66 @@ mod tests {
         fn service_unit(&self) -> Option<String> {
             None
         }
+
+        fn stop(&self, pid: Option<u32>) -> Result<crate::launcher::StopMethod, LaunchError> {
+            if pid.is_none() {
+                return Err(LaunchError::Stop("unknown pid".into()));
+            }
+            // The fake server stops answering at once and boots again on the next launch.
+            self.server.started.store(false, Ordering::SeqCst);
+            self.server.probes_since_start.store(0, Ordering::SeqCst);
+            Ok(crate::launcher::StopMethod::Signalled)
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn restart_stops_then_starts_the_local_server() {
+        // Settings saved for the next start: "Save & restart server" stops the running server,
+        // waits until it no longer answers and starts a new one.
+        let server = FakeServer {
+            started: Arc::new(AtomicBool::new(true)),
+            ..FakeServer::default()
+        };
+        let launches = Arc::new(AtomicUsize::new(0));
+        let launcher = FakeLauncher {
+            server: server.clone(),
+            launches: launches.clone(),
+            fail: false,
+        };
+        let (manager, mut handle) =
+            ConnectionManager::new(server, Some(launcher), "http://127.0.0.1:11435".into());
+        let task = tokio::spawn(manager.run());
+        wait_for(&mut handle.snapshots, "connected", |s| {
+            matches!(s.state, ConnectionState::Connected(_))
+        })
+        .await;
+        // Without a pid (and no unit) the stop is refused and reported, nothing changes.
+        handle
+            .commands
+            .send(Command::RestartServer { pid: None })
+            .unwrap();
+        let s = wait_for(&mut handle.snapshots, "notice", |s| s.notice.is_some()).await;
+        assert!(s.notice.unwrap().contains("unknown pid"));
+        handle
+            .commands
+            .send(Command::RestartServer { pid: Some(42) })
+            .unwrap();
+        let s = wait_for(&mut handle.snapshots, "restarting", |s| {
+            matches!(s.state, ConnectionState::Stopping { restart: true, .. })
+        })
+        .await;
+        assert_eq!(s.service_card().title, "Restarting server\u{2026}");
+        assert_eq!(s.notice, None);
+        wait_for(&mut handle.snapshots, "started again", |s| {
+            matches!(s.state, ConnectionState::Connected(_))
+        })
+        .await;
+        assert_eq!(launches.load(Ordering::SeqCst), 1);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(60), task)
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     async fn wait_for(

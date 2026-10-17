@@ -5,7 +5,8 @@
 //!
 //! * `GET /alkahest/v1/models`: the merged catalog (every `ModelSummary` field plus the
 //!   runtime state of loaded models) and the store paths and counts.
-//! * `GET /alkahest/v1/models/{name}`: summary, template, system prompt, licence, parameters.
+//! * `GET /alkahest/v1/models/{name}`: summary, template, system prompt, licence,
+//!   `default_parameters` (the params layer; `parameters` stays the parameter-count label).
 //! * `DELETE /alkahest/v1/models/{name}`: unloads, then deletes (Ollama-store models: 403).
 //! * `POST /alkahest/v1/copy` `{"source": .., "destination": ..}`.
 //! * `GET|PUT|DELETE /alkahest/v1/models/{name}/settings`: the per-model overlay; `GET` adds
@@ -23,7 +24,8 @@ use alkahest_sched::{
     SchedError, Scheduler, estimate,
 };
 use alkahest_store::{
-    Catalog, CatalogEntry, ModelName, ModelRef, ModelSettings, Origin, ScopedRef, StoreError,
+    Catalog, CatalogEntry, MAX_NUM_PARALLEL, ModelName, ModelRef, ModelSettings, Origin, ScopedRef,
+    StoreError,
 };
 use axum::Json;
 use axum::body::Bytes;
@@ -142,7 +144,9 @@ pub(super) async fn detail(State(state): State<AppState>, Path(name): Path<Strin
             v["template_from_gguf"] = json!(d.template_from_gguf);
             v["system"] = json!(d.system);
             v["license"] = json!(d.license);
-            v["parameters"] = json!(d.parameters);
+            // `parameters` stays the parameter-count label of the row; the params layer's
+            // default map gets its own key so both keep one JSON type (ALK-US-0103).
+            v["default_parameters"] = json!(d.parameters);
             v["source_info"] = json!(d.source);
             v["shadows"] = json!(entry.shadows.iter().map(|o| o.as_str()).collect::<Vec<_>>());
             v["not_loadable_reason"] = json!(entry.not_loadable_reason());
@@ -374,6 +378,13 @@ fn validate(s: &ModelSettings) -> Result<(), HttpError> {
     if s.context_length == Some(0) {
         return Err(HttpError::bad_request("context_length must be at least 1"));
     }
+    if let Some(n) = s.num_parallel
+        && !(1..=MAX_NUM_PARALLEL).contains(&n)
+    {
+        return Err(HttpError::bad_request(format!(
+            "num_parallel must be between 1 and {MAX_NUM_PARALLEL}"
+        )));
+    }
     for (name, v) in [
         ("kv_cache_type_k", &s.kv_cache_type_k),
         ("kv_cache_type_v", &s.kv_cache_type_v),
@@ -504,7 +515,11 @@ pub(super) async fn estimate_memory(
                 .unwrap_or(DEFAULT_CONTEXT_LENGTH);
             let cfg = EstimateConfig {
                 context_length,
-                num_parallel: p.num_parallel.unwrap_or(1).max(1),
+                num_parallel: p
+                    .num_parallel
+                    .or(eff.settings.num_parallel)
+                    .unwrap_or(1)
+                    .max(1),
                 cache_type_k: kv(&p.kv_cache_type_k, &eff.settings.kv_cache_type_k)?,
                 cache_type_v: kv(&p.kv_cache_type_v, &eff.settings.kv_cache_type_v)?,
                 flash_attention: p
