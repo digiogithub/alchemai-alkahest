@@ -8,7 +8,9 @@
 use std::collections::BTreeMap;
 
 use alkahest_client::EngineOverride;
-use alkahest_client::admin::{EngineInstall, EngineListing, EngineVariant, Job};
+use alkahest_client::admin::{
+    EngineInstall, EngineInstallOptions, EngineListing, EngineVariant, Job,
+};
 use serde_json::Value;
 
 use crate::present::format_bytes;
@@ -49,6 +51,8 @@ pub enum ChipState {
     SourceOnly,
     /// Cannot run on this host (dashed, faint).
     Unsupported,
+    /// An installed native build made for another CPU (dashed brass border).
+    NativeStale,
 }
 
 /// One variant chip.
@@ -65,12 +69,26 @@ pub struct VariantChip {
     /// Short note after the name (`Installed`, `recommended`, the reason it is unsupported),
     /// with the download size of installable variants (`recommended \u{b7} 142 MB`).
     pub note: String,
+    /// The native variant (`cpu-native`): installed with `native: true`, never recommended.
+    pub native: bool,
 }
 
 impl VariantChip {
     /// Whether a click installs it (and how).
     pub fn install_request(&self) -> Option<EngineInstall> {
         match self.state {
+            ChipState::Recommended | ChipState::Available | ChipState::SourceOnly
+                if self.native =>
+            {
+                // The server picks the native variant of its CPU (`variant` must stay empty).
+                Some(EngineInstall {
+                    engine: self.engine.clone(),
+                    version: Some(self.version.clone()),
+                    variant: None,
+                    from_source: false,
+                    force: false,
+                })
+            }
             ChipState::Recommended | ChipState::Available | ChipState::SourceOnly => {
                 Some(EngineInstall {
                     engine: self.engine.clone(),
@@ -80,7 +98,18 @@ impl VariantChip {
                     force: false,
                 })
             }
-            ChipState::Installed | ChipState::Building | ChipState::Unsupported => None,
+            ChipState::Installed
+            | ChipState::Building
+            | ChipState::Unsupported
+            | ChipState::NativeStale => None,
+        }
+    }
+
+    /// The install options that go with [`Self::install_request`].
+    pub fn install_options(&self) -> EngineInstallOptions {
+        EngineInstallOptions {
+            with: Vec::new(),
+            native: self.native,
         }
     }
 }
@@ -104,6 +133,96 @@ pub struct InstalledBuild {
     pub bundled: bool,
     /// Executable.
     pub path: String,
+    /// Built from source (dependency installs keep it that way).
+    pub from_source: bool,
+    /// A native build (built for a CPU).
+    pub native: bool,
+    /// A native build made for another CPU ("Rebuild for this CPU").
+    pub native_stale: bool,
+}
+
+impl InstalledBuild {
+    /// The native tag of the row: `native · built for this CPU` (neutral) or
+    /// `built for another CPU` (brass-subtle warning, `true`).
+    pub fn native_tag(&self) -> Option<(&'static str, bool)> {
+        match (self.native, self.native_stale) {
+            (_, true) => Some(("built for another CPU", true)),
+            (true, false) => Some(("native \u{b7} built for this CPU", false)),
+            _ => None,
+        }
+    }
+
+    /// "Rebuild for this CPU": the native variant of this version, built again
+    /// (`engines install --native --force`).
+    pub fn rebuild_request(&self) -> Option<(EngineInstall, EngineInstallOptions)> {
+        self.native_stale.then(|| {
+            (
+                EngineInstall {
+                    engine: self.engine.clone(),
+                    version: Some(self.version.clone()),
+                    variant: None,
+                    from_source: false,
+                    force: true,
+                },
+                EngineInstallOptions {
+                    with: Vec::new(),
+                    native: true,
+                },
+            )
+        })
+    }
+}
+
+/// One dependency chip of an engine card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependencyChip {
+    /// Dependency id (`cuda-runtime`).
+    pub id: String,
+    /// The installed variant it belongs to (`cuda12.8`).
+    pub variant: String,
+    /// `optional · for cuda12.8 · 594 MB`, `with cuda12.8`.
+    pub note: String,
+    /// Present in the installed build (verdigris).
+    pub installed: bool,
+    /// "Install" for a missing optional dependency (`engines install <id> --with <dep>`).
+    pub install: Option<(EngineInstall, EngineInstallOptions)>,
+}
+
+/// The recipe origin chip: `built-in` (dashed), `catalog official @ c1c1877b`, `recipes/`,
+/// `user dir`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OriginChip {
+    /// Text.
+    pub text: String,
+    /// The built-in layer (dashed border).
+    pub builtin: bool,
+}
+
+/// The origin chip of a recipe layer (`built-in`, `catalog:<name>`, `dir:<path>`).
+pub fn origin_chip(origin: &str, commit: Option<&str>) -> OriginChip {
+    let text = if origin == "built-in" {
+        "built-in".to_string()
+    } else if let Some(name) = origin.strip_prefix("catalog:") {
+        match commit {
+            Some(c) => format!(
+                "catalog {name} @ {}",
+                crate::catalog_models::short_commit(c)
+            ),
+            None => format!("catalog {name}"),
+        }
+    } else if let Some(path) = origin.strip_prefix("dir:") {
+        if path.trim_end_matches('/').ends_with("recipes") && !path.contains(".local") {
+            "recipes/".to_string()
+        } else {
+            "user dir".to_string()
+        }
+    } else {
+        origin.to_string()
+    };
+    OriginChip {
+        builtin: origin == "built-in",
+        text,
+    }
 }
 
 /// One engine card.
@@ -121,6 +240,12 @@ pub struct EngineCard {
     pub installed: Vec<InstalledBuild>,
     /// Variant chips of the newest recipe version.
     pub chips: Vec<VariantChip>,
+    /// The layer the newest recipe was read from.
+    pub origin: Option<OriginChip>,
+    /// Dependencies of the installed variants (row shown only when not empty).
+    pub dependencies: Vec<DependencyChip>,
+    /// A hint from the notes of a variant with an optional dependency.
+    pub dependency_hint: Option<String>,
 }
 
 /// `id version variant`, the job target format of engine installs.
@@ -178,6 +303,9 @@ pub fn cards(
                     },
                     bundled: r.bundled,
                     path: r.path.clone().unwrap_or_default(),
+                    from_source: r.from_source,
+                    native: r.native,
+                    native_stale: r.native_stale,
                 })
                 .collect();
             installed.sort_by_key(|b| std::cmp::Reverse(version_key(&b.version)));
@@ -195,6 +323,14 @@ pub fn cards(
                         .collect()
                 })
                 .unwrap_or_default();
+            let origin = newest.as_ref().and_then(|ver| {
+                rows.iter().filter(|r| &r.version == ver).find_map(|r| {
+                    r.origin
+                        .as_deref()
+                        .map(|o| origin_chip(o, r.origin_commit.as_deref()))
+                })
+            });
+            let (dependencies, dependency_hint) = dependency_chips(&rows);
             EngineCard {
                 name: name.to_string(),
                 serves: serves.to_string(),
@@ -202,9 +338,62 @@ pub fn cards(
                 id,
                 installed,
                 chips,
+                origin,
+                dependencies,
+                dependency_hint,
             }
         })
         .collect()
+}
+
+/// The dependency chips of the installed variants and a hint line.
+fn dependency_chips(rows: &[&EngineVariant]) -> (Vec<DependencyChip>, Option<String>) {
+    let mut out: Vec<DependencyChip> = Vec::new();
+    let mut hint = None;
+    for r in rows.iter().filter(|r| r.installed) {
+        for d in &r.dependencies {
+            if out.iter().any(|c| c.id == d.id && c.variant == r.variant) {
+                continue;
+            }
+            let mut note = if d.optional {
+                format!("optional \u{b7} for {}", r.variant)
+            } else {
+                format!("with {}", r.variant)
+            };
+            if let Some(size) = d.size.filter(|s| *s > 0) {
+                note.push_str(&format!(" \u{b7} {}", format_bytes(size)));
+            }
+            let install = (d.optional && !d.installed).then(|| {
+                (
+                    EngineInstall {
+                        engine: r.id.clone(),
+                        version: Some(r.version.clone()),
+                        variant: Some(r.variant.clone()),
+                        from_source: r.from_source,
+                        force: false,
+                    },
+                    EngineInstallOptions {
+                        with: vec![d.id.clone()],
+                        native: false,
+                    },
+                )
+            });
+            if d.optional && hint.is_none() {
+                let first = r.notes.split(['\n']).next().unwrap_or_default().trim();
+                if !first.is_empty() {
+                    hint = Some(first.to_string());
+                }
+            }
+            out.push(DependencyChip {
+                id: d.id.clone(),
+                variant: r.variant.clone(),
+                note,
+                installed: d.installed,
+                install,
+            });
+        }
+    }
+    (out, hint)
 }
 
 fn chip(r: &EngineVariant, running_jobs: &[String]) -> VariantChip {
@@ -213,6 +402,16 @@ fn chip(r: &EngineVariant, running_jobs: &[String]) -> VariantChip {
         .any(|t| t == &job_target(&r.id, &r.version, &r.variant));
     let (state, note) = if building {
         (ChipState::Building, "building\u{2026}".to_string())
+    } else if r.installed && r.native_stale {
+        (ChipState::NativeStale, "built for another CPU".to_string())
+    } else if r.installed && r.native {
+        (ChipState::Installed, "native".to_string())
+    } else if r.native && r.state != "unsupported" {
+        // Never recommended and never picked automatically: built from source on request.
+        (
+            ChipState::SourceOnly,
+            "native \u{b7} on request".to_string(),
+        )
     } else if r.installed {
         (ChipState::Installed, "Installed".to_string())
     } else if r.state == "unsupported" {
@@ -233,6 +432,7 @@ fn chip(r: &EngineVariant, running_jobs: &[String]) -> VariantChip {
         variant: r.variant.clone(),
         state,
         note,
+        native: r.native,
     }
 }
 
@@ -272,7 +472,10 @@ pub fn recommended_installs(listing: &EngineListing) -> Vec<EngineInstall> {
         if rows.iter().any(|r| r.installed) {
             continue;
         }
-        if let Some(r) = rows.iter().find(|r| r.recommended && r.prebuilt) {
+        if let Some(r) = rows
+            .iter()
+            .find(|r| r.recommended && r.prebuilt && !r.native)
+        {
             out.push(EngineInstall {
                 engine: r.id.clone(),
                 version: Some(r.version.clone()),
@@ -913,6 +1116,116 @@ mod tests {
         .to_string();
         assert!(
             remove_failure("llama.cpp", "b1", &other).starts_with("Cannot remove llama.cpp b1")
+        );
+    }
+
+    #[test]
+    fn origin_native_builds_and_dependencies() {
+        use alkahest_client::admin::EngineDependency;
+        let base = |variant: &str| EngineVariant {
+            id: "llama-cpp".into(),
+            version: "b11669".into(),
+            variant: variant.into(),
+            state: "available".into(),
+            prebuilt: true,
+            origin: Some("catalog:official".into()),
+            origin_commit: Some("c1c1877b99".into()),
+            ..EngineVariant::default()
+        };
+        let cuda = EngineVariant {
+            installed: true,
+            state: "installed".into(),
+            notes: "Not needed when the CUDA 12 runtime is installed on the host.".into(),
+            dependencies: vec![EngineDependency {
+                id: "cuda-runtime".into(),
+                optional: true,
+                size: Some(594_000_000),
+                installed: false,
+            }],
+            ..base("cuda12.8")
+        };
+        let stale = EngineVariant {
+            installed: true,
+            state: "installed".into(),
+            native: true,
+            native_stale: true,
+            from_source: true,
+            prebuilt: false,
+            source_build: true,
+            ..base("cpu-native")
+        };
+        let listing = EngineListing {
+            accelerators: vec!["cuda".into()],
+            engines: vec![cuda, stale],
+        };
+        let c = &cards(&listing, &[], &[])[0];
+        assert_eq!(
+            c.origin,
+            Some(OriginChip {
+                text: "catalog official @ c1c1877b".into(),
+                builtin: false
+            })
+        );
+        let native = c
+            .installed
+            .iter()
+            .find(|b| b.variant == "cpu-native")
+            .unwrap();
+        assert_eq!(native.native_tag(), Some(("built for another CPU", true)));
+        let (req, opts) = native.rebuild_request().unwrap();
+        assert!(opts.native && req.force && req.variant.is_none());
+        let plain = c
+            .installed
+            .iter()
+            .find(|b| b.variant == "cuda12.8")
+            .unwrap();
+        assert!(plain.native_tag().is_none() && plain.rebuild_request().is_none());
+        assert_eq!(c.dependencies.len(), 1);
+        let dep = &c.dependencies[0];
+        assert_eq!(dep.note, "optional \u{b7} for cuda12.8 \u{b7} 594 MB");
+        let (req, opts) = dep.install.clone().unwrap();
+        assert_eq!(req.variant.as_deref(), Some("cuda12.8"));
+        assert_eq!(opts.with, ["cuda-runtime"]);
+        assert!(
+            c.dependency_hint
+                .as_deref()
+                .unwrap()
+                .starts_with("Not needed")
+        );
+        let chip = c
+            .chips
+            .iter()
+            .find(|ch| ch.variant == "cpu-native")
+            .unwrap();
+        assert_eq!(chip.state, ChipState::NativeStale);
+        assert!(chip.install_request().is_none());
+        // A native variant not installed is source-only on request, never recommended.
+        let fresh = EngineVariant {
+            native: true,
+            recommended: true,
+            source_build: true,
+            prebuilt: false,
+            ..base("cpu-native")
+        };
+        let ch = super::chip(&fresh, &[]);
+        assert_eq!(ch.state, ChipState::SourceOnly);
+        let req = ch.install_request().unwrap();
+        assert!(req.variant.is_none() && ch.install_options().native);
+        assert!(
+            recommended_installs(&EngineListing {
+                accelerators: vec![],
+                engines: vec![EngineVariant {
+                    prebuilt: true,
+                    ..fresh
+                }],
+            })
+            .is_empty()
+        );
+        assert_eq!(origin_chip("built-in", None).text, "built-in");
+        assert!(origin_chip("built-in", None).builtin);
+        assert_eq!(
+            origin_chip("dir:/home/u/.local/share/alkahest/recipes", None).text,
+            "user dir"
         );
     }
 }

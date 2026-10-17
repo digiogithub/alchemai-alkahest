@@ -16,6 +16,8 @@
 //!   from `design/tokens.json`; views never hard-code them.
 
 pub mod autostart;
+pub mod catalog_models;
+pub mod catalogs;
 pub mod connection;
 pub mod discover;
 pub mod downloads;

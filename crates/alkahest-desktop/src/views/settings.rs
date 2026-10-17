@@ -29,11 +29,12 @@ use crate::ui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Window, div, h_flex, px, v_flex,
 };
+use crate::views::catalogs::{CatalogsEvent, CatalogsView};
 use crate::views::icons;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
     ButtonKind, button, card, checkbox, choice_chip, dot, empty_block, field_frame, field_label,
-    mono_caption, notice_line, segment, segmented,
+    mono_caption, notice_line, section_tab, segment, segmented,
 };
 
 /// Width of the side column.
@@ -90,6 +91,9 @@ pub struct SettingsView {
     /// The `alkahest` executable an autostart entry runs; `None` hides the toggle.
     autostart_exe: Option<PathBuf>,
     autostart: bool,
+    /// Settings › Catalogs (screen 16b), shown instead of the General tab when selected.
+    catalogs: Entity<CatalogsView>,
+    catalogs_tab: bool,
 }
 
 impl std::fmt::Debug for SettingsView {
@@ -105,16 +109,28 @@ impl EventEmitter<SettingsEvent> for SettingsView {}
 
 impl SettingsView {
     /// A Settings screen. `settings_file` is `desktop.toml`; `keyring` is false in the smoke
-    /// test (no unlock prompts); `env_key` says the key comes from `ALKAHEST_API_KEY`.
+    /// test (no unlock prompts); `env_key` says the key comes from `ALKAHEST_API_KEY`;
+    /// `catalogs` draws the Catalogs tab.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: Client,
         settings_file: Option<PathBuf>,
         keyring: bool,
         env_key: bool,
         autostart_exe: Option<PathBuf>,
+        catalogs: Entity<CatalogsView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // The Catalogs tab label carries the count and a dot after a failed sync.
+        cx.observe(&catalogs, |_, _, cx| cx.notify()).detach();
+        cx.subscribe(&catalogs, |this, _, e: &CatalogsEvent, cx| {
+            if *e == CatalogsEvent::ShowGeneral {
+                this.catalogs_tab = false;
+                cx.notify();
+            }
+        })
+        .detach();
         let mut inputs = Vec::new();
         for key in TEXT_FIELDS {
             let input = cx.new(|cx| InputState::new(window, cx));
@@ -213,7 +229,45 @@ impl SettingsView {
             pending_reload: false,
             autostart: crate::autostart::is_enabled(&crate::autostart::process_env),
             autostart_exe,
+            catalogs,
+            catalogs_tab: false,
         }
+    }
+
+    /// Shows the Catalogs tab (Discover pill, banners, Engines footnote).
+    pub fn show_catalogs(&mut self, cx: &mut Context<Self>) {
+        self.catalogs_tab = true;
+        cx.notify();
+    }
+
+    fn tabs(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+        let (count, alert) = self
+            .catalogs
+            .read(cx)
+            .listing()
+            .map(|l| {
+                (
+                    Some(l.catalogs.len()),
+                    !crate::catalogs::failed(l).is_empty(),
+                )
+            })
+            .unwrap_or((None, false));
+        h_flex()
+            .gap(px(space::S2))
+            .border_b_1()
+            .border_color(c(p.line_default))
+            .child(section_tab(
+                "settings-tab-general",
+                "General",
+                None,
+                false,
+                true,
+                p,
+            ))
+            .child(
+                section_tab("settings-tab-catalogs", "Catalogs", count, alert, false, p)
+                    .on_click(cx.listener(|this, _, _, cx| this.show_catalogs(cx))),
+            )
     }
 
     /// Follows a connection snapshot.
@@ -1108,11 +1162,15 @@ impl Render for SettingsView {
         if std::mem::take(&mut self.pending_reload) {
             self.reload(window, cx);
         }
+        if self.catalogs_tab {
+            return div().size_full().child(self.catalogs.clone());
+        }
         let p = Theme::get(cx).palette;
         let mut content = v_flex()
             .size_full()
             .gap(px(space::S5))
-            .child(self.header(p, cx));
+            .child(self.header(p, cx))
+            .child(self.tabs(p, cx));
         if let Some((danger, msg)) = self.notice.clone() {
             content = content.child(notice_line(msg, danger, p));
         }

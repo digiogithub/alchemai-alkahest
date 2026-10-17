@@ -19,32 +19,57 @@ use std::collections::HashMap;
 use alkahest_gguf::ModelKind;
 use serde_json::Value;
 
+use crate::catalog_models::CatalogDiscover;
 use crate::present::{format_bytes, group_digits, is_ternary};
 
 /// Which catalogue the screen searches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Source {
+    /// Every source at once: catalog rows first, then Hugging Face, then Ollama (as
+    /// `alkahest search --source all`).
+    All,
     /// Hugging Face Hub.
     #[default]
     HuggingFace,
     /// ollama.com library.
     Ollama,
+    /// The git catalogs' local snapshots (screen 11b).
+    Catalog,
     /// A repository id, URL or reference typed by the user.
     Paste,
 }
 
 impl Source {
     /// Segmented control order.
-    pub const ALL: [Self; 3] = [Self::HuggingFace, Self::Ollama, Self::Paste];
+    pub const ALL: [Self; 5] = [
+        Self::All,
+        Self::HuggingFace,
+        Self::Ollama,
+        Self::Catalog,
+        Self::Paste,
+    ];
 
     /// Segment label.
     pub fn label(self) -> &'static str {
         match self {
+            Self::All => "All",
             Self::HuggingFace => "Hugging Face",
             Self::Ollama => "Ollama library",
+            Self::Catalog => "Catalog",
             Self::Paste => "Paste repo / URL",
         }
     }
+}
+
+/// A result picked in the "All" list: which detail panel opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pick {
+    /// A catalog card (its key).
+    Catalog(String),
+    /// A Hugging Face repository.
+    Hf(String),
+    /// An Ollama library model.
+    Ollama(String),
 }
 
 /// Weight format filter of a Hugging Face search.
@@ -1203,6 +1228,10 @@ pub struct DiscoverState {
     pub token_error: Option<String>,
     /// A one-line message (pull refused, search failed).
     pub notice: Option<String>,
+    /// Discover › Catalog (screen 11b).
+    pub catalog: CatalogDiscover,
+    /// The result open in the "All" list.
+    pub all_pick: Option<Pick>,
     generation: u64,
     detail_generation: u64,
     tags_generation: u64,
@@ -1214,9 +1243,41 @@ impl DiscoverState {
         self.generation += 1;
         match self.source {
             Source::Ollama => self.ollama_results = Fetch::Loading,
+            Source::All => {
+                self.hf_results = Fetch::Loading;
+                self.ollama_results = Fetch::Loading;
+            }
             _ => self.hf_results = Fetch::Loading,
         }
         self.generation
+    }
+
+    /// The rows of the "All" list in display order: catalog cards first, then Hugging Face,
+    /// then the Ollama library.
+    pub fn all_rows(&self) -> Vec<Pick> {
+        let mut out: Vec<Pick> = self
+            .catalog
+            .entries(&self.hardware)
+            .into_iter()
+            .map(|e| Pick::Catalog(e.key))
+            .collect();
+        if let Some(rows) = self.hf_results.ready() {
+            out.extend(rows.iter().map(|m| Pick::Hf(m.id.clone())));
+        }
+        if let Some(rows) = self.ollama_results.ready() {
+            out.extend(rows.iter().map(|m| Pick::Ollama(m.name.clone())));
+        }
+        out
+    }
+
+    /// The result to open after an "All" answer: the first row when nothing listed is open
+    /// (`None` keeps the current one).
+    pub fn all_pick_after_search(&self) -> Option<Pick> {
+        let rows = self.all_rows();
+        if self.all_pick.as_ref().is_some_and(|p| rows.contains(p)) {
+            return None;
+        }
+        rows.into_iter().next()
     }
 
     /// Applies Hugging Face results of search `generation` (ignored when a newer one ran).
@@ -1959,5 +2020,67 @@ mod tests {
         assert!(parse_paste("hf.co/onlyorg").is_err());
         assert!(parse_paste("../etc/passwd").is_err());
         assert!(parse_paste("a b").is_err());
+    }
+
+    #[test]
+    fn all_lists_catalog_rows_first() {
+        let mut s = DiscoverState {
+            source: Source::All,
+            ..DiscoverState::default()
+        };
+        let g = s.begin_search();
+        assert!(s.hf_results.is_loading() && s.ollama_results.is_loading());
+        s.finish_hf_search(
+            g,
+            Ok(vec![HfModel {
+                id: "Qwen/Qwen3-8B-GGUF".into(),
+                ..HfModel::default()
+            }]),
+        );
+        // Only Hugging Face answered so far: it is opened.
+        assert_eq!(
+            s.all_pick_after_search(),
+            Some(Pick::Hf("Qwen/Qwen3-8B-GGUF".into()))
+        );
+        s.all_pick = s.all_pick_after_search();
+        s.finish_ollama_search(
+            g,
+            Ok(vec![OllamaModel {
+                name: "qwen3".into(),
+                ..OllamaModel::default()
+            }]),
+        );
+        let cg = s.catalog.begin_search();
+        s.catalog.finish_search(
+            cg,
+            Ok(vec![alkahest_client::CatalogSearchRow {
+                name: "qwen/q".into(),
+                tag: "q4".into(),
+                catalog: "official".into(),
+                format: "gguf".into(),
+                default: true,
+                ..Default::default()
+            }]),
+        );
+        assert_eq!(
+            s.all_rows(),
+            [
+                Pick::Catalog("official/qwen/q".into()),
+                Pick::Hf("Qwen/Qwen3-8B-GGUF".into()),
+                Pick::Ollama("qwen3".into()),
+            ]
+        );
+        assert_eq!(
+            s.all_pick_after_search(),
+            None,
+            "the open result stays open"
+        );
+        s.all_pick = None;
+        assert_eq!(
+            s.all_pick_after_search(),
+            Some(Pick::Catalog("official/qwen/q".into()))
+        );
+        assert_eq!(Source::ALL[0], Source::All);
+        assert_eq!(Source::Catalog.label(), "Catalog");
     }
 }

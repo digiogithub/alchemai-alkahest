@@ -26,6 +26,7 @@ use crate::ui::{
     IntoElement, ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled,
     Task, Window, div, h_flex, px, svg_icon, v_flex,
 };
+use crate::views::catalogs::{CatalogsEvent, CatalogsView};
 use crate::views::discover::{DiscoverEvent, DiscoverView};
 use crate::views::engines::EnginesView;
 use crate::views::icons;
@@ -44,6 +45,7 @@ struct Screens {
     engines: Entity<EnginesView>,
     keys: Entity<KeysView>,
     settings: Entity<SettingsView>,
+    catalogs: Entity<CatalogsView>,
 }
 
 /// Root view of the main window.
@@ -130,9 +132,11 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Screens {
         let library = cx.new(|cx| LibraryView::new(client.clone(), window, cx));
-        let discover = cx.new(|cx| DiscoverView::new(client.clone(), window, cx));
+        // Shared by Discover, Engines and Settings: one listing and one event feed.
+        let catalogs = cx.new(|cx| CatalogsView::new(client.clone(), window, cx));
+        let discover = cx.new(|cx| DiscoverView::new(client.clone(), catalogs.clone(), window, cx));
         let running = cx.new(|cx| RunningView::new(client.clone(), library.clone(), cx));
-        let engines = cx.new(|_| EnginesView::new(client.clone()));
+        let engines = cx.new(|cx| EnginesView::new(client.clone(), catalogs.clone(), cx));
         let keys = cx.new(|cx| KeysView::new(client.clone(), window, cx));
         let settings = cx.new(|cx| {
             SettingsView::new(
@@ -141,10 +145,20 @@ impl Shell {
                 !options.smoke_test,
                 options.api_key.is_some(),
                 options.serve_program.clone(),
+                catalogs.clone(),
                 window,
                 cx,
             )
         });
+        cx.subscribe(&catalogs, |this, _, event: &CatalogsEvent, cx| {
+            if *event == CatalogsEvent::Open {
+                this.screens
+                    .settings
+                    .update(cx, |view, cx| view.show_catalogs(cx));
+                this.select(Screen::Settings, cx);
+            }
+        })
+        .detach();
         cx.subscribe(
             &discover,
             |this, _, event: &DiscoverEvent, cx| match event {
@@ -193,6 +207,7 @@ impl Shell {
             engines,
             keys,
             settings,
+            catalogs,
         }
     }
 
@@ -314,6 +329,7 @@ impl Shell {
         s.engines.update(cx, |view, cx| view.apply(snapshot, cx));
         s.keys.update(cx, |view, cx| view.apply(snapshot, cx));
         s.settings.update(cx, |view, cx| view.apply(snapshot, cx));
+        s.catalogs.update(cx, |view, cx| view.apply(snapshot, cx));
         if matches!(snapshot.state, ConnectionState::Connected(_)) {
             self.ever_connected = true;
         }
