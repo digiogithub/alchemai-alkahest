@@ -3,23 +3,67 @@
 Pick one of: a release package, the setup script, or a build from source. All of them give you
 the same `alkahest` binary. Check it with `alkahest --version`.
 
-## Linux packages
+## Release packages
 
 Tagged releases publish, next to a `SHA256SUMS` file:
 
 | File | Content |
 |---|---|
-| `alkahest-<version>-<target>.tar.gz` | Headless binary (no GUI libraries) with a bundled CPU llama.cpp, systemd unit templates and licences. Targets `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`. |
-| `alkahest_<version>_amd64.deb` | The desktop build (menu entry, icons), CLI and server in `/usr/bin/alkahest`. |
-| `alkahest_<version>_x86_64.AppImage` | The same desktop build, self-contained. |
+| `alkahest-<version>-<target>.tar.gz` | Headless binary (no GUI libraries), bundled CPU llama.cpp, systemd unit templates (Linux) and licences. Targets: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin`. |
+| `alkahest-<version>-x86_64-pc-windows-msvc.zip` | The same for Windows (`alkahest.exe`). |
+| `alkahest_<version>_amd64.deb` | Desktop build (menu entry, icons); CLI and server in `/usr/bin/alkahest`. |
+| `alkahest-<version>-<release>.x86_64.rpm` | The same layout for Fedora, RHEL and openSUSE. |
+| `alkahest-headless-<version>-<release>.<arch>.rpm` | CLI and server only, no GUI libraries (`x86_64`, `aarch64`). **Conflicts with `alkahest`**: install one of the two. |
+| `alkahest_<version>_x86_64.AppImage` | The desktop build, self-contained. |
+| `Alkahest_<version>_aarch64.dmg`, `Alkahest_<version>_x64.dmg` | macOS app (Apple Silicon and Intel, macOS 12+). |
+| `alkahest_<version>_x64-setup.exe` | Windows installer (NSIS). |
+| `alkahest.rb` | Homebrew formula for the CLI, rendered at release time. |
 
-The packages never run maintainer scripts and create no user or service. To run the server as a
-system service afterwards, ask for it explicitly: `sudo alkahest service install` (see
-[Running as a service](guide/service.md)).
+The Linux packages never run maintainer scripts and create no user or service. To run the
+server as a system service afterwards, ask for it explicitly: `sudo alkahest service install`
+(see [Running as a service](guide/service.md)). The bundled CPU engine is found automatically;
+GPU builds installed with `alkahest engines install llama-cpp` take precedence over it.
 
-The bundled CPU engine is found automatically. GPU builds are installed with
-`alkahest engines install llama-cpp` (see [Engines and recipes](guide/engines.md)); they take
-precedence over the bundled copy.
+### macOS
+
+Open the `.dmg` and drag `Alkahest.app` to Applications. Opening the app starts the desktop (Dock
+icon plus a menu bar icon); its bundled llama.cpp (Metal on Apple Silicon) lives inside the app.
+The command line is inside the bundle:
+`/Applications/Alkahest.app/Contents/MacOS/alkahest`, or link it:
+
+```sh
+ln -s /Applications/Alkahest.app/Contents/MacOS/alkahest /usr/local/bin/alkahest
+```
+
+Releases are signed and notarised when the maintainers' Apple credentials are configured; an
+unsigned build (a fork, a release candidate) needs right-click, Open the first time.
+
+For the CLI alone, use Homebrew with the formula attached to the release:
+`brew install digiogithub/tap/alkahest`, then `brew services start alkahest` to run the server at
+login.
+
+### Windows
+
+Run `alkahest_<version>_x64-setup.exe` as administrator (it installs for all users into
+`C:\Program Files\Alkahest`). The components page offers:
+
+| Component | Default | What it does |
+|---|---|---|
+| Alkahest | required | `alkahest.exe`, bundled CPU llama.cpp, licences, Start menu shortcut |
+| Add to PATH | on | adds the install folder to the machine `PATH` (open a new terminal) |
+| Windows service | off | runs `alkahest service install` (service `alkahest`, started at boot) |
+| CUDA 12 engine | off | downloads llama.cpp for CUDA 12 with its runtime DLLs (about 650 MB) |
+
+Silent install:
+
+```text
+alkahest_<version>_x64-setup.exe /S [/SERVICE] [/CUDA] [/NOPATH] [/D=C:\dir]
+```
+
+`/S` is silent, `/SERVICE` installs the service, `/CUDA` the CUDA engine, `/NOPATH` skips the PATH
+entry and `/D=` sets the folder (it must be the last argument). The uninstaller removes the
+service, the PATH entry and the files; models and settings are kept. Upgrading stops the service,
+replaces the files and starts it again.
 
 ## Setup scripts
 
