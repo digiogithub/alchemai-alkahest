@@ -126,7 +126,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         } => serve_cmd::run(&loaded, *allow_unauthenticated),
         Command::Keys { action } => keys_cmd::run(action, &loaded, cli.global.json),
         Command::Service { action } => service_cmd::run(action, &loaded, cli.global.json),
-        Command::Desktop => desktop(),
+        Command::Desktop(args) => desktop(args, &cli.global, &loaded),
         other => Ok(not_implemented(other)),
     }
 }
@@ -138,22 +138,42 @@ fn not_implemented(command: &Command) -> ExitCode {
     ExitCode::from(EXIT_NOT_IMPLEMENTED)
 }
 
-/// `alkahest desktop`: launches the GPUI app, or explains how to get it.
+/// `alkahest desktop`: launches the GPUI app against the configured server. The app may start
+/// a local server with this very executable (`alkahest [--config <file>] [--host <h>] serve`).
 #[cfg(feature = "desktop")]
-fn desktop() -> Result<ExitCode> {
-    // The GPUI app lands with ALK-US-0064; until then the feature only links the crate.
-    eprintln!("alkahest desktop: not implemented yet (ALK-US-0064)");
-    Ok(ExitCode::from(EXIT_NOT_IMPLEMENTED))
+fn desktop(args: &cli::DesktopArgs, global: &GlobalArgs, loaded: &Loaded) -> Result<ExitCode> {
+    let server = &loaded.config.server;
+    let client = alkahest_client::Client::for_bind(&server.host, server.port)?;
+    let mut serve_args = Vec::new();
+    if let Some(config) = &global.config {
+        serve_args.push("--config".into());
+        serve_args.push(config.clone().into_os_string());
+    }
+    if let Some(host) = &global.host {
+        serve_args.push("--host".into());
+        serve_args.push(host.into());
+    }
+    let options = alkahest_desktop::LaunchOptions {
+        server_url: client.base_url().to_string(),
+        api_key: std::env::var(alkahest_client::API_KEY_ENV).ok(),
+        settings_file: Some(loaded.paths.config_dir.join("desktop.toml")),
+        serve_program: std::env::current_exe().ok(),
+        serve_args,
+        smoke_test: args.smoke_test,
+    };
+    alkahest_desktop::run(options)?;
+    Ok(ExitCode::SUCCESS)
 }
 
-/// `alkahest desktop` in a build without the `desktop` feature.
+/// `alkahest desktop` in a build without the `desktop` feature: explains how to get the app
+/// and exits 2 (ALK-SP-0008.R1).
 #[cfg(not(feature = "desktop"))]
-fn desktop() -> Result<ExitCode> {
+fn desktop(_args: &cli::DesktopArgs, _global: &GlobalArgs, _loaded: &Loaded) -> Result<ExitCode> {
     eprintln!(
         "alkahest desktop: this build has no desktop app; \
          rebuild with `cargo build --features desktop` or install the desktop package"
     );
-    Ok(ExitCode::FAILURE)
+    Ok(ExitCode::from(EXIT_NOT_IMPLEMENTED))
 }
 
 /// `alkahest config show|path`.

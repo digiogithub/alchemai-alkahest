@@ -93,6 +93,15 @@ pub struct SearchArgs {
     pub limit: u32,
 }
 
+/// Arguments of `alkahest desktop`.
+#[derive(Debug, Args)]
+pub struct DesktopArgs {
+    /// Open the window, wait for the first frame to be rendered, then exit with status 0
+    /// (used by CI; fails with status 3 when no frame arrives within 30 s).
+    #[arg(long)]
+    pub smoke_test: bool,
+}
+
 /// Arguments of `alkahest run`.
 #[derive(Debug, Args)]
 pub struct RunArgs {
@@ -213,7 +222,7 @@ pub enum Command {
         allow_unauthenticated: bool,
     },
     /// Open the desktop app (needs a build with the `desktop` feature).
-    Desktop,
+    Desktop(DesktopArgs),
     /// Manage the Hugging Face token (`login`, `logout`, `whoami`).
     Hf {
         /// Hugging Face action.
@@ -414,7 +423,6 @@ impl Command {
             Self::Search(_) => "ALK-US-0021",
             Self::Ls | Self::Show(_) => "ALK-US-0012",
             Self::Rm { .. } | Self::Cp { .. } | Self::Gc { .. } => "ALK-US-0013",
-            Self::Desktop => "ALK-US-0064",
             Self::Service { .. } => "ALK-US-0045",
             Self::Pull { .. }
             | Self::Run(_)
@@ -426,7 +434,8 @@ impl Command {
             | Self::Serve { .. }
             | Self::Keys { .. }
             | Self::Engines { .. }
-            | Self::Hf { .. } => {
+            | Self::Hf { .. }
+            | Self::Desktop(_) => {
                 return None;
             }
         })
@@ -446,7 +455,7 @@ impl Command {
             Self::Run(_) => "run",
             Self::Stop { .. } => "stop",
             Self::Serve { .. } => "serve",
-            Self::Desktop => "desktop",
+            Self::Desktop(_) => "desktop",
             Self::Hf { .. } => "hf",
             Self::Keys { .. } => "keys",
             Self::Engines { .. } => "engines",

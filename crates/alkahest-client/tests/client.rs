@@ -136,3 +136,52 @@ async fn chat_streams_ndjson() {
     assert!(last.done);
     assert_eq!(last.stats.eval_count, 2);
 }
+
+#[tokio::test]
+async fn events_stream_decodes_status_snapshots() {
+    let server = MockServer::start().await;
+    let body = concat!(
+        ": keep-alive\n\n",
+        "event: status\n",
+        "data: {\"models\":[{\"name\":\"qwen3:8b\",\"state\":\"ready\",\"engine\":\"llama-cpp\",",
+        "\"processor_label\":\"100% GPU\",\"future\":1}],\"queued\":2,\"max_queue\":512}\n\n",
+        "event: status\r\n",
+        "data: {\"models\":[],\"queued\":0}\r\n\r\n",
+    );
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/events"))
+        .and(header("accept", "text/event-stream"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    let events: Vec<_> = c.events().await.unwrap().collect().await;
+    assert_eq!(events.len(), 2);
+    let first = events[0].as_ref().unwrap().status().unwrap().unwrap();
+    assert_eq!(first.models[0].name, "qwen3:8b");
+    assert_eq!(first.models[0].state, "ready");
+    assert_eq!(first.queued, 2);
+    let second = events[1].as_ref().unwrap().status().unwrap().unwrap();
+    assert!(second.models.is_empty());
+}
+
+#[tokio::test]
+async fn runtime_status_and_unauthorized_events() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/ps"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"models": [], "loads_total": 3})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/events"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({"error": "admin scope"})))
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    assert_eq!(c.runtime_status().await.unwrap().loads_total, 3);
+    let err = c.events().await.err().unwrap();
+    assert!(matches!(err, ClientError::Api { status: 401, .. }), "{err}");
+}

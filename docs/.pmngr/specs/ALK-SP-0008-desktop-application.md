@@ -5,12 +5,37 @@ title: Desktop application
 status: backlog
 labels: [desktop]
 created: 2026-10-16T22:37:38Z
-updated: 2026-10-16T22:37:38Z
+updated: 2026-10-17T02:44:07Z
 requirements:
   R1:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest/src/main.rs#desktop
+        - crates/alkahest-desktop/src/app.rs#run
+        - crates/alkahest-desktop/src/views/shell.rs#Shell
+        - crates/alkahest-desktop/src/ui/mod.rs#open_main_window
+      tests:
+        - crates/alkahest/tests/cli.rs#headless_build
+        - crates/alkahest-desktop/src/ui/mod.rs#only_ui_names_gpui_kit
+        - crates/alkahest-desktop/src/nav.rs#rail_lists_the_five_designed_screens_in_order
+        - xtask/src/tokens.rs#alembic_tokens_pass_the_contrast_rules
   R2:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-desktop/src/connection.rs#Machine
+        - crates/alkahest-desktop/src/connection.rs#ConnectionManager
+        - crates/alkahest-desktop/src/launcher.rs#LocalLauncher
+        - crates/alkahest-desktop/src/settings.rs#DesktopSettings
+        - crates/alkahest-client/src/lib.rs#Client::events
+        - crates/alkahest-desktop/src/views/shell.rs#Shell::apply
+      tests:
+        - crates/alkahest-desktop/src/connection.rs#no_server
+        - crates/alkahest-desktop/src/connection.rs#starting_polls_until_healthy_or_deadline
+        - crates/alkahest-desktop/src/connection.rs#a_failed_launch_is_reported_and_retry_probes_again
+        - crates/alkahest-desktop/src/launcher.rs#spawns_a_detached_serve_child
+        - crates/alkahest-client/tests/client.rs#events_stream_decodes_status_snapshots
   R3:
     status: backlog
   R4:

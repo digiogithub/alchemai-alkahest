@@ -2,14 +2,15 @@
 id: ALK-US-0066
 type: story
 title: Models view
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0013
 milestone: ALK-M-0005
 labels: [desktop]
 estimate: 5
 created: 2026-10-16T22:42:53Z
-updated: 2026-10-16T22:52:08Z
+updated: 2026-10-17T02:48:23Z
+started: 2026-10-17T02:48:23Z
 links:
   - { kind: implements, target: ALK-SP-0008.R3 }
 ---

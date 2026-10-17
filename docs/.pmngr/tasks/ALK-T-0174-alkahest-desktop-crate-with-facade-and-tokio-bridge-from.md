@@ -2,14 +2,15 @@
 id: ALK-T-0174
 type: task
 title: alkahest-desktop crate with facade and tokio bridge (from Bitacora)
-status: backlog
+status: done
 priority: critical
 parent: ALK-US-0064
 milestone: ALK-M-0005
 labels: [desktop]
 effort: 3
 created: 2026-10-16T22:42:44Z
-updated: 2026-10-16T22:42:44Z
+updated: 2026-10-17T02:33:48Z
+closed: 2026-10-17T02:33:48Z
 ---
 
 ## Description
