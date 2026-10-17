@@ -71,7 +71,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
     }
 
     // Only the long-running server writes log files; short commands stay on stderr.
-    let is_serve = matches!(cli.command, Command::Serve);
+    let is_serve = matches!(cli.command, Command::Serve { .. });
     let _log_guard = logging::init(
         &loaded.config.logging,
         &loaded.config.resolve_paths(&loaded.paths).log_dir,
@@ -104,7 +104,9 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             force,
         } => pull_cmd::run(model, *insecure, *force, &loaded, cli.global.json),
         Command::Engines { action } => engines_cmd::run(action, &loaded, cli.global.json),
-        Command::Serve => serve_cmd::run(&loaded),
+        Command::Serve {
+            allow_unauthenticated,
+        } => serve_cmd::run(&loaded, *allow_unauthenticated),
         Command::Keys { action } => keys_cmd::run(action, &loaded, cli.global.json),
         Command::Desktop => desktop(),
         other => Ok(not_implemented(other)),

@@ -11,6 +11,9 @@ use std::sync::Arc;
 
 use axum::http::Extensions;
 
+use crate::dialect::{DefaultErrorRenderer, ErrorRenderer};
+use crate::keys::KeyVerifier;
+
 /// Static facts about the running server, reported by `/api/version`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerInfo {
@@ -35,6 +38,8 @@ pub struct AppState {
 struct Inner {
     info: ServerInfo,
     services: Extensions,
+    keys: Option<Arc<dyn KeyVerifier>>,
+    errors: Arc<dyn ErrorRenderer>,
 }
 
 impl fmt::Debug for AppState {
@@ -42,6 +47,7 @@ impl fmt::Debug for AppState {
         f.debug_struct("AppState")
             .field("info", &self.inner.info)
             .field("services", &self.inner.services.len())
+            .field("keys", &self.inner.keys.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -52,7 +58,20 @@ impl AppState {
         AppStateBuilder {
             info,
             services: Extensions::new(),
+            keys: None,
+            errors: Arc::new(DefaultErrorRenderer),
         }
+    }
+
+    /// The API key verifier. `None` means no key can ever be valid (remote access is
+    /// refused unless the operator disabled key checks).
+    pub fn keys(&self) -> Option<Arc<dyn KeyVerifier>> {
+        self.inner.keys.clone()
+    }
+
+    /// The renderer for middleware-generated errors.
+    pub fn errors(&self) -> Arc<dyn ErrorRenderer> {
+        self.inner.errors.clone()
     }
 
     /// Server facts.
@@ -70,6 +89,8 @@ impl AppState {
 pub struct AppStateBuilder {
     info: ServerInfo,
     services: Extensions,
+    keys: Option<Arc<dyn KeyVerifier>>,
+    errors: Arc<dyn ErrorRenderer>,
 }
 
 impl fmt::Debug for AppStateBuilder {
@@ -90,12 +111,26 @@ impl AppStateBuilder {
         self
     }
 
+    /// Sets the API key verifier used by the authentication middleware.
+    pub fn key_verifier(mut self, verifier: Arc<dyn KeyVerifier>) -> Self {
+        self.keys = Some(verifier);
+        self
+    }
+
+    /// Replaces the renderer of middleware errors (401, 403, 404 in the endpoint dialect).
+    pub fn error_renderer(mut self, renderer: Arc<dyn ErrorRenderer>) -> Self {
+        self.errors = renderer;
+        self
+    }
+
     /// Finishes the state.
     pub fn build(self) -> AppState {
         AppState {
             inner: Arc::new(Inner {
                 info: self.info,
                 services: self.services,
+                keys: self.keys,
+                errors: self.errors,
             }),
         }
     }

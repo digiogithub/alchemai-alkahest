@@ -61,3 +61,33 @@ async fn serve_binds_the_host_flag_and_answers_version() {
         .collect();
     assert!(!logs.is_empty(), "no log file written");
 }
+
+/// Waits for a server that is expected to refuse to start; returns its stderr.
+fn refused(mut child: Child) -> String {
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(1));
+    let mut stderr = String::new();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
+    stderr
+}
+
+#[test]
+fn startup_refusal_without_keys_on_a_network_bind() {
+    // Fails before binding, so the wildcard address is never actually opened.
+    let home = tempfile::tempdir().unwrap();
+    let stderr = refused(spawn_serve(home.path(), &["--host", "0.0.0.0:1"]));
+    assert!(stderr.contains("no active API keys"), "{stderr}");
+}
+
+#[test]
+fn startup_refusal_when_remote_keys_are_disabled() {
+    let home = tempfile::tempdir().unwrap();
+    let config = home.path().join("open.toml");
+    std::fs::write(&config, "[auth]\nrequire_key_for_remote = false\n").unwrap();
+    let config = config.to_string_lossy().into_owned();
+    let stderr = refused(spawn_serve(
+        home.path(),
+        &["--host", "0.0.0.0:1", "--config", &config],
+    ));
+    assert!(stderr.contains("--allow-unauthenticated"), "{stderr}");
+}

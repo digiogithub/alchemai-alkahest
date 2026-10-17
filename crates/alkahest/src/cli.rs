@@ -177,7 +177,12 @@ pub enum Command {
         model: String,
     },
     /// Start the API server.
-    Serve,
+    Serve {
+        /// Start on a non-loopback address even though remote clients would not need a key
+        /// (`auth.require_key_for_remote = false`) or no API key exists yet.
+        #[arg(long)]
+        allow_unauthenticated: bool,
+    },
     /// Open the desktop app (needs a build with the `desktop` feature).
     Desktop,
     /// Manage the Hugging Face token (`login`, `logout`, `whoami`).
@@ -340,7 +345,7 @@ impl Command {
             | Self::Config { .. }
             | Self::Completions { .. }
             | Self::Sysinfo
-            | Self::Serve
+            | Self::Serve { .. }
             | Self::Keys { .. }
             | Self::Engines { .. }
             | Self::Hf { .. } => {
@@ -362,7 +367,7 @@ impl Command {
             Self::Cp { .. } => "cp",
             Self::Run { .. } => "run",
             Self::Stop { .. } => "stop",
-            Self::Serve => "serve",
+            Self::Serve { .. } => "serve",
             Self::Desktop => "desktop",
             Self::Hf { .. } => "hf",
             Self::Keys { .. } => "keys",
