@@ -86,3 +86,11 @@ engines listing with origin layer, native and dependency fields plus
   11 ↔ 11b and 16 ↔ 16b present).
 - Canvas publish accepted on the first try; the read-back of all 13 canvas
   files matched the local copies.
+
+## Product owner review (2026-10-17)
+
+Design approved ("adelante con la implementación"). Open questions settled with the
+orchestrator's recommendations: no catalog reordering in v1 (new catalogs go last); Discover
+"All" lists catalog rows first, as the CLI; removing a private catalog asks in the dialog whether
+to delete its keyring token; catalog actions apply immediately (no Save). The backend gaps became
+[[ALK-US-0124]], implemented before the desktop phase of [[ALK-US-0122]].
