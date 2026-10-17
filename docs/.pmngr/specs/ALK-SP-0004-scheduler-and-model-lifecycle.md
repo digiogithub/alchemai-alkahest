@@ -5,7 +5,7 @@ title: Scheduler and model lifecycle
 status: backlog
 labels: [sched]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-16T23:19:26Z
+updated: 2026-10-17T00:17:43Z
 requirements:
   R1:
     status: backlog
@@ -23,6 +23,15 @@ requirements:
     status: backlog
   R6:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-engine/src/supervisor/mod.rs#EngineHandle
+        - crates/alkahest-engine/src/supervisor/mod.rs#ExitInfo
+        - crates/alkahest-engine/src/supervisor/restart.rs#RestartTracker
+      tests:
+        - crates/alkahest-engine/tests/supervisor.rs#crash
+        - crates/alkahest-engine/tests/supervisor.rs#killed_engine_is_detected
+        - crates/alkahest-engine/tests/supervisor.rs#exit_before_ready_reports_status_and_stderr
   R7:
     status: backlog
 ---

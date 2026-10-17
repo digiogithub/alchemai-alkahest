@@ -2,14 +2,15 @@
 id: ALK-US-0028
 type: story
 title: On-demand load and keep-alive
-status: backlog
+status: in_progress
 priority: critical
 parent: ALK-EP-0006
 milestone: ALK-M-0003
 labels: [sched]
 estimate: 5
 created: 2026-10-16T22:40:09Z
-updated: 2026-10-16T22:40:14Z
+updated: 2026-10-17T00:19:24Z
+started: 2026-10-17T00:19:24Z
 links:
   - { kind: implements, target: ALK-SP-0004.R1 }
   - { kind: implements, target: ALK-SP-0004.R2 }
