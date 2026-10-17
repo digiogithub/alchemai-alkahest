@@ -7,6 +7,7 @@ use crate::builtin::builtin_engines;
 use crate::engine::Engine;
 use crate::error::{EngineError, Result};
 use crate::id::EngineId;
+use crate::install::EngineInstaller;
 use crate::launch::{LaunchRequest, LaunchSpec};
 use crate::locator::{EngineInstall, EngineLocator, LocateQuery};
 use crate::select::{EngineChoice, Platform, select_engine};
@@ -47,6 +48,7 @@ impl EnginePlan {
 pub struct EngineRegistry {
     engines: BTreeMap<EngineId, Arc<dyn Engine>>,
     locator: Arc<dyn EngineLocator>,
+    auto_install: Option<Arc<dyn EngineInstaller>>,
 }
 
 impl EngineRegistry {
@@ -55,7 +57,40 @@ impl EngineRegistry {
         Self {
             engines: BTreeMap::new(),
             locator,
+            auto_install: None,
         }
+    }
+
+    /// The registry the server uses: built-in engines over [`crate::FsLocator::from_config`],
+    /// with first-use installation when `engines.auto_install` is set (default off).
+    pub fn from_config(
+        config: &alkahest_core::config::Config,
+        paths: &alkahest_core::config::ResolvedPaths,
+    ) -> Self {
+        let locator = Arc::new(crate::locator::FsLocator::from_config(config, paths));
+        let mut r = Self::with_builtin_engines(locator);
+        if config.engines.auto_install {
+            let fetch = alkahest_fetch::FetchConfig {
+                max_bytes_per_sec: config.pull.bandwidth_cap(),
+                ..alkahest_fetch::FetchConfig::default()
+            };
+            r.auto_install = Some(Arc::new(crate::install::RecipeInstaller::new(
+                paths.engines_dir.clone(),
+                fetch,
+            )));
+        }
+        r
+    }
+
+    /// Installs missing engines through `installer` in [`EngineRegistry::plan_or_install`].
+    pub fn with_auto_install(mut self, installer: Arc<dyn EngineInstaller>) -> Self {
+        self.auto_install = Some(installer);
+        self
+    }
+
+    /// Whether a missing engine would be installed on first use.
+    pub fn auto_install_enabled(&self) -> bool {
+        self.auto_install.is_some()
     }
 
     /// A registry holding the built-in baseline engines (one per [`EngineId`]).
@@ -125,6 +160,27 @@ impl EngineRegistry {
     /// Applies the selection rule (ALK-SP-0003.R2) to `req`; see [`select_engine`].
     pub fn select(&self, req: &LaunchRequest, platform: &Platform) -> Result<EngineChoice> {
         select_engine(req, platform)
+    }
+
+    /// [`EngineRegistry::plan`], installing the engine first when it is missing and
+    /// auto-install is enabled (ALK-T-0222). Without an installer this is `plan`.
+    pub async fn plan_or_install(
+        &self,
+        req: &LaunchRequest,
+        platform: &Platform,
+    ) -> Result<EnginePlan> {
+        match self.plan(req, platform) {
+            Err(EngineError::NotInstalled { engine, pin, .. })
+                if pin.is_none() && self.auto_install.is_some() =>
+            {
+                let Some(installer) = &self.auto_install else {
+                    return self.plan(req, platform);
+                };
+                installer.install(engine).await?;
+                self.plan(req, platform)
+            }
+            other => other,
+        }
     }
 
     /// Selects the engine for `req`, checks it can load the model and finds its binary.

@@ -35,11 +35,14 @@ dependencies = [
  "alkahest-api",
  "alkahest-core",
  "alkahest-desktop",
+ "alkahest-engine",
  "alkahest-fetch",
+ "alkahest-gguf",
  "alkahest-hf",
  "alkahest-ollama",
  "alkahest-pull",
  "alkahest-recipes",
+ "alkahest-sched",
  "alkahest-store",
  "alkahest-sysinfo",
  "anyhow",
@@ -114,10 +117,13 @@ name = "alkahest-engine"
 version = "0.1.0"
 dependencies = [
  "alkahest-core",
+ "alkahest-fetch",
  "alkahest-gguf",
+ "alkahest-recipes",
  "alkahest-store",
  "alkahest-sysinfo",
  "parking_lot",
+ "reqwest",
  "rustix",
  "serde",
  "serde_json",
@@ -125,6 +131,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
