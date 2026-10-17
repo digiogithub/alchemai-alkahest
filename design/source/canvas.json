@@ -1,5 +1,4 @@
 {
-  "v": 3,
   "attachments": {},
   "boards": {
     "ApiKeys.dc.html": {
@@ -24,6 +23,14 @@
       "w": 1440,
       "x": 1520,
       "y": 2140
+    },
+    "Engines.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "Engines",
+      "w": 1440,
+      "x": 0,
+      "y": 3460
     },
     "Library.dc.html": {
       "expand": "fill",
@@ -55,6 +62,21 @@
       "w": 1440,
       "x": 4560,
       "y": 2140
+    },
+    "Settings.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "title": "Settings",
+      "w": 1440,
+      "x": 1520,
+      "y": 3460
+    },
+    "States.dc.html": {
+      "h": 3100,
+      "title": "States & confirmations",
+      "w": 1440,
+      "x": 3040,
+      "y": 3460
     }
   },
   "createdOnFiles": {
@@ -69,7 +91,7 @@
     "app": {
       "kind": "title1",
       "maxW": 7520,
-      "text": "alkahest desktop — screens",
+      "text": "alkahest desktop \u2014 screens",
       "w": 240,
       "x": 0,
       "y": 1880
@@ -81,6 +103,14 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "more": {
+      "kind": "title1",
+      "maxW": 4480,
+      "text": "Engines, settings & app states",
+      "w": 240,
+      "x": 0,
+      "y": 3160
     }
   },
   "order": [
@@ -90,8 +120,12 @@
     "Discover.dc.html",
     "ModelSettings.dc.html",
     "Running.dc.html",
-    "ApiKeys.dc.html"
+    "ApiKeys.dc.html",
+    "Engines.dc.html",
+    "Settings.dc.html",
+    "States.dc.html"
   ],
   "pages": [],
-  "title": "Alkahest Desktop Design"
+  "title": "Alkahest Desktop Design",
+  "v": 3
 }

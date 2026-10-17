@@ -5,7 +5,7 @@ title: Desktop application
 status: backlog
 labels: [desktop]
 created: 2026-10-16T22:37:38Z
-updated: 2026-10-17T03:19:01Z
+updated: 2026-10-17T03:27:50Z
 requirements:
   R1:
     status: backlog
@@ -56,6 +56,18 @@ requirements:
     status: backlog
   R6:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-desktop/src/running.rs#cards
+        - crates/alkahest-desktop/src/running.rs#tiles
+        - crates/alkahest-desktop/src/views/running.rs#RunningView
+        - crates/alkahest-desktop/src/connection.rs#RUNTIME_POLL
+        - crates/alkahest-client/src/lib.rs#RuntimeModel
+      tests:
+        - crates/alkahest-desktop/src/running.rs#activity
+        - crates/alkahest-desktop/src/connection.rs#runtime_is_polled_every_two_seconds_while_connected
+        - crates/alkahest-desktop/src/views/running.rs#live_snapshot_renders_cards_and_stop_all_asks_first
+        - crates/alkahest-client/tests/library.rs#runtime_status_reads_the_full_snapshot
   R7:
     status: backlog
 ---

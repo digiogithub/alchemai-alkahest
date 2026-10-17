@@ -54,7 +54,7 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
     tokio_bridge::init(cx)?;
     let settings = load_settings(options);
     Theme::install(cx, settings.theme, cx.window_appearance());
-    let (server_url, connection) = start_connection(cx, options, &settings)?;
+    let (server_url, connection, client) = start_connection(cx, options, &settings)?;
 
     let bounds = Bounds::centered(
         None,
@@ -80,7 +80,7 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
             commands,
             snapshots,
         } = connection;
-        let shell = cx.new(|_| Shell::new(&url_for_shell, commands));
+        let shell = cx.new(|cx| Shell::new(&url_for_shell, commands, client, window, cx));
         Shell::follow(&shell, snapshots, cx);
         shell
     })
@@ -137,12 +137,13 @@ fn load_settings(options: &LaunchOptions) -> DesktopSettings {
 }
 
 /// Builds the client for the effective server and starts the connection manager on the tokio
-/// runtime. It stops by itself when the window (holding the handle) goes away.
+/// runtime. It stops by itself when the window (holding the handle) goes away. The client is
+/// returned too: the screens send their own requests (model list, actions) with it.
 fn start_connection(
     cx: &mut App,
     options: &LaunchOptions,
     settings: &DesktopSettings,
-) -> Result<(String, ConnectionHandle), DesktopError> {
+) -> Result<(String, ConnectionHandle, Client), DesktopError> {
     let server_url = settings
         .effective_server_url(&options.server_url)
         .to_string();
@@ -162,7 +163,7 @@ fn start_connection(
         .filter(|_| is_local_url(&server_url))
         .map(|program| LocalLauncher::new(program, options.serve_args.clone()));
     let url = client.base_url().to_string();
-    let (manager, handle) = ConnectionManager::new(client, launcher, url.clone());
+    let (manager, handle) = ConnectionManager::new(client.clone(), launcher, url.clone());
     tokio_bridge::handle(cx).spawn(manager.run());
-    Ok((url, handle))
+    Ok((url, handle, client))
 }

@@ -17,7 +17,11 @@
 
 pub mod connection;
 pub mod launcher;
+pub mod library;
 pub mod nav;
+pub mod ops;
+pub mod present;
+pub mod running;
 pub mod settings;
 pub mod theme;
 

@@ -2,14 +2,15 @@
 id: ALK-US-0057
 type: story
 title: Speech-to-text with whisper.cpp
-status: backlog
+status: in_progress
 priority: medium
 parent: ALK-EP-0011
 milestone: ALK-M-0004
 labels: [engine, audio]
 estimate: 5
 created: 2026-10-16T22:42:15Z
-updated: 2026-10-16T22:42:18Z
+updated: 2026-10-17T03:43:56Z
+started: 2026-10-17T03:43:56Z
 links:
   - { kind: implements, target: ALK-SP-0005.R4 }
 ---
