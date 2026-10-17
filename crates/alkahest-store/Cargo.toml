@@ -28,3 +28,4 @@ tracing.workspace = true
 [dev-dependencies]
 alkahest-hf.workspace = true
 proptest.workspace = true
+tracing-subscriber.workspace = true

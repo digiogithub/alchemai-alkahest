@@ -118,6 +118,15 @@ impl PullService {
         let scoped: ScopedRef = reference.parse().map_err(|e| {
             PullError::InvalidReference(format!("invalid model reference `{reference}`: {e}"))
         })?;
+        // Ollama cloud models have no weights to pull and are not supported (ALK-US-0126).
+        if let ModelRef::Name { name, .. } = &scoped.reference
+            && name.is_ollama_cloud()
+        {
+            let e = alkahest_store::StoreError::CloudModel {
+                reference: name.display_short(),
+            };
+            return Err(PullError::NotFound(e.to_string()));
+        }
         let store = AlkahestStore::open_resolved(&self.paths)
             .map_err(|e| PullError::Failed(format!("opening the model store: {e}")))?;
         let fetch = FetchConfig {

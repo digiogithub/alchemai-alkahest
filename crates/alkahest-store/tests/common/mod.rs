@@ -10,6 +10,11 @@ use alkahest_store::{
     AlkahestStore, Descriptor, Digest, Manifest, ModelName, ModelRef, media_type,
 };
 
+/// Config blob of an Ollama cloud model, in the shape current Ollama writes (its `ConfigV2`
+/// field order, `"model_families": null`): the document whose strict parse failed with
+/// "invalid type: null, expected a sequence at line 1 column 58" before ALK-US-0126.
+pub const CLOUD_CONFIG: &str = r#"{"model_format":"","model_family":"","model_families":null,"model_type":"","file_type":"","renderer":"glm-4.7","parser":"glm-4.7","remote_host":"https://ollama.com:443","remote_model":"glm-5.1","capabilities":["completion","tools","thinking"],"context_length":202752,"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":null}}"#;
+
 fn s(out: &mut Vec<u8>, v: &str) {
     out.extend((v.len() as u64).to_le_bytes());
     out.extend(v.as_bytes());
@@ -115,12 +120,10 @@ impl OllamaFx {
         Digest::of(&bytes)
     }
 
-    /// A cloud model: config with `remote_host`, `"layers": null`.
+    /// A cloud model as current Ollama writes it: `"layers": null` and a config with
+    /// `remote_host` and `null` lists (ALK-US-0126).
     pub fn add_cloud(&self, rel: &str) {
-        let config = self.layer(
-            media_type::CONFIG,
-            br#"{"model_format":"","remote_host":"https://ollama.com:443","remote_model":"glm"}"#,
-        );
+        let config = self.layer(media_type::CONFIG, CLOUD_CONFIG.as_bytes());
         let bytes = serde_json::to_vec(&serde_json::json!({
             "schemaVersion": 2,
             "mediaType": media_type::MANIFEST_V2,

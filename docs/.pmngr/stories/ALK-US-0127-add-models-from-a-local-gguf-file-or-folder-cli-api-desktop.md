@@ -2,7 +2,7 @@
 id: ALK-US-0127
 type: story
 title: Add models from a local GGUF file or folder (CLI, API, desktop)
-status: backlog
+status: in_progress
 priority: high
 parent: ALK-EP-0004
 milestone: ALK-M-0006
@@ -10,7 +10,13 @@ author: mcp
 labels: [models, store, cli, desktop, api]
 estimate: 8
 created: 2026-10-17T22:55:11Z
-updated: 2026-10-17T22:55:11Z
+updated: 2026-10-17T23:09:53Z
+started: 2026-10-17T23:04:24Z
+links:
+  - { kind: implements, target: ALK-SP-0002.R7 }
+  - { kind: implements, target: ALK-SP-0002.R8 }
+  - { kind: implements, target: ALK-SP-0002.R9 }
+  - { kind: implements, target: ALK-SP-0002.R10 }
 ---
 
 ## Description

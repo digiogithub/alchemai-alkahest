@@ -5,7 +5,7 @@ title: Model store and Ollama compatibility
 status: backlog
 labels: [store]
 created: 2026-10-16T22:37:32Z
-updated: 2026-10-16T23:49:21Z
+updated: 2026-10-17T23:14:44Z
 requirements:
   R1:
     status: backlog
@@ -29,6 +29,10 @@ requirements:
       code:
         - crates/alkahest-store/src/ollama.rs#OllamaStore
         - crates/alkahest-store/src/catalog.rs#Catalog
+        - crates/alkahest-store/src/source.rs#ModelEntry
+        - crates/alkahest-store/src/reference.rs#ModelName::is_ollama_cloud
+        - crates/alkahest-store/src/error.rs#StoreError::CloudModel
+        - crates/alkahest-api/src/pull.rs#PullService::pull
       tests:
         - crates/alkahest-store/tests/ollama_store.rs#ollama_model_is_listed
         - crates/alkahest-store/tests/ollama_store.rs#delete_refuses_ollama_model
@@ -40,6 +44,14 @@ requirements:
         - crates/alkahest-store/tests/delete_copy.rs#delete_refuses_ollama_model
         - crates/alkahest/tests/models.rs#rm_refuses_ollama_models
         - crates/alkahest/tests/models.rs#ollama_model_is_listed
+        - crates/alkahest-store/tests/catalog.rs#cloud_model_is_ignored
+        - crates/alkahest-store/tests/ollama_cloud.rs#cloud_model_is_ignored_in_listings
+        - crates/alkahest-store/tests/ollama_cloud.rs#cloud_model_is_ignored_on_run_show_pull
+        - crates/alkahest-store/tests/ollama_cloud.rs#cloud_model_is_ignored_without_warning
+        - crates/alkahest-store/tests/ollama_cloud.rs#cloud_model_is_ignored_and_ollama_store_untouched
+        - crates/alkahest-api/tests/cloud_models.rs#cloud_model_is_ignored_in_api_listings
+        - crates/alkahest-api/tests/cloud_models.rs#cloud_model_show_is_a_clear_404
+        - crates/alkahest-api/tests/cloud_models.rs#cloud_model_pull_is_refused_with_404
   R3:
     status: backlog
     trace:
@@ -101,7 +113,7 @@ The store SHALL keep blobs as `blobs/sha256-<hex>` and manifests as Docker distr
 
 ### ALK-SP-0001.R2 — Read-only Ollama store adapter
 
-WHEN an Ollama store exists at `$OLLAMA_MODELS`, `~/.ollama/models` or `/usr/share/ollama/.ollama/models`, the store SHALL expose its models by resolving `manifests-v2/` before legacy `manifests/` (hosts `registry.ollama.ai` and `ollama.com`) and SHALL never create, modify or delete a file inside it.
+WHEN an Ollama store exists at `$OLLAMA_MODELS`, `~/.ollama/models` or `/usr/share/ollama/.ollama/models`, the store SHALL expose its models by resolving `manifests-v2/` before legacy `manifests/` (hosts `registry.ollama.ai` and `ollama.com`) and SHALL never create, modify or delete a file inside it. Ollama cloud models (a `cloud` or `*-cloud` tag, or a config naming `remote_host` / `remote_model`, typically with `"layers": null`) SHALL NOT be listed, SHALL be logged at most once per model and process at debug level, and a reference to one SHALL fail with "Ollama cloud models are not supported by Alkahest" (404 in the API dialects) (ALK-US-0126).
 
 #### Scenario: Ollama model is listed
 - **WHEN** Ollama has `llama3.2:latest` pulled
@@ -110,6 +122,10 @@ WHEN an Ollama store exists at `$OLLAMA_MODELS`, `~/.ollama/models` or `/usr/sha
 #### Scenario: delete refuses Ollama model
 - **WHEN** the user runs `alkahest rm` on an Ollama-sourced model
 - **THEN** the command fails with a message pointing to `ollama rm` and no file changes
+
+#### Scenario: cloud model is ignored
+- **WHEN** the Ollama store holds `glm-5.1:cloud` (manifest `"layers": null`, config with `remote_host` and `"model_families": null`) next to `llama3.2:latest`
+- **THEN** `alkahest ls`, `/api/tags`, `/v1/models` and the admin model list show only `llama3.2:latest`, no warning is logged, `run` / `show` / `pull` of `glm-5.1:cloud` fail with "Ollama cloud models are not supported by Alkahest" (404 in the API) and no file in the Ollama store changes
 
 ### ALK-SP-0001.R3 — Model reference grammar
 

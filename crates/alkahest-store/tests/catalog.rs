@@ -272,30 +272,34 @@ fn detail_reads_text_layers_and_modelfile() {
     assert!(d.template.unwrap().contains("tools"));
 }
 
+/// ALK-US-0126 (supersedes the ALK-US-0082 "marked" behaviour): Ollama cloud models are
+/// not listed, and naming one is a clear `CloudModel` error, never a parse error.
 #[test]
-fn ollama_cloud_models_are_marked_and_not_loadable() {
+fn cloud_model_is_ignored() {
     let w = world();
     let rows = w.catalog.list().unwrap();
-    let cloud = rows
-        .iter()
-        .find(|r| r.entry.name.model() == "glm-5.1")
-        .expect("cloud models stay listed");
-    assert_eq!(cloud.source_label(), "ollama-cloud");
-    assert!(cloud.info.remote && !cloud.info.loadable);
-    let v = serde_json::to_value(cloud.summary()).unwrap();
-    assert_eq!(v["source"], "ollama-cloud");
-    assert_eq!(v["loadable"], false);
+    assert!(
+        rows.iter().all(|r| r.entry.name.model() != "glm-5.1"),
+        "cloud models are not listed"
+    );
+    assert!(rows.iter().all(|r| r.source_label() != "ollama-cloud"));
     // Local models are loadable and keep the plain source.
     let local = w.catalog.resolve("ollama:qwen3:8b").unwrap();
     assert_eq!(local.source_label(), "ollama");
     assert!(local.ensure_loadable().is_ok());
 
-    match w.catalog.resolve_loadable("glm-5.1:cloud") {
-        Err(StoreError::NotLoadable { reason, .. }) => assert!(reason.contains("cloud")),
-        other => panic!("{other:?}"),
+    for input in ["glm-5.1:cloud", "ollama:glm-5.1:cloud"] {
+        for result in [w.catalog.resolve(input), w.catalog.resolve_loadable(input)] {
+            match result {
+                Err(e @ StoreError::CloudModel { .. }) => assert!(
+                    e.to_string()
+                        .contains("Ollama cloud models are not supported by Alkahest"),
+                    "{e}"
+                ),
+                other => panic!("{input}: {other:?}"),
+            }
+        }
     }
-    // Resolving without the loadable requirement still works (for `show`).
-    assert!(w.catalog.resolve("glm-5.1:cloud").is_ok());
 }
 
 #[test]

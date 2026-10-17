@@ -182,7 +182,7 @@ fn copy_from_ollama_copies_blobs_and_never_writes_there() {
 fn cloud_models_cannot_be_copied() {
     let w = world();
     match w.catalog.copy("ollama:glm:cloud", "x") {
-        Err(StoreError::NotLoadable { .. }) => {}
+        Err(StoreError::CloudModel { .. }) => {}
         other => panic!("{other:?}"),
     }
     assert!(w.catalog.alkahest().list_manifests().unwrap().is_empty());
