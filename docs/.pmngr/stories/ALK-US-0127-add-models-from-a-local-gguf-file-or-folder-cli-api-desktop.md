@@ -10,8 +10,13 @@ author: mcp
 labels: [models, store, cli, desktop, api]
 estimate: 8
 created: 2026-10-17T22:55:11Z
-updated: 2026-10-17T23:04:24Z
+updated: 2026-10-17T23:09:53Z
 started: 2026-10-17T23:04:24Z
+links:
+  - { kind: implements, target: ALK-SP-0002.R7 }
+  - { kind: implements, target: ALK-SP-0002.R8 }
+  - { kind: implements, target: ALK-SP-0002.R9 }
+  - { kind: implements, target: ALK-SP-0002.R10 }
 ---
 
 ## Description
