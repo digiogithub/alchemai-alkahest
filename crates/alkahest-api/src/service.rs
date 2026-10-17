@@ -93,7 +93,10 @@ impl HttpError {
 
     /// Maps a scheduler failure, keeping its status (`SchedError::status_code`).
     pub fn from_sched(e: &SchedError) -> Self {
-        if let SchedError::Store(store @ StoreError::ModelNotFound { .. }) = e.root() {
+        if let SchedError::Store(
+            store @ (StoreError::ModelNotFound { .. } | StoreError::CloudModel { .. }),
+        ) = e.root()
+        {
             return Self::from_store(store);
         }
         Self::new(ErrorKind::from_status(e.status_code()), e.to_string())
@@ -105,6 +108,9 @@ impl HttpError {
             return Self::model_not_found_hint(reference, hint);
         }
         let kind = match e {
+            // An unsupported Ollama cloud model is a missing model to every dialect (404),
+            // with the store's explanation instead of "try pulling it first" (ALK-US-0126).
+            StoreError::CloudModel { .. } => ErrorKind::ModelNotFound,
             StoreError::AmbiguousModel { .. }
             | StoreError::NotLoadable { .. }
             | StoreError::InvalidSettings { .. }

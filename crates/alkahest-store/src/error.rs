@@ -98,6 +98,15 @@ pub enum StoreError {
         /// Display names of the matching models.
         candidates: Vec<String>,
     },
+    /// The reference names an Ollama cloud model (`glm-5.1:cloud`), which Alkahest does not
+    /// support (ALK-US-0126). The API answers it as a missing model (404).
+    #[error(
+        "{reference} is an Ollama cloud model; Ollama cloud models are not supported by Alkahest"
+    )]
+    CloudModel {
+        /// The reference as typed.
+        reference: String,
+    },
     /// The model exists but cannot be loaded by an engine (cloud model, missing blobs).
     #[error("{name} cannot be loaded: {reason}")]
     NotLoadable {

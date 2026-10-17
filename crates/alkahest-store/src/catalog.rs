@@ -373,16 +373,17 @@ impl Catalog {
 
     /// Every model once: Alkahest models first win name clashes, newest first. Returns an
     /// error only when the Alkahest store cannot be read; a failing Ollama store is skipped.
+    /// Ollama cloud models are not listed (ALK-US-0126).
     pub fn list(&self) -> Result<Vec<CatalogEntry>> {
         let mut by_name: BTreeMap<String, CatalogEntry> = BTreeMap::new();
-        for e in ModelSource::list(&self.alkahest)? {
+        for e in supported(ModelSource::list(&self.alkahest)?) {
             let key = name_key(&e.name);
             by_name.insert(key, self.enrich(e, Vec::new()));
         }
         if let Some(o) = &self.ollama {
             match ModelSource::list(o) {
                 Ok(entries) => {
-                    for e in entries {
+                    for e in supported(entries) {
                         match by_name.get_mut(&name_key(&e.name)) {
                             Some(hidden_by) => hidden_by.shadows.push(Origin::Ollama),
                             None => {
@@ -404,21 +405,27 @@ impl Catalog {
         Ok(out)
     }
 
-    /// Every model of one store, without merging.
+    /// Every model of one store, without merging; Ollama cloud models are not listed.
     pub fn list_origin(&self, origin: Origin) -> Result<Vec<CatalogEntry>> {
         let Some(src) = self.source(origin) else {
             return Ok(Vec::new());
         };
-        Ok(src
-            .list()?
+        Ok(supported(src.list()?)
             .into_iter()
             .map(|e| self.enrich(e, Vec::new()))
             .collect())
     }
 
     /// Looks `name` up, in the Alkahest store first and then in Ollama's unless `origin`
-    /// restricts the search.
+    /// restricts the search. An Ollama cloud model is [`StoreError::CloudModel`], whether or
+    /// not a store holds it (ALK-US-0126).
     pub fn find(&self, origin: Option<Origin>, name: &ModelName) -> Result<Option<CatalogEntry>> {
+        let cloud = || StoreError::CloudModel {
+            reference: name.display_short(),
+        };
+        if name.is_ollama_cloud() {
+            return Err(cloud());
+        }
         let in_alkahest = origin != Some(Origin::Ollama);
         let in_ollama = origin != Some(Origin::Alkahest);
         let alk = if in_alkahest {
@@ -430,6 +437,14 @@ impl Catalog {
             (Some(o), true) => o.get(name)?,
             _ => None,
         };
+        if alk
+            .as_ref()
+            .or(ollama_entry.as_ref())
+            .is_some_and(ModelEntry::is_remote)
+        {
+            return Err(cloud());
+        }
+        let ollama_entry = ollama_entry.filter(|e| !e.is_remote());
         Ok(match (alk, ollama_entry) {
             (Some(a), o) => {
                 Some(self.enrich(a, o.map(|_| vec![Origin::Ollama]).unwrap_or_default()))
@@ -744,6 +759,12 @@ impl Catalog {
         }
         Ok(d)
     }
+}
+
+/// Drops Ollama cloud models, which Alkahest does not support (ALK-US-0126); the store
+/// already logged each one once at debug level.
+fn supported(entries: Vec<ModelEntry>) -> Vec<ModelEntry> {
+    entries.into_iter().filter(|e| !e.is_remote()).collect()
 }
 
 /// Key under which names are compared: lowercase, like Ollama's lookups.
