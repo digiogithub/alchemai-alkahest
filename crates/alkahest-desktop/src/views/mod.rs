@@ -4,6 +4,7 @@
 pub mod discover;
 pub mod icons;
 pub mod library;
+pub mod model_settings;
 pub mod running;
 pub mod shell;
 pub mod style;

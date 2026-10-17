@@ -82,7 +82,10 @@ pub struct CatalogModel {
     pub family: Option<String>,
     /// Architecture.
     pub architecture: Option<String>,
-    /// Parameter count label (`3.2B`).
+    /// Parameter count label (`3.2B`). The detail route reuses the `parameters` key for the
+    /// model's default parameter map; a non-string value reads as `None` so the detail still
+    /// decodes.
+    #[serde(deserialize_with = "label_or_none")]
     pub parameters: Option<String>,
     /// Trained context length.
     pub context_length: Option<u64>,
@@ -105,6 +108,16 @@ pub struct CatalogModel {
     /// Fields of the detail route and future fields.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+/// A string, or `None` for any other JSON value (see [`CatalogModel::parameters`]).
+fn label_or_none<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<String>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::String(s) => Some(s),
+        _ => None,
+    })
 }
 
 /// One store of the catalog.
@@ -1107,6 +1120,23 @@ mod tests {
     use super::*;
     use wiremock::matchers::{body_json, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// The detail route overwrites `parameters` with the default parameter map; the row must
+    /// still decode, with the template in `extra`.
+    #[test]
+    fn model_detail_with_a_parameter_map_decodes() {
+        let v = json!({
+            "name": "qwen2.5-coder:0.5b", "parameters": {"stop": ["<|im_end|>"]},
+            "template": "{{ .Prompt }}", "template_from_gguf": false,
+            "model_path": "/blobs/sha256-2069"
+        });
+        let m: CatalogModel = serde_json::from_value(v).unwrap();
+        assert_eq!(m.parameters, None);
+        assert_eq!(m.extra["template"], "{{ .Prompt }}");
+        assert_eq!(m.model_path.as_deref(), Some("/blobs/sha256-2069"));
+        let row: CatalogModel = serde_json::from_value(json!({"parameters": "494M"})).unwrap();
+        assert_eq!(row.parameters.as_deref(), Some("494M"));
+    }
 
     #[test]
     fn segments_are_encoded() {

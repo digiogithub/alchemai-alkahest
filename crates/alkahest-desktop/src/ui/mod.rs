@@ -31,9 +31,10 @@ pub use gpui_kit::{Anchor, anchored, deferred};
 /// Typed events between views (a screen asking the shell to navigate).
 pub use gpui_kit::EventEmitter;
 
-/// gpui-kit's single-line text input (the Library filter field).
+/// gpui-kit's text inputs: single line (filters, numbers, the masked token field) and the
+/// multi-line text area (the custom chat template).
 pub mod input {
-    pub use gpui_kit::component::input::{Input, InputEvent, InputState};
+    pub use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 }
 
 /// The colours gpui-kit components (the text input) draw with, taken from the Alembic

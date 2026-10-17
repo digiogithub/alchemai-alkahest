@@ -28,6 +28,7 @@ use crate::ui::{
     svg_icon, v_flex,
 };
 use crate::views::icons;
+use crate::views::model_settings::{ModelSettingsView, SettingsEvent};
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
     ButtonKind, button, column_label, confirm_dialog, format_tag, icon_button, kind_badge,
@@ -79,6 +80,8 @@ pub struct LibraryView {
     search: Entity<InputState>,
     menu: Option<Menu>,
     fetch: Option<Task<()>>,
+    /// Screen 12 while open.
+    settings: Option<Entity<ModelSettingsView>>,
 }
 
 impl std::fmt::Debug for LibraryView {
@@ -112,6 +115,7 @@ impl LibraryView {
             search,
             menu: None,
             fetch: None,
+            settings: None,
         }
     }
 
@@ -148,6 +152,10 @@ impl LibraryView {
         }
         if self.runtime != snapshot.runtime {
             self.runtime = snapshot.runtime.clone();
+        }
+        if let Some(settings) = self.settings.clone() {
+            let loaded = self.is_loaded(settings.read(cx).model_name());
+            settings.update(cx, |view, cx| view.set_loaded(loaded, cx));
         }
         cx.notify();
     }
@@ -588,9 +596,8 @@ impl LibraryView {
                 false,
                 p,
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.state.open_settings(Some(n.clone()));
-                cx.notify();
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_settings(&n, window, cx);
             })),
         );
         let n = name.clone();
@@ -742,72 +749,45 @@ impl LibraryView {
         card.into_any_element()
     }
 
-    /// Screen 12 placeholder: model settings arrive with ALK-US-0069.
-    fn settings_placeholder(&self, name: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
-            .gap(px(space::S4))
-            .child(
-                h_flex()
-                    .gap(px(space::S2))
-                    .type_style(text::SMALL)
-                    .text_color(c(p.text_muted))
-                    .child(
-                        div()
-                            .id("settings-breadcrumb-library")
-                            .cursor_pointer()
-                            .text_color(c(p.accent_text))
-                            .child("Library")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.state.open_settings(None);
-                                cx.notify();
-                            })),
-                    )
-                    .child("/")
-                    .child(
-                        div()
-                            .type_style(text::MONO)
-                            .text_size(px(text::SMALL.size))
-                            .child(SharedString::from(name.to_string())),
-                    ),
-            )
-            .child(
-                div()
-                    .type_style(text::H1)
-                    .child(SharedString::from(name.to_string())),
-            )
-            .child(
-                div()
-                    .type_style(text::SMALL)
-                    .text_color(c(p.text_muted))
-                    .child("Per-model runtime settings arrive with ALK-US-0069 (screen 12)."),
-            )
-            .child(
-                h_flex().child(
-                    button(
-                        "settings-back",
-                        "Back to Library",
-                        ButtonKind::Secondary,
-                        size::CONTROL_SMALL,
-                        false,
-                        p,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.state.open_settings(None);
-                        cx.notify();
-                    })),
-                ),
-            )
-            .into_any_element()
+    /// Opens screen 12 for `name` (the model settings editor).
+    fn open_settings(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(model) = self.state.models().iter().find(|m| m.name == name).cloned() else {
+            return;
+        };
+        let loaded = self.is_loaded(name);
+        let client = self.client.clone();
+        let view = cx.new(|cx| ModelSettingsView::new(client, model, loaded, window, cx));
+        cx.subscribe(&view, |this, _, event: &SettingsEvent, cx| match event {
+            SettingsEvent::Close => {
+                this.state.open_settings(None);
+                this.settings = None;
+                cx.notify();
+            }
+        })
+        .detach();
+        self.state.open_settings(Some(name.to_string()));
+        self.settings = Some(view);
+        cx.notify();
+    }
+
+    /// Whether the live snapshot lists `name` as loaded.
+    fn is_loaded(&self, name: &str) -> bool {
+        self.runtime.as_ref().is_some_and(|r| {
+            r.status
+                .models
+                .iter()
+                .any(|m| crate::present::same_model(&m.name, name))
+        })
     }
 }
 
 impl Render for LibraryView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Theme::get(cx).palette;
-        if let Some(name) = self.state.settings_for().map(str::to_string) {
-            return v_flex()
-                .size_full()
-                .child(self.settings_placeholder(&name, p, cx));
+        if self.state.settings_for().is_some()
+            && let Some(settings) = &self.settings
+        {
+            return v_flex().size_full().child(settings.clone());
         }
         let runtime = self.runtime.as_ref().map(|r| r.status.as_ref());
         let rows = self.state.rows(runtime);

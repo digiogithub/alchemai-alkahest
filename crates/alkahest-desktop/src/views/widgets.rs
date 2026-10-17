@@ -405,3 +405,11 @@ pub fn field_frame(error: bool, p: &Palette) -> Div {
         }))
         .bg(c(p.bg_sidebar))
 }
+
+/// A small muted label above a field.
+pub fn field_label(label: impl Into<SharedString>, p: &Palette) -> Div {
+    div()
+        .type_style(text::SMALL)
+        .text_color(c(p.text_secondary))
+        .child(label.into())
+}

@@ -20,6 +20,7 @@ pub mod discover;
 pub mod downloads;
 pub mod launcher;
 pub mod library;
+pub mod model_settings;
 pub mod nav;
 pub mod ops;
 pub mod present;
