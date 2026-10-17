@@ -66,7 +66,7 @@ async fn mock() -> MockServer {
         .respond_with(|req: &wiremock::Request| {
             let body: Value = req.body_json().unwrap();
             match body["model"].as_str() {
-                Some("m") => ResponseTemplate::new(200)
+                Some("m" | "tiny:latest") => ResponseTemplate::new(200)
                     .set_body_json(json!({"capabilities": ["completion"], "details": {}})),
                 Some("emb") => ResponseTemplate::new(200)
                     .set_body_json(json!({"capabilities": ["embedding"], "details": {}})),
@@ -196,4 +196,52 @@ fn stopped_server_gets_guidance_and_nothing_is_started() {
     assert!(stderr.contains("alkahest serve"), "{stderr}");
     // Nothing was started in the background.
     assert!(std::net::TcpStream::connect(&host).is_err());
+}
+
+/// Bytes of a tiny GGUF header (architecture only).
+fn tiny_gguf() -> Vec<u8> {
+    fn s(out: &mut Vec<u8>, v: &str) {
+        out.extend((v.len() as u64).to_le_bytes());
+        out.extend(v.as_bytes());
+    }
+    let mut o = b"GGUF".to_vec();
+    o.extend(3u32.to_le_bytes());
+    o.extend(0u64.to_le_bytes());
+    o.extend(1u64.to_le_bytes());
+    s(&mut o, "general.architecture");
+    o.extend(8u32.to_le_bytes());
+    s(&mut o, "llama");
+    while !o.len().is_multiple_of(32) {
+        o.push(0);
+    }
+    o
+}
+
+/// Scenario "run a gguf path" (ALK-SP-0002.R10): the file is imported in link mode as `tiny`
+/// and the prompt goes to that model; a second run reuses the import.
+#[tokio::test(flavor = "multi_thread")]
+async fn run_a_gguf_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = mock().await;
+    let file = tmp.path().join("tiny.gguf");
+    std::fs::write(&file, tiny_gguf()).unwrap();
+    let home = tmp.path().join("home");
+    for round in 0..2 {
+        let out = run(
+            &home,
+            &host_of(&server),
+            &[file.to_str().unwrap(), "hi"],
+            "",
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{stderr}");
+        assert_eq!(
+            stderr.contains("imported"),
+            round == 0,
+            "round {round}: {stderr}"
+        );
+    }
+    let bodies = generate_bodies(&server).await;
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0]["model"], "tiny:latest");
 }

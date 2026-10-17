@@ -110,11 +110,14 @@ impl LaunchRequest {
                 .ok_or_else(|| EngineError::MissingModelPath {
                     model: model.clone(),
                 })?;
-        // A safetensors snapshot is loaded as a directory. Pull builds it; a model copied
-        // with `cp` or restored without it gets it rebuilt here (symlinks inside the
-        // Alkahest store only).
-        if entry.entry.is_snapshot() && !model_path.join("config.json").exists() {
-            ensure_snapshot(&entry.entry, &model_path)?;
+        // A safetensors snapshot is loaded as a directory, a split GGUF through a directory
+        // of shards named like the original files. Pull and import build it; a model copied
+        // with `cp`, pulled before split views existed or restored without it gets it rebuilt
+        // here (symlinks inside the Alkahest store only).
+        let view_missing = (entry.entry.is_snapshot() && !model_path.join("config.json").exists())
+            || (entry.entry.is_split() && !model_path.exists());
+        if view_missing {
+            ensure_snapshot(&entry.entry)?;
         }
         Ok(Self {
             model,
@@ -144,15 +147,17 @@ impl LaunchRequest {
     }
 }
 
-/// Rebuilds the snapshot directory of a safetensors model in its own store.
-fn ensure_snapshot(entry: &alkahest_store::ModelEntry, dir: &Path) -> Result<()> {
+/// Rebuilds the view directory of a safetensors or split GGUF model in its own store.
+fn ensure_snapshot(entry: &alkahest_store::ModelEntry) -> Result<()> {
     // `<store>/snapshots/<digest>`: the store root is two levels up.
-    let root =
-        dir.parent()
-            .and_then(Path::parent)
-            .ok_or_else(|| EngineError::MissingModelPath {
-                model: entry.name.display_short(),
-            })?;
+    let dir = entry.snapshot_dir();
+    let root = dir
+        .as_deref()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .ok_or_else(|| EngineError::MissingModelPath {
+            model: entry.name.display_short(),
+        })?;
     let store = alkahest_store::AlkahestStore::open(root).map_err(|e| {
         EngineError::SnapshotUnavailable {
             model: entry.name.display_short(),

@@ -55,6 +55,10 @@ pub mod media_type {
     /// Alkahest extension: per-model configuration (engine, context, overrides). Its schema
     /// belongs to the per-model configuration story; the store treats it as opaque JSON.
     pub const ALKAHEST_CONFIG: &str = "application/vnd.alkahest.config.v1+json";
+    /// Alkahest extension: the files of a model imported with `--link`
+    /// ([`crate::import::LinkRecord`]): source path, size and modification time of every
+    /// blob that is a hard or symbolic link to a file outside the store (ALK-SP-0002.R9).
+    pub const ALKAHEST_LINKS: &str = "application/vnd.alkahest.links.v1+json";
     /// Alkahest extension: the VAE of a multi-file diffusion model (Flux, SD3, Wan).
     pub const DIFFUSION_VAE: &str = "application/vnd.alkahest.diffusion.vae.v1";
     /// Alkahest extension: the CLIP-L text encoder of a diffusion model.

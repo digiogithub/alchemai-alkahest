@@ -6,7 +6,7 @@
 //! engine's OpenAI-compatible routes (`/v1/chat/completions`, `/v1/embeddings`) or, for raw
 //! prompts, llama-server's native `/completion`; streams are NDJSON by default.
 
-mod create;
+pub(crate) mod create;
 mod embed;
 mod generate;
 mod models;

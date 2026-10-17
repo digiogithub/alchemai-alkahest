@@ -298,12 +298,12 @@ impl Renderer {
 
 /// A bar style; the templates here are constants, so a parse failure is a programming error
 /// that falls back to the default style instead of panicking.
-fn style(template: &str) -> ProgressStyle {
+pub(crate) fn style(template: &str) -> ProgressStyle {
     ProgressStyle::with_template(template).unwrap_or_else(|_| ProgressStyle::default_bar())
 }
 
 /// Shortens a label to `max` characters, keeping the tail (the quant is at the end).
-fn truncate(label: &str, max: usize) -> String {
+pub(crate) fn truncate(label: &str, max: usize) -> String {
     let n = label.chars().count();
     if n <= max {
         return label.to_string();

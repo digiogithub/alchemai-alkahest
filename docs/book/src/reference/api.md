@@ -125,7 +125,7 @@ configured bind host (DNS rebinding). Admin requests with a body must be
 | Area | Routes |
 |---|---|
 | System | `GET info`, `GET ps` (with an estimated `load_progress` while a model loads, CPU and GPU `utilization`, engine `cpu_percent`), `GET events` (server-sent events: scheduler `status`, `job`, `request` and `catalog` updates), `POST unload`, `POST models/{name}/kill` (SIGKILL a hung engine), `GET requests` (recent inference requests: route, model, key, tokens, duration, status; never content), `GET utilization` |
-| Models | `GET models`, `GET/DELETE models/{name}`, `POST copy`, `GET/PUT/DELETE models/{name}/settings`, `GET models/{name}/recommended`, `GET models/{name}/estimate` (memory estimate; KV cache types f32, f16, bf16, q8_0, q5_1, q5_0, q4_1, q4_0, iq4_nl) |
+| Models | `GET models`, `GET/DELETE models/{name}`, `POST models/import` (see [Local imports](#local-imports)), `POST copy`, `GET/PUT/DELETE models/{name}/settings`, `GET models/{name}/recommended`, `GET models/{name}/estimate` (memory estimate; KV cache types f32, f16, bf16, q8_0, q5_1, q5_0, q4_1, q4_0, iq4_nl) |
 | Downloads | `POST/GET pulls`, `DELETE pulls/{id}`, `GET jobs`, `GET jobs/{id}`, `GET jobs/{id}/log` (output tail, source build log), `POST jobs/{id}/cancel`, `DELETE jobs/{id}` |
 | Discovery | `GET hf/search`, `GET hf/model`, `GET hf/files`, `GET hf/estimate` (memory estimate of a quant before download), `GET/PUT/DELETE hf/token`, `GET ollama/search`, `GET ollama/tags` (tags of a library model), `GET catalog/search` (git catalog model entries, one row per tag: `q`, `catalog`, `limit`) |
 | Catalogs | `GET catalogs`, `POST catalogs`, `PATCH catalogs/{name}`, `DELETE catalogs/{name}`, `POST catalogs/sync`, `POST catalogs/{name}/sync`, `PUT/DELETE catalogs/{name}/token`, `GET catalog/models/{ns}/{model}`; see [Git catalogs](#git-catalogs) |
@@ -133,6 +133,22 @@ configured bind host (DNS rebinding). Admin requests with a body must be
 | Keys | `GET keys`, `POST keys` (the secret is returned once), `DELETE keys/{id}` |
 | Settings | `GET/PUT settings/network`, `GET/PUT settings/server` (`catalog_limits` applies at once) |
 | Logs | `GET logs/engines`, `GET logs/engines/{name}`, `GET logs/server` |
+
+### Local imports
+
+`POST /alkahest/v1/models/import` registers a model from a file or folder **of the server
+machine**, as `alkahest import` does: body `{"path": "/abs/path/model.gguf", "name"?: "mine",
+"link"?: false}`. `path` is an absolute path to a `.gguf` file, a folder with one GGUF model
+(split shards, `mmproj` projector, `Modelfile`) or a Hugging Face safetensors folder. The answer
+is `202 {"job", "created"}` with an `import` job (`200` with the running job when the same path
+is already being imported); its `phase` is `hashing` (link mode) or `copying`, then
+`installing`; `completed`/`total` count bytes over all files; the `result` of a completed job
+is `{"name", "reference", "digest", "format", "mode", "files": [{"path", "digest", "size",
+"how"}], "copied"}`, `how` being `copied`, `present`, `hardlinked` or `symlinked`.
+
+Only keyless loopback callers may use it (the path is read on the server): any other caller,
+even with an admin key, gets `403`. Remote clients upload the bytes instead with
+`POST /api/blobs/:digest` and `POST /api/create`.
 
 ### Git catalogs
 

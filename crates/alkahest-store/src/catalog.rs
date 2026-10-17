@@ -74,9 +74,13 @@ impl CatalogEntry {
     }
 
     /// Fails with [`StoreError::NotLoadable`] unless an engine can load the model. The
-    /// scheduler and `run` call this before they start an engine.
+    /// scheduler and `run` call this before they start an engine. A model imported with
+    /// `--link` also has its linked files re-checked here (ALK-SP-0002.R9), first, so a
+    /// vanished file is named instead of reported as a missing blob.
     pub fn ensure_loadable(&self) -> Result<()> {
-        match self.not_loadable_reason() {
+        let reason =
+            crate::import::linked_files_problem(&self.entry).or_else(|| self.not_loadable_reason());
+        match reason {
             None => Ok(()),
             Some(reason) => Err(StoreError::NotLoadable {
                 name: self.entry.name.display_short(),
@@ -800,6 +804,12 @@ fn rfc3339(t: SystemTime) -> String {
 
 /// A destination that must be a plain model name (`my-llama`, `team/llama:v2`); store
 /// prefixes and digests are refused.
+/// Parses the name a new model (copy, create, import) is stored under: a plain model name or
+/// a Hugging Face reference, never a store-scoped or digest reference.
+pub fn destination_name(destination: &str) -> Result<ModelName> {
+    plain_destination(destination)
+}
+
 fn plain_destination(destination: &str) -> Result<ModelName> {
     match ScopedRef::from_str(destination)? {
         ScopedRef {

@@ -198,7 +198,8 @@ impl SnapshotFacts {
 
 /// The chat template of a snapshot: `chat_template.jinja` / `chat_template.json`, else the
 /// `chat_template` key of `tokenizer_config.json` (a string, or a list of named templates).
-fn chat_template_of(read: impl Fn(&str) -> Option<Vec<u8>>) -> Option<String> {
+/// `read` returns a snapshot file's bytes by name (also used by local folder imports).
+pub fn chat_template_of(read: impl Fn(&str) -> Option<Vec<u8>>) -> Option<String> {
     if let Some(b) = read("chat_template.jinja") {
         return String::from_utf8(b).ok();
     }

@@ -335,20 +335,25 @@ fn uploaded_files(files: &Map<String, Value>) -> Result<(Option<Digest>, Compone
     Ok((main, components))
 }
 
-/// The supported subset of a Modelfile.
+/// The supported subset of a Modelfile (also read by local imports, [`crate::import`]).
 #[derive(Debug, Default, PartialEq)]
-struct Modelfile {
-    from: Option<String>,
-    parameters: Vec<(String, String)>,
-    template: Option<String>,
-    system: Option<String>,
-    license: Vec<String>,
+pub(crate) struct Modelfile {
+    /// `FROM`: a model reference, a blob digest or (local imports) a path.
+    pub(crate) from: Option<String>,
+    /// `PARAMETER` pairs in order, names lower-cased.
+    pub(crate) parameters: Vec<(String, String)>,
+    /// `TEMPLATE`.
+    pub(crate) template: Option<String>,
+    /// `SYSTEM`.
+    pub(crate) system: Option<String>,
+    /// `LICENSE`, one entry per instruction.
+    pub(crate) license: Vec<String>,
 }
 
 /// Parses Modelfile text: one instruction per line (case-insensitive), `#` comments,
 /// values either bare to the end of the line, `"quoted"`, or `"""triple quoted"""` across
 /// lines.
-fn parse_modelfile(text: &str) -> Result<Modelfile, HttpError> {
+pub(crate) fn parse_modelfile(text: &str) -> Result<Modelfile, HttpError> {
     let mut mf = Modelfile::default();
     let mut rest = text;
     while !rest.is_empty() {
@@ -417,7 +422,7 @@ fn parse_modelfile(text: &str) -> Result<Modelfile, HttpError> {
 
 /// Modelfile `PARAMETER` strings as Ollama's params JSON: numbers and booleans typed,
 /// `stop` collected into an array (it may repeat).
-fn parameters_json(params: &[(String, String)]) -> Map<String, Value> {
+pub(crate) fn parameters_json(params: &[(String, String)]) -> Map<String, Value> {
     let mut out = Map::new();
     for (k, v) in params {
         if k == "stop" {

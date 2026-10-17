@@ -45,6 +45,9 @@ pub enum JobKind {
     /// A git catalog sync (one catalog or every enabled one); `completed` / `total` count
     /// files, not bytes.
     CatalogSync,
+    /// A local file or folder imported into the Alkahest store (ALK-SP-0002.R10); bytes
+    /// hashed or copied.
+    Import,
 }
 
 /// Lifecycle of a job.

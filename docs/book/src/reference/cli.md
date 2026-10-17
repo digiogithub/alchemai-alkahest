@@ -34,6 +34,8 @@ Every command accepts these (`serve` binds `--host`, the client commands target 
 | [`rm`](#alkahest-rm) | Delete local models |
 | [`gc`](#alkahest-gc) | Delete blobs no model references and abandoned temporary files |
 | [`show`](#alkahest-show) | Show details of a model |
+| [`create`](#alkahest-create) | Create a model from a Modelfile, a local GGUF file or a model folder |
+| [`import`](#alkahest-import) | Import a local GGUF file or model folder (`create --from <path>` with a default name) |
 | [`cp`](#alkahest-cp) | Copy a model under a new name |
 | [`run`](#alkahest-run) | Chat with a model interactively, or answer one prompt |
 | [`stop`](#alkahest-stop) | Unload a running model |
@@ -209,6 +211,57 @@ Options (besides the global ones):
       --system              Print only the system prompt
 ```
 
+## alkahest create
+
+Create a model from a Modelfile, a local GGUF file or a model folder.
+
+Copies the files into the Alkahest store (or links them with `--link`); the source files are never modified. Without `--from` and `-f`, a `Modelfile` in the current directory is used, like `ollama create`.
+
+```text
+alkahest create [OPTIONS] <NAME>
+```
+
+Arguments:
+
+```text
+  <NAME>
+          Name of the new model (replaced when it exists in the Alkahest store)
+```
+
+Options (besides the global ones):
+
+```text
+      --from <PATH>
+          A `.gguf` file or a model folder to import (split shards, `mmproj` projector, `Modelfile`, or a Hugging Face safetensors folder)
+  -f, --file <MODELFILE>
+          Modelfile to build from, as `ollama create -f`: `FROM ./file.gguf`, `FROM ./folder` (relative to the Modelfile) or `FROM <model>`, plus `TEMPLATE`, `PARAMETER`, `SYSTEM`, `LICENSE`. `--from` replaces its `FROM`
+      --link
+          Register the files where they are instead of copying them: a hard link on the same filesystem, otherwise a symbolic link checked before every load. The files must stay unchanged
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## alkahest import
+
+Import a local GGUF file or model folder (`create --from <path>` with a default name)
+
+```text
+alkahest import [OPTIONS] <PATH>
+```
+
+Arguments:
+
+```text
+  <PATH>  A `.gguf` file or a model folder
+```
+
+Options (besides the global ones):
+
+```text
+      --name <NAME>         Model name; defaults to the file stem or folder name
+      --link                Register the files where they are instead of copying them (see `create --link`)
+```
+
 ## alkahest cp
 
 Copy a model under a new name
@@ -238,7 +291,7 @@ Arguments:
 
 ```text
   <MODEL>
-          Model reference
+          Model reference, or the path of a local `.gguf` file or model folder (imported with `--link` under its default name first, then run)
   [PROMPT]...
           One-shot prompt (words are joined with spaces, after any piped input)
 ```
