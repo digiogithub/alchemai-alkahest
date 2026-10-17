@@ -3,6 +3,7 @@
 //! Commands whose story is not built yet print `not implemented yet (ALK-US-xxxx)` and exit
 //! with code 2. Exit codes: 0 success, 1 runtime error, 2 not implemented or usage error.
 
+mod catalog_cmd;
 mod certs_cmd;
 mod cli;
 mod engines_cmd;
@@ -164,6 +165,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             cli.global.json,
         ),
         Command::Engines { action } => engines_cmd::run(action, &loaded, cli.global.json),
+        Command::Catalog { action } => catalog_cmd::run(action, &loaded, cli.global.json),
         Command::Serve {
             allow_unauthenticated,
             service,

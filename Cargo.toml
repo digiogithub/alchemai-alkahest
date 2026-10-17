@@ -42,6 +42,7 @@ todo = "warn"
 [workspace.dependencies]
 # Workspace crates
 alkahest-api = { path = "crates/alkahest-api" }
+alkahest-catalog = { path = "crates/alkahest-catalog" }
 alkahest-client = { path = "crates/alkahest-client" }
 alkahest-core = { path = "crates/alkahest-core" }
 alkahest-decision = { path = "crates/alkahest-decision" }

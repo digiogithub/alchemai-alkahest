@@ -50,6 +50,15 @@ Sections are TOML tables: `server.port` is `port` under `[server]`. A key shown 
 | `logging.rotation` | one of `daily`, `hourly`, `never` | `daily` | File rotation period. |
 | `logging.max_files` | usize | `7` | Rotated files kept before the oldest is deleted. |
 | `pull.max_bytes_per_sec` | optional u64 | unset | Bandwidth cap of one `pull` in bytes per second, shared by all its connections. Absent or `0` means unlimited. Overridden by `ALKAHEST_PULL_MAX_BPS`. |
+| `catalogs[].name` | String | unset | Unique catalog name (lower-case letters, digits, `-`, `_`, `.`); names the snapshot directory `<data_dir>/catalogs/<name>/`. |
+| `catalogs[].url` | String | unset | Git repository URL (`https://`), or `file://` path of a plain catalog directory for air-gapped installs. |
+| `catalogs[].ref` | String | unset | Branch or tag to follow. |
+| `catalogs[].subdir` | String | unset | Folder of the catalog inside the repository (`.` for the repository root). |
+| `catalogs[].pin` | optional String | unset | Commit id the catalog is frozen at; a pinned catalog is never refreshed. |
+| `catalogs[].enabled` | bool | unset | Whether the catalog contributes entries. |
+| `catalogs[].refresh_interval` | String | unset | How old a snapshot may get before a background refresh (`30m`, `24h`, `7d`). |
+| `catalogs[].raw_url` | optional String | unset | Raw file URL template for hosts other than GitHub, GitLab and Gitea/Forgejo, with `{commit}` and `{path}` placeholders. |
+| `catalogs[].archive_url` | optional String | unset | Commit archive (`tar.gz`) URL template for other hosts, with a `{commit}` placeholder. |
 
 ## Environment variables that set a key
 

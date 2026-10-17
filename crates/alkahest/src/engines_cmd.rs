@@ -1,8 +1,9 @@
 //! `alkahest engines ls|install|rm|info`: engine management driven by recipes
 //! (ALK-US-0049, ALK-SP-0003.R3-R5).
 //!
-//! Recipes come from the binary, from `recipes/` next to the binary and from the user's
-//! `<data dir>/recipes`, later sources replacing earlier ones. `install` picks the best variant
+//! Recipes come from the binary, from the git catalogs (`[[catalogs]]`, ALK-SP-0011.R12), from
+//! `recipes/` next to the binary and from the user's `<data dir>/recipes`, later sources
+//! replacing earlier ones; `ls` and `info` name the layer each recipe comes from. `install` picks the best variant
 //! for the detected hardware unless `--variant` says otherwise; versions install side by side.
 
 use std::io::Write;
@@ -29,7 +30,7 @@ use crate::output::{Format, Listing};
 pub fn run(action: &EnginesAction, loaded: &Loaded, json: bool) -> Result<ExitCode> {
     let paths = loaded.config.resolve_paths(&loaded.paths);
     let engines_dir = paths.engines_dir;
-    let catalog = load_catalog(&paths.data_dir);
+    let catalog = load_catalog(loaded, &paths.data_dir);
     match action {
         EnginesAction::Ls => ls(&catalog, &engines_dir, json),
         EnginesAction::Info { engine } => info(&catalog, engine, &engines_dir, json),
@@ -78,10 +79,11 @@ pub fn run(action: &EnginesAction, loaded: &Loaded, json: bool) -> Result<ExitCo
     }
 }
 
-/// Built-in recipes, then `recipes/` next to the binary, then the user's recipe directory.
-/// Unusable recipe files are reported on stderr and skipped.
-fn load_catalog(data_dir: &Path) -> Catalog {
-    let mut catalog = Catalog::builtin();
+/// Built-in recipes, then the git catalog snapshots (refreshed by
+/// [`crate::catalog_cmd::prepare`]), then `recipes/` next to the binary, then the user's
+/// recipe directory. Unusable local recipe files are reported on stderr and skipped.
+fn load_catalog(loaded: &Loaded, data_dir: &Path) -> Catalog {
+    let states = crate::catalog_cmd::prepare(loaded);
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe()
         && let Some(parent) = exe.parent()
@@ -89,18 +91,22 @@ fn load_catalog(data_dir: &Path) -> Catalog {
         dirs.push(parent.join("recipes"));
     }
     dirs.push(data_dir.join("recipes"));
-    for dir in dirs {
-        let (next, issues) = catalog.with_dir(&dir);
-        catalog = next;
-        for issue in issues {
-            eprintln!(
-                "warning: ignoring recipe {}: {}",
-                issue.path.display(),
-                issue.reason
-            );
-        }
+    let (catalog, issues) = alkahest_catalog::recipe_catalog(&states, &dirs);
+    for issue in issues {
+        eprintln!(
+            "warning: ignoring recipe {}: {}",
+            issue.path.display(),
+            issue.reason
+        );
     }
     catalog
+}
+
+/// The layer a recipe comes from, for `ls` and `info`.
+fn origin(catalog: &Catalog, r: &Recipe) -> String {
+    catalog
+        .layer_of(r)
+        .map_or_else(|| "-".to_string(), ToString::to_string)
 }
 
 /// Roots searched for installed engines: the engines directory, then the directories
@@ -166,13 +172,19 @@ fn ls(catalog: &Catalog, engines_dir: &Path, json: bool) -> Result<ExitCode> {
     let installed = installed_all(engines_dir);
 
     let host_flags = alkahest_sysinfo::detect_cpu_flags();
-    let mut listing = Listing::new(["engine", "version", "variant", "state", "path"]);
+    let mut listing = Listing::new(["engine", "version", "variant", "state", "origin", "path"]);
     for e in &installed {
+        let layer = catalog
+            .variants(&e.id, &e.tag)
+            .into_iter()
+            .find(|r| r.variant == e.variant)
+            .map_or_else(|| "-".to_string(), |r| origin(catalog, r));
         listing.push_row([
             e.id.clone(),
             e.tag.clone(),
             e.variant.clone(),
             installed_state(e, &host_flags),
+            layer,
             e.executable.display().to_string(),
         ]);
     }
@@ -191,6 +203,7 @@ fn ls(catalog: &Catalog, engines_dir: &Path, json: bool) -> Result<ExitCode> {
                     r.tag.clone(),
                     r.variant.clone(),
                     availability(r, &host, recommended),
+                    origin(catalog, r),
                     "-".to_string(),
                 ]);
             }
@@ -222,6 +235,13 @@ fn info(catalog: &Catalog, engine: &str, engines_dir: &Path, json: bool) -> Resu
         let variants: Vec<_> = versions
             .iter()
             .flat_map(|v| catalog.variants(engine, v))
+            .map(|r| {
+                let mut v = serde_json::to_value(r).unwrap_or_default();
+                if let Some(obj) = v.as_object_mut() {
+                    obj.insert("origin".into(), json!(origin(catalog, r)));
+                }
+                v
+            })
             .collect();
         writeln!(
             out,
@@ -258,6 +278,7 @@ fn info(catalog: &Catalog, engine: &str, engines_dir: &Path, json: bool) -> Resu
                 .map(|(a, b)| format!(" needs CUDA {a}.{b}"))
                 .unwrap_or_default();
             writeln!(out, "  {:<12} {state}{needs}", r.variant)?;
+            writeln!(out, "      from {}", origin(catalog, r))?;
             if !r.notes.is_empty() {
                 writeln!(out, "      {}", r.notes)?;
             }

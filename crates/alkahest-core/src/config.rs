@@ -33,7 +33,7 @@ pub const DEFAULT_PORT: u16 = 11435;
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 
 /// The whole configuration. Every section has defaults, so an empty file is valid.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// HTTP listener.
@@ -52,6 +52,260 @@ pub struct Config {
     pub logging: LoggingConfig,
     /// Model downloads.
     pub pull: PullConfig,
+    /// Git catalog sources (`[[catalogs]]`), lowest layer first (ALK-SP-0011.R9). Without any
+    /// `[[catalogs]]` table the list holds the official catalog.
+    pub catalogs: Vec<CatalogSource>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            server: ServerConfig::default(),
+            store: StoreConfig::default(),
+            scheduler: SchedulerConfig::default(),
+            engines: EnginesConfig::default(),
+            auth: AuthConfig::default(),
+            hf: HfConfig::default(),
+            logging: LoggingConfig::default(),
+            pull: PullConfig::default(),
+            catalogs: vec![CatalogSource::official()],
+        }
+    }
+}
+
+/// Name of the catalog every installation gets out of the box.
+pub const OFFICIAL_CATALOG_NAME: &str = "official";
+/// Repository of the official catalog.
+pub const OFFICIAL_CATALOG_URL: &str = "https://github.com/digiogithub/alchemai-alkahest";
+/// Folder of the official catalog inside its repository.
+pub const OFFICIAL_CATALOG_SUBDIR: &str = "catalog";
+
+/// One git catalog source (`[[catalogs]]`, ALK-SP-0011.R9). Credentials are never part of it:
+/// a private catalog's token lives in the OS keyring (service `alkahest`, user
+/// `catalog:<name>`) or in `ALKAHEST_CATALOG_TOKEN_<NAME>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogSource {
+    /// Unique catalog name (lower-case letters, digits, `-`, `_`, `.`); names the snapshot
+    /// directory `<data_dir>/catalogs/<name>/`.
+    pub name: String,
+    /// Git repository URL (`https://`), or `file://` path of a plain catalog directory for
+    /// air-gapped installs.
+    pub url: String,
+    /// Branch or tag to follow.
+    #[serde(default = "default_catalog_ref")]
+    pub r#ref: String,
+    /// Folder of the catalog inside the repository (`.` for the repository root).
+    #[serde(default = "default_catalog_subdir")]
+    pub subdir: String,
+    /// Commit id the catalog is frozen at; a pinned catalog is never refreshed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
+    /// Whether the catalog contributes entries.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// How old a snapshot may get before a background refresh (`30m`, `24h`, `7d`).
+    #[serde(default = "default_refresh_interval")]
+    pub refresh_interval: String,
+    /// Raw file URL template for hosts other than GitHub, GitLab and Gitea/Forgejo, with
+    /// `{commit}` and `{path}` placeholders.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_url: Option<String>,
+    /// Commit archive (`tar.gz`) URL template for other hosts, with a `{commit}` placeholder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_url: Option<String>,
+}
+
+fn default_catalog_ref() -> String {
+    "main".to_string()
+}
+
+fn default_catalog_subdir() -> String {
+    ".".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_refresh_interval() -> String {
+    "24h".to_string()
+}
+
+impl CatalogSource {
+    /// The official catalog: `catalog/` of the Alkahest repository at `main`.
+    pub fn official() -> Self {
+        Self::new(OFFICIAL_CATALOG_NAME, OFFICIAL_CATALOG_URL).with_subdir(OFFICIAL_CATALOG_SUBDIR)
+    }
+
+    /// A source with the defaults (`ref = "main"`, `subdir = "."`, refreshed daily).
+    pub fn new(name: impl Into<String>, url: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            url: url.into(),
+            r#ref: default_catalog_ref(),
+            subdir: default_catalog_subdir(),
+            pin: None,
+            enabled: true,
+            refresh_interval: default_refresh_interval(),
+            raw_url: None,
+            archive_url: None,
+        }
+    }
+
+    /// Sets the folder of the catalog inside the repository.
+    pub fn with_subdir(mut self, subdir: impl Into<String>) -> Self {
+        self.subdir = subdir.into();
+        self
+    }
+
+    /// The refresh interval as a duration.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidDuration`] when the text is not `<number><s|m|h|d>`.
+    pub fn refresh_duration(&self) -> Result<std::time::Duration> {
+        parse_interval(&self.refresh_interval)
+    }
+
+    /// Checks the rules of ALK-SP-0011.R9 that the schema cannot express.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidConfig`] naming the catalog and the rule.
+    pub fn validate(&self) -> Result<()> {
+        let bad =
+            |reason: String| Error::InvalidConfig(format!("catalogs: `{}`: {reason}", self.name));
+        if !is_catalog_name(&self.name) {
+            return Err(bad(
+                "name must use lower-case letters, digits, `-`, `_` and `.`".into(),
+            ));
+        }
+        if !(self.url.starts_with("https://")
+            || self.url.starts_with("file://")
+            || is_loopback_http(&self.url))
+        {
+            return Err(bad(format!(
+                "url `{}` must be https:// (or file:// for a local directory)",
+                self.url
+            )));
+        }
+        if self.url.contains('@') && !self.url.starts_with("file://") {
+            return Err(bad(
+                "url must not carry credentials; store the token in the OS keyring".into(),
+            ));
+        }
+        if self.r#ref.trim().is_empty()
+            || self.r#ref.starts_with('-')
+            || !self
+                .r#ref
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+        {
+            return Err(bad(format!(
+                "ref `{}` is not a branch or tag name",
+                self.r#ref
+            )));
+        }
+        let sub = self.subdir.trim_matches('/');
+        if self.subdir.starts_with('/')
+            || self.subdir.contains('\\')
+            || sub
+                .split('/')
+                .any(|c| c == ".." || (c.is_empty() && !sub.is_empty()))
+        {
+            return Err(bad(format!(
+                "subdir `{}` must be a relative path without `..`",
+                self.subdir
+            )));
+        }
+        if let Some(pin) = &self.pin
+            && !is_commit_id(pin)
+        {
+            return Err(bad(format!(
+                "pin `{pin}` must be a full commit id (40 or 64 hex digits)"
+            )));
+        }
+        for (key, template) in [
+            ("raw_url", &self.raw_url),
+            ("archive_url", &self.archive_url),
+        ] {
+            if let Some(t) = template {
+                if !(t.starts_with("https://") || is_loopback_http(t)) {
+                    return Err(bad(format!("{key} must be an https:// URL template")));
+                }
+                if !t.contains("{commit}") {
+                    return Err(bad(format!("{key} must contain `{{commit}}`")));
+                }
+            }
+        }
+        if let Some(t) = &self.raw_url
+            && !t.contains("{path}")
+        {
+            return Err(bad("raw_url must contain `{path}`".into()));
+        }
+        self.refresh_duration()
+            .map_err(|e| bad(format!("refresh_interval: {e}")))?;
+        Ok(())
+    }
+}
+
+/// Whether `name` is a valid catalog (or catalog entry component) name: non-empty, lower-case
+/// ASCII letters, digits, `-`, `_` and `.`, not starting with `.` (ALK-SP-0011.R1).
+pub fn is_catalog_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.')
+        })
+}
+
+/// Whether `s` is a full git commit id (SHA-1 or SHA-256, lower-case hex).
+pub fn is_commit_id(s: &str) -> bool {
+    (s.len() == 40 || s.len() == 64)
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Plain `http://` is accepted only for loopback hosts (local mirrors and tests); everything
+/// that crosses a network must be https.
+fn is_loopback_http(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let host = rest.split(['/', '?']).next().unwrap_or_default();
+    let host = host.rsplit_once(':').map_or(host, |(h, p)| {
+        if p.bytes().all(|b| b.is_ascii_digit()) {
+            h
+        } else {
+            host
+        }
+    });
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]")
+}
+
+/// Parses `<number><unit>` with unit `s`, `m`, `h` or `d` (`30m`, `24h`, `7d`).
+///
+/// # Errors
+///
+/// [`Error::InvalidDuration`] for anything else, zero included.
+pub fn parse_interval(text: &str) -> Result<std::time::Duration> {
+    let t = text.trim();
+    let bad = || Error::InvalidDuration(format!("`{text}`: expected a number and s, m, h or d"));
+    let split = t.find(|c: char| !c.is_ascii_digit()).ok_or_else(bad)?;
+    let (num, unit) = t.split_at(split);
+    let n: u64 = num.parse().map_err(|_| bad())?;
+    let secs = match unit {
+        "s" => n,
+        "m" => n.saturating_mul(60),
+        "h" => n.saturating_mul(3600),
+        "d" => n.saturating_mul(86_400),
+        _ => return Err(bad()),
+    };
+    if secs == 0 {
+        return Err(bad());
+    }
+    Ok(std::time::Duration::from_secs(secs))
 }
 
 /// HTTP listener settings.
@@ -507,6 +761,15 @@ impl Config {
                 "logging.max_files must be at least 1".into(),
             ));
         }
+        for (i, c) in self.catalogs.iter().enumerate() {
+            c.validate()?;
+            if self.catalogs[..i].iter().any(|o| o.name == c.name) {
+                return Err(Error::InvalidConfig(format!(
+                    "catalogs: the name `{}` is used twice",
+                    c.name
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -775,6 +1038,20 @@ fn read_layer(path: &Path, required: bool) -> Result<Option<toml::Table>> {
             path: path.to_path_buf(),
             key: "hf.token".into(),
             hint: "the HF_TOKEN environment variable or the OS keyring".into(),
+        });
+    }
+    if let Some(list) = table.get("catalogs").and_then(|v| v.as_array())
+        && list.iter().any(|c| {
+            c.as_table()
+                .is_some_and(|t| t.keys().any(|k| matches!(k.as_str(), "token" | "password")))
+        })
+    {
+        return Err(Error::SecretInConfig {
+            path: path.to_path_buf(),
+            key: "catalogs.token".into(),
+            hint: "the OS keyring (service `alkahest`, user `catalog:<name>`) or \
+                   ALKAHEST_CATALOG_TOKEN_<NAME>"
+                .into(),
         });
     }
     // Validate against the schema now so errors name the offending file.
@@ -1054,5 +1331,66 @@ mod tests {
     #[test]
     fn validation_rejects_zero_queue() {
         assert!(Config::from_toml_str("[scheduler]\nmax_queue = 0\n").is_err());
+    }
+
+    /// ALK-SP-0011.R9 "default official catalog".
+    #[test]
+    fn default_official_catalog() {
+        let c = Config::from_toml_str("").unwrap();
+        assert_eq!(c.catalogs, vec![CatalogSource::official()]);
+        assert_eq!(
+            c.catalogs[0].url,
+            "https://github.com/digiogithub/alchemai-alkahest"
+        );
+        assert_eq!(c.catalogs[0].r#ref, "main");
+        assert_eq!(c.catalogs[0].subdir, "catalog");
+        assert_eq!(
+            c.catalogs[0].refresh_duration().unwrap(),
+            std::time::Duration::from_secs(86_400)
+        );
+    }
+
+    #[test]
+    fn catalog_sources_are_validated() {
+        let ok = "[[catalogs]]\nname = \"acme\"\nurl = \"https://git.example.org/a\"\n";
+        assert_eq!(Config::from_toml_str(ok).unwrap().catalogs.len(), 1);
+        for bad in [
+            "[[catalogs]]\nname = \"Acme\"\nurl = \"https://x.org/a\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"http://x.org/a\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://u:p@x.org/a\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\nsubdir = \"../x\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\npin = \"abc\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\nrefresh_interval = \"soon\"\n",
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\n[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/b\"\n",
+        ] {
+            assert!(Config::from_toml_str(bad).is_err(), "{bad}");
+        }
+        assert!(
+            Config::from_toml_str(
+                "[[catalogs]]\nname = \"t\"\nurl = \"http://127.0.0.1:8080/a\"\n"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn catalog_token_in_a_file_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = AlkahestPaths::under(tmp.path());
+        write(
+            &paths.user_config_file(),
+            "[[catalogs]]\nname = \"a\"\nurl = \"https://x.org/a\"\ntoken = \"ghp_secret\"\n",
+        );
+        let err = load_with(&opts(tmp.path()), &fake(&[])).unwrap_err();
+        assert!(matches!(err, Error::SecretInConfig { .. }));
+        assert!(!err.to_string().contains("ghp_secret"));
+    }
+
+    #[test]
+    fn intervals_parse() {
+        assert_eq!(parse_interval("30m").unwrap().as_secs(), 1800);
+        assert_eq!(parse_interval("7d").unwrap().as_secs(), 604_800);
+        assert!(parse_interval("0h").is_err());
+        assert!(parse_interval("1w").is_err());
     }
 }

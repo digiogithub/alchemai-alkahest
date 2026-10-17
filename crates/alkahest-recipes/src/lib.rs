@@ -32,7 +32,7 @@ mod runtime;
 
 pub use archive::{extract, strip_components};
 pub use build::BuildTools;
-pub use catalog::{Catalog, DiscoveryIssue};
+pub use catalog::{Catalog, DiscoveryIssue, RecipeLayer};
 pub use error::{RecipeError, Result};
 pub use install::{
     ENGINE_LICENSE_FILE, InstallOptions, InstalledEngine, MARKER_FILE, bundled_roots,

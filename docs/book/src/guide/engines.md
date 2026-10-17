@@ -94,6 +94,45 @@ Recipes pin one upstream release with the SHA-256 of every archive; nothing is i
 the digest matches. A weekly workflow reports newer upstream releases. Installing a newer
 version leaves older ones in place, so models can keep the version their settings pin.
 
+## Catalogs: recipes without a new release
+
+Besides the recipes compiled into the binary, Alkahest reads engine recipes and model entries
+from **catalogs**: folders of TOML in git repositories. Out of the box there is one, `official`,
+the `catalog/` folder of `github.com/digiogithub/alchemai-alkahest` at `main`.
+
+```sh
+alkahest catalog ls                       # catalogs, commit, age, entry counts, problems
+alkahest catalog sync [<name>]            # fetch now
+alkahest catalog add acme https://git.example.org/acme/catalog --ref stable [--subdir .] [--pin <commit>]
+alkahest catalog rm acme                  # removes the source and its snapshot
+```
+
+- **Layers.** Lowest first: built-in recipes, then the catalogs in configured order (a catalog
+  added later overrides earlier ones), then `recipes/` next to the binary, then
+  `<data dir>/recipes/`. The same engine, version and variant in a higher layer wins.
+  `engines ls` (column `origin`) and `engines info` (`from ...`) show where each entry comes from,
+  for example `catalog official@c1c1877bc8fb`.
+- **Snapshots.** Each catalog is stored under `<data dir>/catalogs/<name>/` with the commit it
+  came from. A new snapshot replaces the old one only when every file validates; otherwise the
+  last good snapshot stays in use and the error appears once on the next command and in
+  `catalog ls`. Unknown keys from a newer catalog format are ignored with a warning.
+- **Refresh.** `serve` and `engines` refresh a catalog older than its `refresh_interval`
+  (default `24h`) in the background and never wait for the network. A catalog that was never
+  fetched is fetched once in the foreground (at most 10 s); offline, the built-in recipes are
+  used and one notice says so. `ALKAHEST_CATALOG_AUTO_SYNC=0` turns automatic refresh off;
+  `pin = "<commit>"` freezes a catalog.
+- **Transport.** No `git` is needed: the ref is resolved over git smart HTTP, then only the
+  changed files of that commit are downloaded (HTTPS, system proxy settings honoured). GitHub,
+  GitLab and Gitea/Forgejo work as is; other hosts need `raw_url` and `archive_url` templates
+  in the `[[catalogs]]` entry. A `file://` URL reads a plain directory (air-gapped installs).
+- **Private catalogs.** Store the token in the OS keyring (service `alkahest`, user
+  `catalog:<name>`) or set `ALKAHEST_CATALOG_TOKEN_<NAME>` (name upper-cased, `-` and `.` as
+  `_`). It is sent only to the repository's own host, never written to configuration,
+  snapshots or logs.
+- **Safety.** A sync only downloads and parses TOML. It never runs anything and never
+  downloads an engine or a model; that happens on `engines install` or `pull`, verified against
+  the sha256 the catalog pins.
+
 ## Overriding an engine binary
 
 Point a model family at your own build in the configuration file:

@@ -356,7 +356,7 @@ fn parse_structs(
                 && let Some((field, ty)) = rest.split_once(':')
             {
                 structs.entry(name).or_default().push(Field {
-                    name: field.trim().to_string(),
+                    name: field.trim().trim_start_matches("r#").to_string(),
                     ty: ty.trim().trim_end_matches(',').to_string(),
                     doc: doc.join(" "),
                 });
@@ -409,6 +409,14 @@ fn walk(
         let base = f.ty.trim_start_matches("Option<").trim_end_matches('>');
         if structs.contains_key(base) {
             walk(base, &key, structs, enums, defaults, rows);
+            continue;
+        }
+        if let Some(inner) =
+            f.ty.strip_prefix("Vec<")
+                .and_then(|s| s.strip_suffix('>'))
+                .filter(|s| structs.contains_key(*s))
+        {
+            walk(inner, &format!("{key}[]"), structs, enums, defaults, rows);
             continue;
         }
         if let Some(inner) =

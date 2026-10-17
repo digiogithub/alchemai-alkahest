@@ -24,6 +24,7 @@ desktop = ["dep:alkahest-desktop", "alkahest-desktop/gui"]
 
 [dependencies]
 alkahest-api.workspace = true
+alkahest-catalog.workspace = true
 alkahest-client.workspace = true
 alkahest-core.workspace = true
 alkahest-fetch.workspace = true

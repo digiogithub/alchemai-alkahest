@@ -1,7 +1,9 @@
 //! Recipe discovery: the recipes compiled into the binary plus `*.toml` files in directories
 //! (a `recipes/` directory next to the binary, the user's recipe directory).
 //!
-//! Sources are layered: a recipe from a later source replaces an earlier one with the same
+//! Sources are layered (ALK-SP-0011.R12: built-in < git catalogs < `recipes/` next to the
+//! binary < the user directory), each recipe remembering its [`RecipeLayer`]: a recipe from a
+//! later source replaces an earlier one with the same
 //! `(id, version, variant)`, so a user can fix a digest or add a variant without a new build,
 //! and different versions of an engine live side by side.
 
@@ -9,6 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use alkahest_sysinfo::{Accelerator, SystemInfo};
+use serde::Serialize;
 
 use crate::error::{RecipeError, Result};
 use crate::recipe::{
@@ -33,10 +36,45 @@ pub struct DiscoveryIssue {
     pub reason: String,
 }
 
+/// The layer a recipe comes from (ALK-SP-0011.R12), lowest first: built-in < git catalog <
+/// a recipe directory (`recipes/` next to the binary, then the user's).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RecipeLayer {
+    /// Compiled into the binary (also the layer of recipes added with [`Catalog::extend`]).
+    Builtin,
+    /// A git catalog snapshot.
+    GitCatalog {
+        /// Configured catalog name.
+        name: String,
+        /// Commit of the snapshot.
+        commit: String,
+    },
+    /// A directory of local recipe files.
+    Directory {
+        /// The directory.
+        path: PathBuf,
+    },
+}
+
+impl std::fmt::Display for RecipeLayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Builtin => f.write_str("built-in"),
+            Self::GitCatalog { name, commit } => {
+                write!(f, "catalog {name}@{}", &commit[..commit.len().min(12)])
+            }
+            Self::Directory { path } => write!(f, "directory {}", path.display()),
+        }
+    }
+}
+
 /// All known recipes, layered from several sources.
 #[derive(Debug, Clone, Default)]
 pub struct Catalog {
     recipes: Vec<Recipe>,
+    /// Layer of each recipe, parallel to `recipes`.
+    layers: Vec<RecipeLayer>,
 }
 
 impl Catalog {
@@ -71,20 +109,46 @@ impl Catalog {
                 .map_err(|e| e.to_string())
                 .and_then(|t| parse_recipes(&t).map_err(|e| e.to_string()));
             match parsed {
-                Ok(rs) => self.extend(rs),
+                Ok(rs) => self.extend_layer(
+                    rs,
+                    RecipeLayer::Directory {
+                        path: dir.to_path_buf(),
+                    },
+                ),
                 Err(reason) => issues.push(DiscoveryIssue { path, reason }),
             }
         }
         (self, issues)
     }
 
-    /// Adds recipes, replacing ones with the same `(id, version, variant)`.
+    /// Adds recipes, replacing ones with the same `(id, version, variant)`; they count as
+    /// built-in.
     pub fn extend(&mut self, recipes: impl IntoIterator<Item = Recipe>) {
+        self.extend_layer(recipes, RecipeLayer::Builtin);
+    }
+
+    /// Adds recipes from `layer`, replacing ones with the same `(id, version, variant)`.
+    pub fn extend_layer(&mut self, recipes: impl IntoIterator<Item = Recipe>, layer: RecipeLayer) {
         for r in recipes {
-            self.recipes
-                .retain(|x| !(x.id == r.id && x.tag == r.tag && x.variant == r.variant));
+            if let Some(i) = self
+                .recipes
+                .iter()
+                .position(|x| x.id == r.id && x.tag == r.tag && x.variant == r.variant)
+            {
+                self.recipes.remove(i);
+                self.layers.remove(i);
+            }
             self.recipes.push(r);
+            self.layers.push(layer.clone());
         }
+    }
+
+    /// The layer `recipe` (one of [`Catalog::recipes`]) comes from.
+    pub fn layer_of(&self, recipe: &Recipe) -> Option<&RecipeLayer> {
+        self.recipes
+            .iter()
+            .position(|x| x.id == recipe.id && x.tag == recipe.tag && x.variant == recipe.variant)
+            .and_then(|i| self.layers.get(i))
     }
 
     /// Every recipe (one per engine, version and variant).

@@ -13,6 +13,7 @@ publish = false
 workspace = true
 
 [dependencies]
+alkahest-catalog.workspace = true
 alkahest-core.workspace = true
 alkahest-decision.workspace = true
 alkahest-engine.workspace = true
