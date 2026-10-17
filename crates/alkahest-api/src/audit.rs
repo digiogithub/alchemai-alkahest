@@ -117,6 +117,11 @@ impl UsageTracker {
         self.counters.lock().get(key_id).cloned()
     }
 
+    /// Current counters of every key (the admin key listing).
+    pub fn snapshot(&self) -> BTreeMap<String, KeyUsage> {
+        self.counters.lock().clone()
+    }
+
     /// Writes the counters if they changed since the last flush (atomic, owner-only).
     pub fn flush(&self) -> Result<(), KeyError> {
         if !self.dirty.swap(false, Ordering::AcqRel) {

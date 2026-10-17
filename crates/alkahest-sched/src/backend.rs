@@ -195,8 +195,12 @@ impl CatalogBackend {
         let effective = self
             .catalog
             .effective_settings(&entry, request, &self.global, None)?;
-        let req = LaunchRequest::from_catalog(&entry, &effective, self.platform.accelerator, 0)?;
+        let mut req =
+            LaunchRequest::from_catalog(&entry, &effective, self.platform.accelerator, 0)?;
         let plan = self.registry.plan(&req, &self.platform)?;
+        // Offload follows the installed build, not only the platform: a CPU-only build on a
+        // GPU machine must be estimated and launched as CPU.
+        req.accelerator = plan.install.runs_on(req.accelerator);
         let capabilities = plan.engine.model_capabilities(&req);
         let profile = match req.format {
             ModelFormat::Gguf => match Gguf::read_file(&req.model_path) {

@@ -56,6 +56,23 @@ pub struct EngineInstall {
     pub extra_args: Vec<String>,
 }
 
+impl EngineInstall {
+    /// The backend this build really offloads to when the caller asked for `wanted`.
+    ///
+    /// The platform may have a GPU while the installed build has no GPU backend (the bundled
+    /// or a `cpu` recipe variant): asking such a build to offload (`-ngl 999`) only makes it
+    /// warn, and the scheduler would charge VRAM the model never uses. A `cpu` build stays
+    /// on Metal because the stock macOS archives, labelled `cpu` in the recipes, include the
+    /// Metal backend. Unlabelled builds (`PATH`, overrides) are trusted to match the platform.
+    pub fn runs_on(&self, wanted: Accelerator) -> Accelerator {
+        match (self.variant.as_deref(), wanted) {
+            (Some("cpu"), Accelerator::Metal) => Accelerator::Metal,
+            (Some("cpu"), _) => Accelerator::Cpu,
+            _ => wanted,
+        }
+    }
+}
+
 /// What to look for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocateQuery {
