@@ -72,9 +72,10 @@ Directory = './.pando/data'
 TimeoutMs = 0
 
 [DecisionModel.Router]
+BaseURL = 'http://127.0.0.1:11435'
 KeepAlive = '30m'
 Model = 'tev1:0.8b'
-Provider = 'ollama'
+Provider = 'custom'
 
 [Design]
 DefaultKind = ''
@@ -463,7 +464,7 @@ toolErrors = 0.0
 turns = 0.0
 
 [[providerAccounts]]
-baseUrl = 'http://127.0.0.1:9292/v1'
-displayName = 'bonsai'
-id = 'bonsai'
-type = 'openai-compatible'
+baseUrl = 'http://127.0.0.1:11435'
+displayName = 'alkahest'
+id = 'alkahest'
+type = 'ollama'
