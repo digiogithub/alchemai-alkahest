@@ -24,7 +24,7 @@ use crate::theme::tokens::{Palette, radius, size, space, text};
 use crate::tokio_bridge;
 use crate::ui::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use crate::ui::{
-    AnyElement, AppContext as _, Context, Div, Entity, EventEmitter, FontWeight,
+    AnyElement, AppContext as _, Context, Div, Entity, EventEmitter, Focusable as _, FontWeight,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Task, Window, div, h_flex, px, relative, v_flex,
 };
@@ -481,6 +481,15 @@ impl ModelSettingsView {
 
     fn input(&self, key: &str) -> Option<&Entity<InputState>> {
         self.inputs.iter().find(|(k, _)| *k == key).map(|(_, i)| i)
+    }
+
+    /// Puts the keyboard in the context window field ("Lower context" after a load that did
+    /// not fit in memory).
+    pub fn focus_context(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(input) = self.input("context_length") {
+            let focus = input.read(cx).focus_handle(cx);
+            window.focus(&focus, cx);
+        }
     }
 
     // ----------------------------------------------------------------------------- drawing

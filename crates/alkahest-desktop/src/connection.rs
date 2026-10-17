@@ -147,6 +147,48 @@ pub enum ConnectionState {
     Error(String),
 }
 
+/// When the next reconnect attempt happens (screen 17.5: "Retrying in N s \u{b7} attempt K \u{b7}
+/// last seen HH:MM:SS").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetryInfo {
+    /// When the next probe runs (the manager's clock, comparable with `Instant::now()`).
+    pub due: Instant,
+    /// The backoff delay that was just chosen.
+    pub delay: Duration,
+    /// Failed attempts since the last time the server answered (1 for the first failure).
+    pub attempt: u32,
+    /// When the server last answered, `None` if it never did in this session.
+    pub last_seen: Option<time::OffsetDateTime>,
+}
+
+impl RetryInfo {
+    /// Whole seconds until the next probe, rounded up so the banner never shows "0 s" while
+    /// something is still pending; 0 once due.
+    pub fn seconds_left(&self, now: Instant) -> u64 {
+        let left = self.due.saturating_duration_since(now);
+        left.as_millis().div_ceil(1000) as u64
+    }
+
+    /// The banner line: `Retrying in 4 s \u{b7} attempt 3 \u{b7} last seen 14:03:11 UTC`.
+    pub fn describe(&self, now: Instant) -> String {
+        let left = self.seconds_left(now);
+        let mut line = if left == 0 {
+            format!("Retrying now \u{b7} attempt {}", self.attempt)
+        } else {
+            format!("Retrying in {left} s \u{b7} attempt {}", self.attempt)
+        };
+        if let Some(t) = self.last_seen {
+            line.push_str(&format!(
+                " \u{b7} last seen {:02}:{:02}:{:02} UTC",
+                t.hour(),
+                t.minute(),
+                t.second()
+            ));
+        }
+        line
+    }
+}
+
 /// Exponential reconnect backoff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Backoff {
@@ -185,6 +227,12 @@ pub struct Machine {
     can_start: bool,
     /// A restart stopped the server and must start the next one.
     restart_pending: bool,
+    /// Failed probes since the server last answered.
+    attempts: u32,
+    /// When the server last answered.
+    last_seen: Option<time::OffsetDateTime>,
+    /// The pending reconnect attempt, while the connection is down.
+    retry: Option<RetryInfo>,
 }
 
 impl Machine {
@@ -195,7 +243,15 @@ impl Machine {
             backoff: Backoff::default(),
             can_start,
             restart_pending: false,
+            attempts: 0,
+            last_seen: None,
+            retry: None,
         }
+    }
+
+    /// The pending reconnect attempt, `None` while connected, starting or stopping.
+    pub fn retry(&self) -> Option<&RetryInfo> {
+        self.retry.as_ref()
     }
 
     /// The current state.
@@ -231,6 +287,33 @@ impl Machine {
 
     /// Feeds a probe result at `now`; returns the delay before the next probe.
     pub fn on_probe(&mut self, result: Result<ServerInfo, ProbeError>, now: Instant) -> Duration {
+        let answered = result.is_ok();
+        let delay = self.transition(result, now);
+        if answered {
+            self.attempts = 0;
+            self.last_seen = Some(time::OffsetDateTime::now_utc());
+        } else {
+            self.attempts = self.attempts.saturating_add(1);
+        }
+        // Only a settled "down" state retries with backoff; starting and stopping poll fast
+        // and have their own wording.
+        self.retry = matches!(
+            self.state,
+            ConnectionState::NotRunning { .. }
+                | ConnectionState::Unauthorized
+                | ConnectionState::Tls { .. }
+                | ConnectionState::Error(_)
+        )
+        .then(|| RetryInfo {
+            due: now + delay,
+            delay,
+            attempt: self.attempts,
+            last_seen: self.last_seen,
+        });
+        delay
+    }
+
+    fn transition(&mut self, result: Result<ServerInfo, ProbeError>, now: Instant) -> Duration {
         match (result, &self.state) {
             // Still answering while it drains: keep waiting until the deadline.
             (Ok(_), ConnectionState::Stopping { deadline, .. }) if now < *deadline => START_POLL,
@@ -320,6 +403,10 @@ impl Machine {
     /// The user asked to retry now: forget the backoff.
     pub fn on_retry(&mut self) {
         self.backoff.reset();
+        // The probe runs now: the countdown is over.
+        if let Some(r) = &mut self.retry {
+            r.due = Instant::now();
+        }
     }
 
     /// A live status update arrived while connected.
@@ -353,6 +440,8 @@ pub struct Snapshot {
     pub notice: Option<String>,
     /// This app can start, stop and restart the server (it is local and a launcher exists).
     pub manages_server: bool,
+    /// The pending reconnect attempt while the connection is down (screen 17.5 banner).
+    pub retry: Option<RetryInfo>,
 }
 
 /// An action button on the service card.
@@ -570,6 +659,7 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
             notice: None,
             manages_server: can_start,
             runtime: None,
+            retry: None,
         };
         let (snap_tx, snap_rx) = watch::channel(first);
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -604,6 +694,7 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
             notice: self.last_error.clone(),
             manages_server: self.machine.can_start(),
             runtime: self.runtime.clone(),
+            retry: self.machine.retry().cloned(),
         };
         self.snapshots.send_if_modified(|cur| {
             if *cur == snap {
@@ -903,6 +994,7 @@ mod tests {
             service_unit: None,
             notice: None,
             manages_server: false,
+            retry: None,
             runtime: None,
         }
     }
@@ -937,6 +1029,40 @@ mod tests {
         let s = snapshot(ConnectionState::Unauthorized, false);
         assert_eq!(s.service_card().tone, Tone::Attention);
         assert_eq!(s.card_action(), Some(CardAction::Retry));
+    }
+
+    #[test]
+    fn the_retry_countdown_follows_the_backoff() {
+        let t0 = Instant::now();
+        let mut m = Machine::new(false);
+        assert!(m.retry().is_none());
+        let d1 = m.on_probe(Err(ProbeError::NotRunning), t0);
+        let r = m.retry().cloned().unwrap();
+        assert_eq!((r.attempt, r.delay, r.last_seen), (1, d1, None));
+        assert_eq!(r.seconds_left(t0), 1, "0.5 s rounds up");
+        let d2 = m.on_probe(Err(ProbeError::NotRunning), t0);
+        let d3 = m.on_probe(Err(ProbeError::NotRunning), t0);
+        assert_eq!((d2.as_millis(), d3.as_millis()), (1000, 2000));
+        let r = m.retry().cloned().unwrap();
+        assert_eq!(r.attempt, 3);
+        assert_eq!(r.seconds_left(t0), 2);
+        assert!(
+            r.describe(t0)
+                .starts_with("Retrying in 2 s \u{b7} attempt 3")
+        );
+        assert_eq!(r.seconds_left(t0 + Duration::from_secs(5)), 0);
+        assert!(
+            r.describe(t0 + Duration::from_secs(5))
+                .starts_with("Retrying now")
+        );
+        // An answer ends the countdown, remembers when, and a later loss starts again at 1.
+        m.on_probe(Ok(info()), t0);
+        assert!(m.retry().is_none());
+        m.on_probe(Err(ProbeError::NotRunning), t0);
+        let r = m.retry().cloned().unwrap();
+        assert_eq!(r.attempt, 1);
+        assert!(r.last_seen.is_some());
+        assert!(r.describe(t0).contains("last seen "));
     }
 
     #[test]

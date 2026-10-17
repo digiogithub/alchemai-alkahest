@@ -290,6 +290,25 @@ pub struct JobCard {
     pub running: bool,
     /// Failure text.
     pub error: Option<String>,
+    /// Failed job: the same install again (a build from source stays a build from source).
+    pub retry: Option<EngineInstall>,
+    /// Failed source build: the prebuilt archive instead (design 17.8).
+    pub prebuilt: Option<EngineInstall>,
+}
+
+/// The install request that repeats a job, from its target (`llama-cpp b11669 cuda12.8`).
+/// `from_source` keeps a source build a source build; `force` replaces a half-installed
+/// build.
+pub fn reinstall_request(target: &str, from_source: bool) -> Option<EngineInstall> {
+    let mut parts = target.split_whitespace();
+    let engine = parts.next()?.to_string();
+    Some(EngineInstall {
+        engine,
+        version: parts.next().map(str::to_string),
+        variant: parts.next().map(str::to_string),
+        from_source,
+        force: true,
+    })
 }
 
 /// Phase history per job id, kept while the screen lives (the server reports the current
@@ -343,6 +362,11 @@ fn pill_label(job: &Job) -> String {
     }
 }
 
+/// Whether the phase log shows a build from source (the server reports `building`).
+fn built_from_source(lines: &[String]) -> bool {
+    lines.iter().any(|l| l == "building")
+}
+
 /// Cards for the engine install jobs: running ones, plus failures not dismissed yet.
 pub fn job_cards(jobs: &[Job], log: &JobLog) -> Vec<JobCard> {
     jobs.iter()
@@ -360,6 +384,12 @@ pub fn job_cards(jobs: &[Job], log: &JobLog) -> Vec<JobCard> {
             log: log.lines(&j.id).to_vec(),
             running: j.state == "running",
             error: j.error.clone(),
+            retry: (j.state == "failed")
+                .then(|| reinstall_request(&j.target, built_from_source(log.lines(&j.id))))
+                .flatten(),
+            prebuilt: (j.state == "failed" && built_from_source(log.lines(&j.id)))
+                .then(|| reinstall_request(&j.target, false))
+                .flatten(),
         })
         .collect()
 }
@@ -581,6 +611,48 @@ mod tests {
             job_cards(&[job], &log).is_empty(),
             "finished jobs leave the list"
         );
+    }
+
+    #[test]
+    fn a_failed_source_build_offers_retry_and_prebuilt() {
+        let mut job = Job {
+            id: "j2".into(),
+            kind: "engine_install".into(),
+            target: "llama-cpp b11669 cuda12.8".into(),
+            state: "running".into(),
+            phase: "building".into(),
+            ..Job::default()
+        };
+        let mut log = JobLog::default();
+        log.record(&job);
+        assert!(
+            job_cards(std::slice::from_ref(&job), &log)[0]
+                .retry
+                .is_none()
+        );
+        job.state = "failed".into();
+        job.error = Some("cmake exited with status 1".into());
+        log.record(&job);
+        let card = &job_cards(std::slice::from_ref(&job), &log)[0];
+        let retry = card.retry.as_ref().unwrap();
+        assert_eq!(
+            (
+                retry.engine.as_str(),
+                retry.version.as_deref(),
+                retry.variant.as_deref()
+            ),
+            ("llama-cpp", Some("b11669"), Some("cuda12.8"))
+        );
+        assert!(retry.from_source && retry.force, "same build again");
+        let prebuilt = card.prebuilt.as_ref().unwrap();
+        assert!(!prebuilt.from_source, "install prebuilt instead");
+        // A failed download has nothing to switch to.
+        let mut log = JobLog::default();
+        job.phase = "downloading".into();
+        log.record(&job);
+        let card = &job_cards(&[job], &log)[0];
+        assert!(card.prebuilt.is_none());
+        assert!(!card.retry.as_ref().unwrap().from_source);
     }
 
     #[test]

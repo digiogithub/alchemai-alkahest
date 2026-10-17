@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use alkahest_client::{LibraryModel, RuntimeModel, SchedulerStatus};
 use alkahest_gguf::ModelKind;
 
-use crate::ops::OpFailure;
+use crate::ops::{FailureCause, OpFailure};
 use crate::present::{
     FormatTag, KIND_FILTERS, Pill, default_engine, engine_label, format_bytes, format_tag,
     group_digits, is_read_only, kind_of, same_model, source_line,
@@ -209,6 +209,31 @@ pub enum NoticeTone {
     Danger,
 }
 
+/// A button of a failure notice (design 17.8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoticeAction {
+    /// Open the model's settings (screen 12).
+    OpenSettings,
+    /// Open the model's settings with the context field focused.
+    LowerContext,
+    /// Unload every model, then load this one again.
+    UnloadOthersAndRetry,
+    /// Start installing the engine (id) and go to the Engines screen.
+    InstallEngine(String),
+}
+
+impl NoticeAction {
+    /// Button label.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::OpenSettings => "Open settings",
+            Self::LowerContext => "Lower context",
+            Self::UnloadOthersAndRetry => "Unload others & retry",
+            Self::InstallEngine(_) => "Install engine",
+        }
+    }
+}
+
 /// A one-line message above the table (refused delete, failed action).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
@@ -216,6 +241,10 @@ pub struct Notice {
     pub tone: NoticeTone,
     /// Text.
     pub text: String,
+    /// The model the failure is about, for the actions.
+    pub model: Option<String>,
+    /// Recovery buttons.
+    pub actions: Vec<NoticeAction>,
 }
 
 /// The Library screen state.
@@ -380,13 +409,28 @@ impl LibraryState {
                 self.notice = Some(Notice {
                     tone: NoticeTone::Info,
                     text: format!("Deleted {name}."),
+                    model: None,
+                    actions: Vec::new(),
                 });
             }
             Ok(()) => {}
             Err(f) => {
+                let actions = match &f.cause {
+                    FailureCause::Memory => vec![
+                        NoticeAction::OpenSettings,
+                        NoticeAction::LowerContext,
+                        NoticeAction::UnloadOthersAndRetry,
+                    ],
+                    FailureCause::EngineMissing(id) => {
+                        vec![NoticeAction::InstallEngine(id.clone())]
+                    }
+                    FailureCause::Other => Vec::new(),
+                };
                 self.notice = Some(Notice {
                     tone: NoticeTone::Danger,
                     text: f.message,
+                    model: (!actions.is_empty()).then(|| name.to_string()),
+                    actions,
                 })
             }
         }
@@ -453,6 +497,16 @@ impl LibraryState {
     pub fn confirm_delete(&mut self) -> Option<String> {
         let name = self.confirm_delete.take()?;
         self.begin(&name, PendingOp::Deleting).then_some(name)
+    }
+
+    /// Shows `text` as a failure notice (an action started outside [`Self::begin`]).
+    pub fn show_error(&mut self, text: String) {
+        self.notice = Some(Notice {
+            tone: NoticeTone::Danger,
+            text,
+            model: None,
+            actions: Vec::new(),
+        });
     }
 
     /// The current notice.
@@ -635,10 +689,44 @@ mod tests {
             "nomic-embed-text",
             Err(OpFailure {
                 message: "no engine".into(),
+                cause: FailureCause::Other,
             }),
         );
         assert_eq!(s.notice().map(|n| n.tone), Some(NoticeTone::Danger));
+        assert!(s.notice().unwrap().actions.is_empty());
         assert_eq!(s.rows(None)[1].pill, Pill::off());
+    }
+
+    #[test]
+    fn failed_loads_offer_their_way_out() {
+        let mut s = state();
+        s.begin("qwen3:8b", PendingOp::Loading);
+        s.finish(
+            "qwen3:8b",
+            Err(OpFailure {
+                message: "does not fit in memory".into(),
+                cause: FailureCause::Memory,
+            }),
+        );
+        let n = s.notice().unwrap();
+        assert_eq!(n.model.as_deref(), Some("qwen3:8b"));
+        let labels: Vec<_> = n.actions.iter().map(NoticeAction::label).collect();
+        assert_eq!(
+            labels,
+            ["Open settings", "Lower context", "Unload others & retry"]
+        );
+        s.begin("qwen3:8b", PendingOp::Loading);
+        s.finish(
+            "qwen3:8b",
+            Err(OpFailure {
+                message: "engine `llama-cpp` is not installed".into(),
+                cause: FailureCause::EngineMissing("llama-cpp".into()),
+            }),
+        );
+        assert_eq!(
+            s.notice().unwrap().actions,
+            [NoticeAction::InstallEngine("llama-cpp".into())]
+        );
     }
 
     #[test]
