@@ -170,7 +170,7 @@ fn store_name(hf: &HfRef, variant: &GgufVariant) -> Result<ModelName, HfPullErro
 }
 
 /// Parses a Hub SHA-256 (`LfsInfo::sha256`) into a store digest.
-fn digest_of(file: &RepoFile) -> Result<Digest, HfPullError> {
+pub(crate) fn digest_of(file: &RepoFile) -> Result<Digest, HfPullError> {
     let hex = file
         .sha256
         .as_deref()
@@ -219,6 +219,15 @@ pub async fn pull_hf_with(
     let repo = hf.repo_id();
     let info = client.model_info(&repo, None).await?;
     let files: Vec<RepoFile> = info.siblings.iter().map(RepoFile::from).collect();
+    // whisper.cpp repositories hold `ggml-*.bin` files and no GGUF.
+    if format == PullFormat::Auto
+        && gguf_variants(&files).is_empty()
+        && !crate::ggml::ggml_variants(&files).is_empty()
+        && !matches!(hf.selector(),
+            Some(HfSelector::Quant(q)) if q.eq_ignore_ascii_case(crate::safetensors::TAG))
+    {
+        return crate::ggml::pull_ggml(transfer, client, hf, overlays, info).await;
+    }
     let snapshot = match format {
         PullFormat::Safetensors => true,
         PullFormat::Gguf => false,

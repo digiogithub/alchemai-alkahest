@@ -17,6 +17,7 @@ use crate::launch::{HealthCheck, LaunchRequest, LaunchSpec, ReadyPredicate};
 use crate::llama_cpp::LlamaCppEngine;
 use crate::locator::EngineInstall;
 pub use crate::vllm::VllmEngine;
+pub use crate::whisper_cpp::WhisperCppEngine;
 
 /// GGUF only.
 const GGUF: &[ModelFormat] = &[ModelFormat::Gguf];
@@ -27,7 +28,7 @@ pub fn builtin_engines() -> Vec<Arc<dyn Engine>> {
         Arc::new(LlamaCppEngine::mainline()),
         Arc::new(LlamaCppEngine::prism()),
         Arc::new(VllmEngine),
-        Arc::new(WhisperCppEngine),
+        Arc::new(WhisperCppEngine::new()),
         Arc::new(StableDiffusionCppEngine),
     ]
 }
@@ -53,48 +54,6 @@ fn append_extra_args(spec: &mut LaunchSpec, req: &LaunchRequest, install: &Engin
     }
     for a in req.settings.extra_args.iter().flatten() {
         spec.arg(a);
-    }
-}
-
-/// whisper.cpp `whisper-server`. Provisional command line; the audio story settles it.
-#[derive(Debug, Clone, Copy)]
-pub struct WhisperCppEngine;
-
-impl Engine for WhisperCppEngine {
-    fn id(&self) -> EngineId {
-        EngineId::WhisperCpp
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities::of(&[C::SpeechToText])
-    }
-
-    fn formats(&self) -> &'static [ModelFormat] {
-        GGUF
-    }
-
-    fn dialect(&self) -> ApiDialect {
-        ApiDialect::WhisperServer
-    }
-
-    fn prepare(&self, req: &LaunchRequest, install: &EngineInstall) -> Result<LaunchSpec> {
-        self.check(req)?;
-        let mut spec = base_spec(
-            EngineId::WhisperCpp,
-            req,
-            install,
-            ApiDialect::WhisperServer,
-        );
-        spec.flag("--model", &req.model_path)
-            .flag("--host", req.host.to_string())
-            .flag("--port", req.port.to_string());
-        // whisper-server loads the model before it listens, so any answer means ready.
-        spec.health = HealthCheck {
-            path: "/".into(),
-            ready: ReadyPredicate::AnyResponse,
-        };
-        append_extra_args(&mut spec, req, install);
-        Ok(spec)
     }
 }
 

@@ -238,6 +238,59 @@ async fn rerank(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
     .into_response_body()
 }
 
+/// whisper-server `/inference`: logs the multipart fields (the file as its length) and answers
+/// in the requested `response_format` with the transcript "Hello world.".
+async fn inference(State(log): State<Arc<LlamaLog>>, mut mp: axum::extract::Multipart) -> Response {
+    let mut fields = serde_json::Map::new();
+    while let Some(f) = mp.next_field().await.unwrap() {
+        let name = f.name().unwrap().to_string();
+        if name == "file" {
+            let filename = f.file_name().unwrap_or_default().to_string();
+            let n = f.bytes().await.unwrap().len();
+            fields.insert("file_len".into(), json!(n));
+            fields.insert("filename".into(), json!(filename));
+        } else {
+            fields.insert(name, json!(f.text().await.unwrap()));
+        }
+    }
+    let fields = Value::Object(fields);
+    log.requests
+        .lock()
+        .push(("/inference".into(), fields.clone()));
+    if fields["file_len"] == json!(3) {
+        return Response::builder()
+            .status(400)
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"error":"failed to read audio data"}"#))
+            .unwrap();
+    }
+    let format = fields["response_format"].as_str().unwrap_or("json");
+    let segments = json!([{
+        "id": 0, "text": " Hello world.", "start": 0.0, "end": 1.5, "tokens": [1, 2],
+        "words": [
+            {"word": " Hello", "start": 0.1, "end": 0.6, "probability": 0.9},
+            {"word": " world.", "start": 0.7, "end": 1.2, "probability": 0.9}
+        ],
+        "temperature": 0.0, "avg_logprob": -0.1, "no_speech_prob": 0.01
+    }]);
+    match format {
+        "text" => Response::new(Body::from(" Hello world.\n")),
+        "srt" => Response::new(Body::from(
+            "1\n00:00:00,000 --> 00:00:01,500\n Hello world.\n\n",
+        )),
+        "vtt" => Response::new(Body::from(
+            "WEBVTT\n\n00:00:00.000 --> 00:00:01.500\n Hello world.\n\n",
+        )),
+        "verbose_json" => axum::Json(json!({
+            "task": "transcribe", "language": "english", "duration": 1.5, "text": " Hello world.",
+            "detected_language": "english", "language_probabilities": {"en": 0.99},
+            "segments": segments
+        }))
+        .into_response_body(),
+        _ => axum::Json(json!({"text": " Hello world."})).into_response_body(),
+    }
+}
+
 /// Per-slot context the fake engine reports in `/props`.
 pub const FAKE_N_CTX: u64 = 300;
 
@@ -365,6 +418,7 @@ pub async fn fake_llama(log: Arc<LlamaLog>) -> u16 {
         .route("/detokenize", post(detokenize))
         .route("/props", axum::routing::get(props))
         .route("/v1/rerank", post(rerank))
+        .route("/inference", post(inference))
         .route("/v1/systemone", post(systemone))
         .with_state(log);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -500,6 +554,13 @@ pub fn gguf_with(kv: &[(&str, &str)]) -> Vec<u8> {
 pub fn rerank_model() -> FakeModel {
     FakeModel {
         caps: Capabilities::of(&[Capability::Rerank, Capability::Tokenize]),
+        settings: ModelSettings::default(),
+    }
+}
+
+pub fn stt_model() -> FakeModel {
+    FakeModel {
+        caps: Capabilities::of(&[Capability::SpeechToText]),
         settings: ModelSettings::default(),
     }
 }

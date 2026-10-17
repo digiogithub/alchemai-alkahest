@@ -31,5 +31,6 @@ url.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+alkahest-gguf.workspace = true
 alkahest-fetch.workspace = true
 wiremock.workspace = true

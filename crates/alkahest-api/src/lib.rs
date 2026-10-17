@@ -18,6 +18,7 @@
 
 pub mod admin;
 pub mod anthropic;
+pub mod audio;
 pub mod audit;
 pub mod auth;
 pub mod decisions;
@@ -50,6 +51,7 @@ pub fn inference_routes() -> axum::Router<AppState> {
         .merge(anthropic::routes())
         .merge(responses::routes())
         .merge(rerank::routes())
+        .merge(audio::routes())
         .merge(decisions::routes())
         .merge(admin::routes())
 }

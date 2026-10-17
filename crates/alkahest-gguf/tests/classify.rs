@@ -482,3 +482,26 @@ fn other_tags_and_empty_decision_type_stay_chat() {
     });
     assert_eq!(c.kind, ModelKind::Chat);
 }
+
+#[test]
+fn whisper_ggml_files_are_speech_to_text_in_ggml() {
+    let c = classify(&ClassifyInput {
+        file_name: Some("ggml-tiny.en.bin"),
+        hf_pipeline_tag: Some("automatic-speech-recognition"),
+        ..ClassifyInput::default()
+    });
+    assert_eq!(c.kind, ModelKind::SpeechToText);
+    assert_eq!(c.format, ModelFormat::Ggml);
+
+    // The capability Alkahest writes into the manifest of a pulled whisper model.
+    let caps = caps(&["transcription"]);
+    let c = classify(&ClassifyInput {
+        ollama_capabilities: &caps,
+        ..ClassifyInput::default()
+    });
+    assert_eq!(
+        (c.kind, c.format),
+        (ModelKind::SpeechToText, ModelFormat::Ggml)
+    );
+    assert_eq!(ModelFormat::Ggml.label(), "GGML");
+}

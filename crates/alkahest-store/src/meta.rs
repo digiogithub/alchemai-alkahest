@@ -210,6 +210,8 @@ impl ModelInfo {
 
         let format = if facts.is_some() {
             ModelFormat::Gguf
+        } else if cfg.model_format.eq_ignore_ascii_case("ggml") {
+            ModelFormat::Ggml
         } else if cfg.model_format.eq_ignore_ascii_case("safetensors") || tensor_model {
             ModelFormat::Safetensors
         } else {

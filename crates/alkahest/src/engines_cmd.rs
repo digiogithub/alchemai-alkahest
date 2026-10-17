@@ -356,7 +356,7 @@ async fn install_cmd(
         progress: Some(progress),
         ..InstallOptions::default()
     };
-    if args.from_source && !json {
+    if (args.from_source || recipe.needs_source_build(&host)) && !json {
         eprintln!(
             "building {} {} from source; this takes a while",
             recipe.id, recipe.tag

@@ -112,10 +112,12 @@ pub async fn install(
     {
         return Ok(done);
     }
+    // A recipe without a prebuilt archive for this host is built from source.
+    let from_source = opts.from_source || recipe.needs_source_build(&host);
     let venv = recipe
         .venv
         .as_ref()
-        .filter(|_| !opts.from_source && recipe.asset_for(&host).is_none());
+        .filter(|_| !from_source && recipe.asset_for(&host).is_none());
     if let Some(venv) = venv {
         return install_venv(
             recipe,
@@ -134,7 +136,7 @@ pub async fn install(
         fs::remove_dir_all(&partial).map_err(|e| RecipeError::io(&partial, e))?;
     }
 
-    let (source, sha256, tofu) = if opts.from_source {
+    let (source, sha256, tofu) = if from_source {
         let src = recipe
             .source
             .as_ref()
@@ -227,7 +229,7 @@ pub async fn install(
         source,
         sha256,
         tofu,
-        from_source: opts.from_source,
+        from_source,
         library_dirs: recipe.library_dirs.clone(),
     };
     let marker_path = partial.join(MARKER_FILE);

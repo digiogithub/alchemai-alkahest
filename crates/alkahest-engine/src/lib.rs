@@ -25,6 +25,7 @@ pub mod registry;
 pub mod select;
 pub mod supervisor;
 pub mod vllm;
+pub mod whisper_cpp;
 
 pub use capability::{Capabilities, Capability, CapabilityError, kind_capabilities};
 pub use engine::Engine;
@@ -49,3 +50,4 @@ pub use supervisor::{
     EngineHandle, EngineState, EphemeralPorts, ExitInfo, PortPicker, SpawnOptions, launch, spawn,
 };
 pub use vllm::{VllmEngine, tool_call_parser};
+pub use whisper_cpp::WhisperCppEngine;
