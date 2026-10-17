@@ -284,12 +284,33 @@ pub enum EnginesAction {
 /// `alkahest service ...`
 #[derive(Debug, Subcommand)]
 pub enum ServiceAction {
-    /// Install the service unit.
-    Install,
-    /// Remove the service unit.
-    Uninstall,
-    /// Show service status.
-    Status,
+    /// Install the service unit and start it.
+    Install(ServiceArgs),
+    /// Stop the service and remove the unit (the service user and its data stay).
+    Uninstall(ServiceArgs),
+    /// Start the installed service.
+    Start(ServiceArgs),
+    /// Stop the installed service.
+    Stop(ServiceArgs),
+    /// Show whether the service is running and where it listens.
+    Status(ServiceArgs),
+}
+
+/// Options shared by the `service` actions.
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct ServiceArgs {
+    /// Manage a per-user service (`systemctl --user`) instead of the system service.
+    #[arg(long)]
+    pub user: bool,
+    /// Print the unit and the commands without writing or running anything.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Write below this directory and run no command (packaging, tests).
+    #[arg(long, value_name = "DIR")]
+    pub root: Option<std::path::PathBuf>,
+    /// Binary the unit starts; defaults to the running executable.
+    #[arg(long, value_name = "PATH")]
+    pub bin: Option<std::path::PathBuf>,
 }
 
 /// `alkahest config ...`
