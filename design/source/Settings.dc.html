@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Alkahest · Settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#C9CDD1;text-decoration:none}a:hover{color:#E8E6E1}
+</style>
+</helmet>
+<div style="min-height: 900px; background: #0F1214; color: #E8E6E1; font-family: 'Schibsted Grotesk', system-ui, sans-serif; display: flex; flex-wrap: wrap">
+
+  <nav aria-label="Main" style="flex: 1 0 232px; box-sizing: border-box; padding: 18px 14px; background: #121518; border-right: 1px solid #2A3036; display: flex; flex-direction: column; gap: 4px">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 6px 10px 20px">
+      <svg viewBox="0 0 64 64" width="26" height="26" fill="none" stroke="#E3A63B" stroke-width="6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M6 12 H58"></path><path d="M13 12 L32 52 L51 12"></path><circle cx="32" cy="27" r="7" fill="#E3A63B" stroke="none"></circle></svg>
+      <span style="font-size: 20px; font-weight: 600; letter-spacing: -0.04em">alkahest</span>
+    </div>
+    <a href="Library.dc.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l8-3 8 3-8 3z"></path><path d="M4 12l8 3 8-3"></path><path d="M4 18l8 3 8-3"></path></svg>Library<span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px">14</span></a>
+    <a href="Discover.dc.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>Discover<span style="margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9CC4F0">2↓</span></a>
+    <a href="Running.dc.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"></path></svg>Running<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #6FD3BF"><span style="width: 7px; height: 7px; border-radius: 50%; background: #46B5A0"></span>4</span></a>
+    <a href="Engines.dc.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"></path></svg>Engines</a>
+    <a href="ApiKeys.dc.html" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"></circle><path d="M11 12l9-9M17 6l3 3M14 9l2 2"></path></svg>API keys</a>
+    <a href="Settings.dc.html" aria-current="page" style="display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 8px; background: #2B2414; color: #F2C46E; font-size: 14px; font-weight: 600"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"></path><circle cx="15" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg>Settings</a>
+    <div style="margin-top: auto; padding: 14px; border: 1px solid #2A3036; border-radius: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #A7ADB3">
+      <span style="display: flex; align-items: center; gap: 8px; color: #6FD3BF; font-weight: 600; font-size: 13px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #46B5A0"></span>Service running</span>
+      <span style="font-family: 'IBM Plex Mono', monospace">127.0.0.1:11435</span>
+      <span>systemd · alkahest.service</span>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 32px; display: flex; flex-direction: column; gap: 18px">
+    <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 4px; margin-right: auto">
+        <h1 style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em">Settings</h1>
+        <span style="font-size: 13px; color: #A7ADB3">Server settings write <span style="font-family: 'IBM Plex Mono', monospace">~/.config/alkahest/config.toml</span> · app settings write <span style="font-family: 'IBM Plex Mono', monospace">desktop.toml</span></span>
+      </div>
+      <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: #F2C46E"><span style="width: 7px; height: 7px; border-radius: 50%; background: #E3A63B"></span>2 unsaved changes · 1 needs a restart</span>
+      <button type="button" style="height: 38px; padding: 0 16px; border-radius: 8px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 14px 'Schibsted Grotesk', sans-serif">Discard</button>
+      <button type="button" style="height: 38px; padding: 0 16px; border-radius: 8px; border: none; background: #E3A63B; color: #1A1206; font: 600 14px 'Schibsted Grotesk', sans-serif">Save &amp; restart server</button>
+    </header>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start">
+      <div style="flex: 1.4 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+
+        <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+          <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px"><h2 style="margin: 0; font-size: 16px; font-weight: 600">Storage</h2><span style="font-size: 12px; color: #A7ADB3">412 GB free on /home</span></div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <span style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #A7ADB3">Models folder<span style="font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: #2B2414; color: #F2C46E">changed · restart</span></span>
+            <div style="display: flex; gap: 8px">
+              <input type="text" aria-label="Models folder" value="/data/alkahest/models" style="flex: 1; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px solid #E3A63B; background: #121518; color: #E8E6E1; font: 500 13px 'IBM Plex Mono', monospace; box-shadow: 0 0 0 3px #E3A63B2E">
+              <button type="button" style="height: 38px; padding: 0 14px; border-radius: 8px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 13px 'Schibsted Grotesk', sans-serif">Choose…</button>
+            </div>
+            <span style="font-size: 12px; color: #A7ADB3">Was <span style="font-family: 'IBM Plex Mono', monospace">~/.local/share/alkahest/models</span> (86.4 GB). Existing models are not moved; Library lists the new folder after the restart.</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <span style="font-size: 13px; color: #A7ADB3">Engines folder</span>
+            <div style="display: flex; gap: 8px">
+              <input type="text" aria-label="Engines folder" value="~/.local/share/alkahest/engines" style="flex: 1; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px solid #343B42; background: #121518; color: #E8E6E1; font: 500 13px 'IBM Plex Mono', monospace">
+              <button type="button" style="height: 38px; padding: 0 14px; border-radius: 8px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 13px 'Schibsted Grotesk', sans-serif">Choose…</button>
+            </div>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid #22272C">
+            <span style="display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 240px">
+              <span style="font-size: 14px; font-weight: 600">Use models from the Ollama store</span>
+              <span style="font-size: 12px; color: #A7ADB3"><span style="font-family: 'IBM Plex Mono', monospace; color: #C9CDD1">~/.ollama/models</span> · 9 models · read-only, Alkahest never writes there</span>
+            </span>
+            <label style="display: inline-flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px"><input type="checkbox" checked aria-label="Use models from the Ollama store" style="accent-color: #46B5A0; width: 18px; height: 18px; margin: 0">On</label>
+            <button type="button" style="height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 13px 'Schibsted Grotesk', sans-serif">Other path…</button>
+          </div>
+        </section>
+
+        <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 600">Model loading</h2>
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <span style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #A7ADB3">Default keep-alive<span style="font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: #2B2414; color: #F2C46E">changed</span></span>
+            <div role="group" aria-label="Default keep-alive" style="display: flex; flex-wrap: wrap; gap: 6px">
+              <button type="button" style="height: 34px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: transparent; color: #C9CDD1; font: 500 13px 'IBM Plex Mono', monospace">After each request</button>
+              <button type="button" style="height: 34px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: transparent; color: #C9CDD1; font: 500 13px 'IBM Plex Mono', monospace">5m</button>
+              <button type="button" aria-pressed="true" style="height: 34px; padding: 0 12px; border-radius: 7px; border: 1px solid #E3A63B; background: #2B2414; color: #F2C46E; font: 600 13px 'IBM Plex Mono', monospace">30m</button>
+              <button type="button" style="height: 34px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: transparent; color: #C9CDD1; font: 500 13px 'IBM Plex Mono', monospace">1h</button>
+              <button type="button" style="height: 34px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: transparent; color: #C9CDD1; font: 500 13px 'IBM Plex Mono', monospace">Forever</button>
+              <input type="text" aria-label="Custom keep-alive" placeholder="custom, e.g. 1h30m" style="width: 160px; height: 34px; box-sizing: border-box; padding: 0 10px; border-radius: 7px; border: 1px solid #343B42; background: #121518; color: #E8E6E1; font: 500 13px 'IBM Plex Mono', monospace">
+            </div>
+            <span style="font-size: 12px; color: #A7ADB3">Idle time before a model leaves memory. A request's <span style="font-family: 'IBM Plex Mono', monospace">keep_alive</span> and per-model settings win. Applies without a restart.</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+            <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #A7ADB3">Max loaded models
+              <input type="text" value="Auto (memory)" style="height: 38px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px solid #343B42; background: #121518; color: #E8E6E1; font: 500 14px 'IBM Plex Mono', monospace">
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #A7ADB3">Parallel requests per model
+              <input type="text" value="Auto" style="height: 38px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px solid #343B42; background: #121518; color: #E8E6E1; font: 500 14px 'IBM Plex Mono', monospace">
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #A7ADB3">Queue limit
+              <input type="text" value="512" disabled style="height: 38px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px dashed #4A5157; background: #0F1214; color: #A7ADB3; font: 500 14px 'IBM Plex Mono', monospace">
+            </label>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; border: 1px solid #343B42; font-size: 12px; color: #C9CDD1; line-height: 1.5">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A7ADB3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+            <span>Queue limit is set by <span style="font-family: 'IBM Plex Mono', monospace">ALKAHEST_MAX_QUEUE</span> in the service environment and cannot be changed here.</span>
+          </div>
+        </section>
+      </div>
+
+      <aside style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+        <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 600">Server connection</h2>
+          <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #A7ADB3">This app talks to
+            <input type="text" value="http://127.0.0.1:11435" style="height: 38px; box-sizing: border-box; padding: 0 12px; border-radius: 8px; border: 1px solid #343B42; background: #121518; color: #E8E6E1; font: 500 13px 'IBM Plex Mono', monospace">
+          </label>
+          <span style="font-size: 12px; color: #A7ADB3">A remote server needs an API key, stored in the system keyring. Bind address, port and CORS live in <a href="ApiKeys.dc.html" style="color: #F2C46E">API keys &amp; network</a>.</span>
+          <div style="display: flex; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid #22272C">
+            <span style="flex: 1; font-size: 13px">API key <span style="font-family: 'IBM Plex Mono', monospace; color: #A7ADB3">not needed (loopback)</span></span>
+            <button type="button" style="height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 13px 'Schibsted Grotesk', sans-serif">Set key…</button>
+          </div>
+        </section>
+
+        <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 600">Appearance</h2>
+          <div role="group" aria-label="Theme" style="display: flex; padding: 3px; border-radius: 9px; background: #121518; border: 1px solid #2A3036">
+            <button type="button" aria-pressed="true" style="flex: 1; height: 34px; border-radius: 7px; border: none; background: #2B2414; color: #F2C46E; font: 600 13px 'Schibsted Grotesk', sans-serif">Dark</button>
+            <button type="button" style="flex: 1; height: 34px; border-radius: 7px; border: none; background: transparent; color: #C9CDD1; font: 500 13px 'Schibsted Grotesk', sans-serif">Light</button>
+            <button type="button" style="flex: 1; height: 34px; border-radius: 7px; border: none; background: transparent; color: #C9CDD1; font: 500 13px 'Schibsted Grotesk', sans-serif">System</button>
+          </div>
+          <span style="font-size: 12px; color: #A7ADB3">Applies immediately. Saved in <span style="font-family: 'IBM Plex Mono', monospace">desktop.toml</span>.</span>
+        </section>
+
+        <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 600">Logging</h2>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+            <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #A7ADB3">Level
+              <select style="height: 38px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; border: 1px solid #343B42; background: #121518; color: #E8E6E1; font: 500 13px 'IBM Plex Mono', monospace"><option>error</option><option>warn</option><option selected>info</option><option>debug</option><option>trace</option></select>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #A7ADB3">Format
+              <select style="height: 38px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; border: 1px solid #343B42; background: #121518; color: #E8E6E1; font: 500 13px 'IBM Plex Mono', monospace"><option selected>text</option><option>json</option></select>
+            </label>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px">
+            <span style="flex: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #A7ADB3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">~/.local/state/alkahest/logs · daily · 7 files</span>
+            <button type="button" style="height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid #343B42; background: #1D2226; color: #E8E6E1; font: 500 13px 'Schibsted Grotesk', sans-serif">Open folder</button>
+          </div>
+        </section>
+
+        <section style="background: #161A1D; border: 1px solid #2A3036; border-radius: 14px; padding: 16px 20px; display: flex; flex-direction: column; gap: 6px">
+          <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB3">Loaded from</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #C9CDD1">defaults</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #C9CDD1">~/.config/alkahest/config.toml</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #C9CDD1">env ALKAHEST_MAX_QUEUE</span>
+        </section>
+      </aside>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

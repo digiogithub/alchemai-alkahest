@@ -65,8 +65,8 @@ completeness; v1 can ship dark only.
 - Window: default 1440×900, minimum 960×640. Client-side title bar follows
   the platform; the design shows content only.
 - Left rail 232 px (`bg.sidebar`): wordmark, nav (Library, Discover, Running,
-  Engines, API keys) with live counters (models, active downloads, loaded
-  models), and a service card at the bottom (state, bind address, service
+  Engines, API keys, Settings) with live counters (models, active downloads,
+  loaded models, engine install jobs), and a service card at the bottom (state, bind address, service
   manager). Active item = `accent.subtle` background + `accent.text`.
 - Content padding 24/32 px, screen title `type.h1`, primary action top right.
 - All data comes from the local server over HTTP (`alkahest-client`); the
@@ -83,6 +83,9 @@ completeness; v1 can ship dark only.
 | 12 | Model settings | `screens/12-model-settings.html` | per-model runtime config |
 | 13 | Running | `screens/13-running.html` | loaded models, hardware, live requests |
 | 14 | API keys & network | `screens/14-api-keys.html` | external access, keys, endpoints, HF token |
+| 15 | Engines | `screens/15-engines.html` | engine recipes, installed builds per accelerator, install jobs |
+| 16 | Settings | `screens/16-settings.html` | storage, model loading, server connection, theme, logging |
+| 17 | States & confirmations | `screens/17-states.html` | empty, first-run, connection, failure states; destructive dialogs |
 
 The previews contain sample data only (model names, sizes and counters are
 illustrative).
@@ -148,12 +151,121 @@ illustrative).
   `/v1/messages`, decisions `/v1/systemone` and `/v1/decisions`.
 - Hugging Face token (stored in the system keyring) with Replace.
 
+### 15 Engines
+
+Data: the engine catalog and installed builds (`alkahest engines ls` /
+`engines info`, admin engines API), install jobs (admin install job API).
+
+- Header: engine count, installed builds, engines folder and disk use;
+  secondary "Reload recipes"; brass "Install recommended builds" installs the
+  `recommended` variant of every engine that has none installed (the one
+  primary action of the view).
+- "This machine" strip: detected accelerators with the facts variant
+  selection uses (GPU, VRAM, driver, maximum CUDA version; Vulkan; CPU
+  features), the preference order Metal › CUDA › ROCm › Vulkan › CPU, and the
+  `engines.auto_install` toggle (off by default, it downloads executables).
+- Install jobs card (one per running job, signal blue): state pill
+  (`Downloading` with bytes/speed, `Verifying sha256`, `Building from source`
+  with the cmake step counter), progress bar, last log lines in a code block
+  with the log path, Cancel (secondary; cancel kills a source build).
+- One card per engine id (`llama-cpp`, `prism-llama-cpp`, `vllm`, later
+  whisper.cpp and stable-diffusion.cpp): name, id in mono, what it serves,
+  pinned recipe version tag, "Override…" (opens a sheet for
+  `engines.overrides.<id>`: custom executable path and extra args).
+  - Installed builds table: `version · variant` in mono, tag pill (`in use` =
+    verdigris when a loaded model runs on it, `bundled` = neutral), origin
+    (`prebuilt · sha256 verified`, `prebuilt · tofu`, `built from source`),
+    size, models using it, Info and Remove (cinnabar outline; no Remove on the
+    bundled CPU build). Remove opens confirmation 17.13.
+  - Not installed: one muted line with the CLI equivalent.
+  - Variants row, one chip per recipe variant, state by style: installed
+    (verdigris border), recommended (brass border, note with download size),
+    available (neutral), building/downloading (signal blue), source only or
+    install on request (dashed), unsupported on this host (dashed, faint,
+    reason as the note). A click on an available chip installs that variant;
+    a menu on it offers "Build from source".
+- Footnote: models use the newest installed build unless pinned in model
+  settings (`engine = "llama-cpp@b11669"`); recipe directories.
+
+### 16 Settings
+
+Data: the server configuration (admin settings API over `config.toml`) and
+the desktop's own `desktop.toml`. Network settings (bind, port, CORS,
+endpoints) and the HF token stay on screen 14; Settings links there.
+
+- Header: which files are written; dirty state ("2 unsaved changes · 1 needs
+  a restart", brass dot); Discard (secondary) and brass "Save" — the label
+  becomes "Save & restart server" when a changed field needs a restart.
+- Changed fields carry a brass `changed` tag (`changed · restart` when the
+  server must restart) and the focus ring.
+- Storage: models folder and engines folder (mono path input + "Choose…"),
+  free disk; a changed models folder explains that existing models are not
+  moved. "Use models from the Ollama store" toggle (verdigris) with the
+  detected path, model count and the read-only promise; "Other path…".
+- Model loading: default keep-alive as segmented presets (After each request
+  = `0`, `5m`, `30m`, `1h`, Forever = `-1`) plus a custom field accepting the
+  Ollama duration syntax; max loaded models, parallel requests per model
+  (`0` is shown as "Auto"), queue limit.
+- A field set by an environment variable (`ALKAHEST_*`) is read-only: dashed
+  border, muted value and a lock note naming the variable.
+- Side column: server connection (URL this app talks to; API key for a
+  remote server, kept in the keyring), Appearance (Dark / Light / System
+  segmented, applies at once, `desktop.toml`), Logging (level, format, log
+  folder + rotation, "Open folder"), and "Loaded from" listing the
+  configuration sources in precedence order.
+
+### 17 States & confirmations
+
+A reference sheet (fixed 1440 px wide, not a page). Frames show the content
+area; rail and service card are as on the other screens.
+
+- 17.1 Library empty: dashed drop zone, outline mark, "No models yet", brass
+  "Discover models", secondary "Point to an Ollama store" (Settings), CLI
+  hint `alkahest pull …`. The empty result of a filter (not drawn) reuses
+  the block with "No models match" and a "Clear filters" secondary, no brass.
+- 17.2 Running empty: hardware tiles still live, dashed block "Nothing
+  loaded", secondary "Open Library" (no brass: nothing to do here).
+- 17.3 First run (no server answered and no models): rail items disabled,
+  grey service card, three-step checklist: 1 Start the local server (brass,
+  the active step has the brass border), 2 engine build (recommended GPU
+  variant from the Engines data), 3 get a model (Ollama store count or
+  Discover). Footer link to connect to a remote server. Steps turn verdigris
+  with a check when done; the view is replaced by Library when 1 and 3 are.
+- 17.4 Server stopped (local URL): grey dot "Service not running", the
+  error in mono, Start server (secondary in the card, brass in the content);
+  lists keep their last data greyed and actions are disabled.
+- 17.5 Connection lost (remote URL, Start not offered): brass warning banner
+  with retry countdown, attempt and last seen time; raw error in mono
+  cinnabar text; "Change server" and brass "Retry now". Backoff as in
+  `connection.rs` (0.5 s doubling to 10 s).
+- 17.6 Unauthorized (401/403): lock, explanation, password field for the
+  key, keyring note, "Use local server" and brass "Connect".
+- 17.7 Download failures in the Discover downloads strip: `Interrupted`
+  (kept bytes, Resume / Discard), `Checksum mismatch` (bytes deleted,
+  Retry), `Gated repo` (brass lock pill, link to add the HF token).
+- 17.8 Engine and load failures: `Build failed` (log tail, Open full log,
+  Install prebuilt instead), `Load failed` for memory (needed vs free,
+  Unload others and retry, Lower context → model settings), `Engine missing`
+  (Go to Engines; shown when auto-install is off).
+- 17.9–17.14 Confirmation dialogs (overlay surface, `shadow.overlay`, 380 px,
+  backdrop `bg.code` at 72 %): title as a question naming the object, the
+  object's facts in mono, consequences in one or two sentences, buttons right
+  aligned: Cancel (default focus, brass focus ring), optional safer
+  alternative (secondary), confirming action (cinnabar). Esc and the backdrop
+  cancel. Dialogs: delete model; delete refused for an Ollama-store model
+  (information only, "Copy command" for `ollama rm`); kill engine (alternative
+  "Unload instead"); revoke key (type the key name to enable Revoke when the
+  key was used in the last 24 h); remove engine build (fallback named); stop
+  all models (alternative "Unload idle").
+- Colour rule recap: cinnabar fills only the confirming button of a
+  destructive action, the destructive outline buttons, and failure pills/text;
+  warnings use the brass subtle banner; nothing in these states adds a second
+  brass button to a view.
+
 ### Not designed yet
 
-- Engines screen (recipes: installed builds per accelerator, download or
-  build, version pins).
-- Settings (store paths, default keep-alive, max loaded models, theme).
-- Empty, error and first-run states; delete and kill confirmations.
+- Tray menu and notifications (ALK-US-0073).
+- Light theme renders of the screens (tokens exist; v1 may ship dark only).
 
 ## Previews
 
@@ -166,3 +278,9 @@ cd design/screens
 google-chrome --headless=new --hide-scrollbars --virtual-time-budget=4000 \
   --window-size=1440,1080 --screenshot=png/10-library.png "file://$PWD/10-library.html"
 ```
+
+`17-states.html` is a tall sheet: render it with `--window-size=1440,3100`.
+The exported `.html` files differ from the canvas sources only by the
+template tag (`<x-dc>` becomes `<script type="text/x-dc-template">`), the root
+`min-height: 100vh` and the link targets (`Library.dc.html` becomes
+`10-library.html`).
