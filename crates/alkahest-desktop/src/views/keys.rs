@@ -28,8 +28,8 @@ use crate::ui::{
 use crate::views::icons;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
-    ButtonKind, button, card, card_title, checkbox, column_label, dialog, field_frame, field_label,
-    mono_caption, notice_line, tag, warning_banner,
+    ButtonKind, button, card, card_title, checkbox, column_label, dialog, dismissable, field_frame,
+    field_label, mono_caption, notice_line, tag, warning_banner,
 };
 
 /// Width of the side column (created key, endpoints, HF token).
@@ -1000,7 +1000,12 @@ impl KeysView {
         el
     }
 
-    fn revoke_dialog(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn revoke_dialog(
+        &self,
+        window: &mut Window,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let ask = self.state.revoke.as_ref()?;
         let extra = ask.needs_typing.then(|| {
             v_flex()
@@ -1052,15 +1057,24 @@ impl KeysView {
         if can {
             confirm = confirm.on_click(cx.listener(|this, _, window, cx| this.revoke(window, cx)));
         }
+        let scrim = dialog(
+            format!("Revoke {}?", ask.name),
+            Some(SharedString::from(ask.facts.clone())),
+            "Clients using this key get 401 from the next request. This cannot be undone; \
+             create a new key to restore access.",
+            extra,
+            vec![cancel, confirm],
+            p,
+        );
         Some(
-            dialog(
-                format!("Revoke {}?", ask.name),
-                Some(SharedString::from(ask.facts.clone())),
-                "Clients using this key get 401 from the next request. This cannot be undone; \
-                 create a new key to restore access.",
-                extra,
-                vec![cancel, confirm],
-                p,
+            dismissable(
+                scrim,
+                cx.listener(|this, _: &(), _, cx| {
+                    this.state.revoke = None;
+                    cx.notify();
+                }),
+                window,
+                cx,
             )
             .into_any_element(),
         )
@@ -1122,7 +1136,7 @@ impl Render for KeysView {
                 ),
         );
         let mut root = div().relative().size_full().child(content);
-        if let Some(d) = self.revoke_dialog(p, cx) {
+        if let Some(d) = self.revoke_dialog(window, p, cx) {
             root = root.child(d);
         }
         root

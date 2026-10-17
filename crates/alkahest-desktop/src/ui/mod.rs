@@ -12,12 +12,14 @@
 
 pub use gpui_kit::prelude::*;
 pub use gpui_kit::{
-    AnyElement, AnyWindowHandle, App, AppContext, Application, AsyncApp, Bounds, ClickEvent,
-    Context, Div, ElementId, Entity, FontWeight, Global, Hsla, Pixels, Render, SharedString, Size,
-    Stateful, Task, TextSystem, TitlebarOptions, WeakEntity, Window, WindowAppearance,
-    WindowBounds, WindowOptions, div, px, rgba, size,
+    AnyElement, AnyView, AnyWindowHandle, App, AppContext, Application, AsyncApp, Bounds,
+    ClickEvent, Context, Div, ElementId, Entity, FontWeight, Global, Hsla, Pixels, Render,
+    SharedString, Size, Stateful, Task, TextSystem, TitlebarOptions, WeakEntity, Window,
+    WindowAppearance, WindowBounds, WindowOptions, div, px, rgba, size,
 };
-pub use gpui_kit::{BoxShadow, ScrollHandle, point, relative};
+pub use gpui_kit::{
+    BoxShadow, FocusHandle, KeyDownEvent, MouseButton, ScrollHandle, point, relative,
+};
 
 /// The system clipboard (copy a key secret, a command).
 pub use gpui_kit::ClipboardItem;
@@ -27,6 +29,11 @@ pub use gpui_kit::Focusable;
 
 /// Flex-row and flex-column shorthands.
 pub use gpui_kit::component::{h_flex, v_flex};
+
+/// A plain-text tooltip view (hover text of a disabled button).
+pub fn text_tooltip(text: impl Into<SharedString>, window: &mut Window, cx: &mut App) -> AnyView {
+    gpui_kit::component::tooltip::Tooltip::new(text.into()).build(window, cx)
+}
 
 /// A monochrome SVG icon tinted with the current text colour.
 pub use gpui_kit::component::Icon;

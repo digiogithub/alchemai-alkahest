@@ -84,6 +84,7 @@ pub struct SettingsView {
     notice: Option<(bool, String)>,
     inputs: Vec<(&'static str, Entity<InputState>)>,
     url_input: Entity<InputState>,
+    ca_input: Entity<InputState>,
     key_input: Entity<InputState>,
     pending_reload: bool,
     /// The `alkahest` executable an autostart entry runs; `None` hides the toggle.
@@ -138,6 +139,16 @@ impl SettingsView {
             }
         })
         .detach();
+        let ca_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("/path/to/ca.pem (private CA of the server)")
+        });
+        cx.subscribe_in(&ca_input, window, |this, input, e: &InputEvent, _, cx| {
+            if matches!(e, InputEvent::Change) {
+                this.conn.ca_cert = input.read(cx).value().to_string();
+                cx.notify();
+            }
+        })
+        .detach();
         let key_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("alk_\u{2026}")
@@ -150,11 +161,13 @@ impl SettingsView {
             }
         })
         .detach();
-        let saved_url = settings_file
+        let saved = settings_file
             .as_deref()
             .and_then(|p| DesktopSettings::load(p).ok())
-            .and_then(|s| s.server_url)
             .unwrap_or_default();
+        let saved_url = saved.server_url.unwrap_or_default();
+        let saved_ca = saved.ca_cert.unwrap_or_default();
+        ca_input.update(cx, |s, cx| s.set_value(saved_ca.clone(), window, cx));
         url_input.update(cx, |s, cx| s.set_value(saved_url.clone(), window, cx));
         // Asked off the UI thread: a locked keyring may block on an unlock prompt.
         if keyring && !env_key {
@@ -187,6 +200,7 @@ impl SettingsView {
             conn: ConnectionDraft {
                 server_url: saved_url,
                 new_key: String::new(),
+                ca_cert: saved_ca,
             },
             editing_key: false,
             saving: false,
@@ -194,6 +208,7 @@ impl SettingsView {
             notice: None,
             inputs,
             url_input,
+            ca_input,
             key_input,
             pending_reload: false,
             autostart: crate::autostart::is_enabled(&crate::autostart::process_env),
@@ -383,9 +398,18 @@ impl SettingsView {
                 return;
             }
         };
+        let ca = match self.conn.ca() {
+            Ok(ca) => ca,
+            Err(e) => {
+                self.notice = Some((true, format!("CA certificate: {e}")));
+                cx.notify();
+                return;
+            }
+        };
         if let Some(path) = &self.settings_file {
             let mut s = DesktopSettings::load(path).unwrap_or_default();
             s.server_url = url;
+            s.ca_cert = ca;
             if let Err(e) = s.save(path) {
                 self.notice = Some((true, e.to_string()));
                 cx.notify();
@@ -396,6 +420,19 @@ impl SettingsView {
             return;
         }
         cx.emit(SettingsEvent::Reconnect);
+    }
+
+    /// The http / https switch next to the server URL.
+    fn set_scheme(&mut self, https: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.conn.server_url.trim().is_empty() {
+            // The switch acts on the server in use, not on an invented default.
+            self.conn.server_url.clone_from(&self.server_url);
+        }
+        self.conn.set_https(https);
+        let text = self.conn.server_url.clone();
+        self.url_input
+            .update(cx, |s, cx| s.set_value(text, window, cx));
+        cx.notify();
     }
 
     /// Writes a typed key to the keyring; false when that failed.
@@ -720,9 +757,28 @@ impl SettingsView {
 
     fn connection_card(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
         let local = is_local_url(&self.server_url);
+        let https = if self.conn.server_url.trim().is_empty() {
+            crate::tls::is_https(&self.server_url)
+        } else {
+            self.conn.https()
+        };
+        let env_ca = std::env::var(alkahest_client::CA_CERT_ENV)
+            .ok()
+            .filter(|v| !v.trim().is_empty());
         let mut el = card(p)
             .child(div().type_style(text::TITLE).child("Server connection"))
             .child(field_label("This app talks to", p))
+            .child(segmented(
+                vec![
+                    segment("scheme-http", "http", !https, p).on_click(
+                        cx.listener(|this, _, window, cx| this.set_scheme(false, window, cx)),
+                    ),
+                    segment("scheme-https", "https (TLS)", https, p).on_click(
+                        cx.listener(|this, _, window, cx| this.set_scheme(true, window, cx)),
+                    ),
+                ],
+                p,
+            ))
             .child(
                 h_flex()
                     .gap(px(space::S2))
@@ -769,6 +825,37 @@ impl SettingsView {
                         cx.emit(SettingsEvent::Navigate(Screen::ApiKeys));
                     })),
             );
+        if https {
+            el = el.child(field_label("CA certificate (PEM)", p));
+            el = el.child(
+                field_frame(self.conn.ca().is_err(), p).child(
+                    div()
+                        .flex_1()
+                        .child(Input::new(&self.ca_input).appearance(false)),
+                ),
+            );
+            let note = match (&env_ca, self.conn.ca()) {
+                (_, Err(e)) => e,
+                (Some(path), _) => format!(
+                    "{} is set to {path} and takes precedence over this field.",
+                    alkahest_client::CA_CERT_ENV
+                ),
+                (None, _) => "Needed when the server uses a private CA (alkahest certs generate \
+                              writes ca.pem). Blank trusts the system roots and, for the local \
+                              server, its generated CA."
+                    .to_string(),
+            };
+            el = el.child(
+                div()
+                    .type_style(text::CAPTION)
+                    .text_color(c(if self.conn.ca().is_err() {
+                        p.danger_text
+                    } else {
+                        p.text_muted
+                    }))
+                    .child(note),
+            );
+        }
         let status = key_status(local, self.has_key, self.env_key);
         let mut key_row = h_flex()
             .items_center()

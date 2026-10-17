@@ -5,9 +5,12 @@ use alkahest_gguf::ModelKind;
 
 use crate::present::{FormatTag, Pill, kind_label, kind_token};
 use crate::theme::tokens::{Palette, SHADOW_OVERLAY, radius, size, space, text};
+use std::rc::Rc;
+
 use crate::ui::{
-    AnyElement, BoxShadow, Div, ElementId, FontWeight, Hsla, InteractiveElement, ParentElement,
-    SharedString, Stateful, Styled, div, h_flex, point, px, svg_icon, v_flex,
+    AnyElement, App, BoxShadow, Div, ElementId, FontWeight, Hsla, InteractiveElement, KeyDownEvent,
+    MouseButton, ParentElement, SharedString, Stateful, StatefulInteractiveElement, Styled, Window,
+    div, h_flex, point, px, svg_icon, v_flex,
 };
 use crate::views::style::{TextStyleExt, c};
 
@@ -443,6 +446,8 @@ pub fn dialog(
         .border_1()
         .border_color(c(p.line_default))
         .shadow(vec![overlay_shadow()])
+        // A press inside the card must not reach the scrim, which cancels on a backdrop click.
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(div().type_style(text::H2).child(title.into()));
     if let Some(f) = facts {
         card = card.child(
@@ -473,6 +478,54 @@ pub fn dialog(
         .bg(c(p.bg_code).opacity(0.72))
         .occlude()
         .child(card.child(actions))
+}
+
+/// Adds a hover tooltip to `el` (why a disabled button is disabled).
+pub fn with_tooltip(el: Stateful<Div>, text: impl Into<SharedString>) -> Stateful<Div> {
+    let text: SharedString = text.into();
+    el.tooltip(move |window, cx| crate::ui::text_tooltip(text.clone(), window, cx))
+}
+
+/// Whether `key` (a GPUI key name) dismisses a dialog: Escape anywhere, Enter only while the
+/// dialog itself has the focus (Cancel is the default button of every confirmation, screen
+/// 17.9-17.14; inside a text field Enter belongs to the field).
+pub fn is_cancel_key(key: &str, dialog_focused: bool) -> bool {
+    key == "escape" || (key == "enter" && dialog_focused)
+}
+
+/// Makes a [`dialog`] (or any scrim built like it) cancel on Esc, on Enter (Cancel has the
+/// default focus) and on a click on the backdrop. `on_cancel` closes the dialog.
+///
+/// The scrim takes the keyboard focus when the dialog appears, unless something inside it (a
+/// text field) already has it, so the keys reach it. The focus handle lives as long as the
+/// dialog is rendered in consecutive frames (GPUI keyed state), so views need no field for it.
+pub fn dismissable(
+    scrim: Stateful<Div>,
+    on_cancel: impl Fn(&(), &mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> Stateful<Div> {
+    let focus = window
+        .use_keyed_state("dialog-focus", cx, |_, cx| cx.focus_handle())
+        .read(cx)
+        .clone();
+    if !focus.contains_focused(window, cx) {
+        focus.focus(window, cx);
+    }
+    let on_cancel = Rc::new(on_cancel);
+    let on_key = on_cancel.clone();
+    let tracked = focus.clone();
+    scrim
+        .track_focus(&focus)
+        .on_key_down(move |e: &KeyDownEvent, window, cx| {
+            if is_cancel_key(&e.keystroke.key, tracked.is_focused(window)) {
+                on_key(&(), window, cx);
+                cx.stop_propagation();
+            }
+        })
+        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            on_cancel(&(), window, cx);
+        })
 }
 
 /// A section title inside a card with an optional muted note at the right.
@@ -561,4 +614,20 @@ pub fn empty_block(
         el = el.child(mono_caption(h, p));
     }
     el
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_cancel_key;
+
+    #[test]
+    fn cancel_keys() {
+        assert!(is_cancel_key("escape", false), "Esc cancels from anywhere");
+        assert!(is_cancel_key("enter", true), "Cancel is the default button");
+        assert!(
+            !is_cancel_key("enter", false),
+            "Enter inside a text field is the field's"
+        );
+        assert!(!is_cancel_key("a", true));
+    }
 }

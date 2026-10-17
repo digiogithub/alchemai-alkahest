@@ -247,6 +247,8 @@ pub struct ConnectionDraft {
     pub server_url: String,
     /// A new key typed (never shown back, never written to a file).
     pub new_key: String,
+    /// CA certificate file typed (PEM); blank = none. Only used for `https` URLs.
+    pub ca_cert: String,
 }
 
 impl ConnectionDraft {
@@ -260,6 +262,38 @@ impl ConnectionDraft {
             return Err(format!("{u:?} is not an http(s) URL"));
         }
         Ok(Some(u.to_string()))
+    }
+
+    /// Whether the typed URL is `https`.
+    pub fn https(&self) -> bool {
+        crate::tls::is_https(&self.server_url)
+    }
+
+    /// The scheme switch: rewrites the typed URL; a blank URL becomes the default local
+    /// address with that scheme so the switch has something to act on.
+    pub fn set_https(&mut self, https: bool) {
+        self.server_url = if self.server_url.trim().is_empty() {
+            format!(
+                "{}://127.0.0.1:{}",
+                if https { "https" } else { "http" },
+                alkahest_client::DEFAULT_PORT
+            )
+        } else {
+            crate::tls::with_scheme(&self.server_url, https)
+        };
+    }
+
+    /// The `ca_cert` to store: blank = none; otherwise an existing file. A CA only matters
+    /// for `https`, but a path typed before switching the scheme is kept.
+    pub fn ca(&self) -> Result<Option<String>, String> {
+        let p = self.ca_cert.trim();
+        if p.is_empty() {
+            return Ok(None);
+        }
+        if !std::path::Path::new(p).is_file() {
+            return Err(format!("{p:?} is not a readable file"));
+        }
+        Ok(Some(p.to_string()))
     }
 }
 
@@ -341,6 +375,18 @@ mod tests {
         assert_eq!(c.url().unwrap().as_deref(), Some("http://gpu-box:11435"));
         c.server_url = "gpu-box".into();
         assert!(c.url().is_err());
+        c.server_url = "http://gpu-box:11435".into();
+        c.set_https(true);
+        assert_eq!(c.server_url, "https://gpu-box:11435");
+        assert!(c.https());
+        c.server_url.clear();
+        c.set_https(true);
+        assert_eq!(c.server_url, "https://127.0.0.1:11435");
+        assert_eq!(c.ca().unwrap(), None);
+        c.ca_cert = "/definitely/not/here.pem".into();
+        assert!(c.ca().is_err());
+        c.ca_cert = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml").into();
+        assert!(c.ca().unwrap().is_some());
         assert_eq!(key_status(true, false, false), "not needed (loopback)");
         assert_eq!(
             key_status(false, true, false),

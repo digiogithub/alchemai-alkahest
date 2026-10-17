@@ -182,7 +182,8 @@ fn desktop(args: &cli::DesktopArgs, global: &GlobalArgs, loaded: &Loaded) -> Res
     #[cfg(windows)]
     detach_own_console();
     let server = &loaded.config.server;
-    let client = alkahest_client::Client::for_bind(&server.host, server.port)?;
+    let client =
+        alkahest_client::Client::for_server(&server.host, server.port, server.tls.enabled)?;
     let mut serve_args = Vec::new();
     if let Some(config) = &global.config {
         serve_args.push("--config".into());
@@ -194,6 +195,10 @@ fn desktop(args: &cli::DesktopArgs, global: &GlobalArgs, loaded: &Loaded) -> Res
     }
     let options = alkahest_desktop::LaunchOptions {
         server_url: client.base_url().to_string(),
+        generated_ca: server
+            .tls
+            .enabled
+            .then(|| server.tls.ca_path(&loaded.paths.data_dir)),
         api_key: std::env::var(alkahest_client::API_KEY_ENV).ok(),
         settings_file: Some(loaded.paths.config_dir.join("desktop.toml")),
         serve_program: std::env::current_exe().ok(),

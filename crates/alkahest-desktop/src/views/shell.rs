@@ -7,6 +7,8 @@
 //! (another server URL or API key) rebuilds the client, the connection manager and the
 //! screens with [`Shell::reconnect`].
 
+use std::time::{Duration, Instant};
+
 use alkahest_client::Client;
 use tokio::sync::{mpsc, watch};
 
@@ -60,6 +62,8 @@ pub struct Shell {
     follow: Option<Task<()>>,
     /// The client of the current connection (tray actions).
     client: Client,
+    /// Re-renders once a second while a reconnect countdown is on screen.
+    _ticker: Task<()>,
 }
 
 impl std::fmt::Debug for Shell {
@@ -84,6 +88,19 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Self {
         let screens = Self::build_screens(&options, client.clone(), window, cx);
+        let ticker = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let alive = this.update(cx, |shell, cx| {
+                    if shell.snapshot.as_ref().is_some_and(|s| s.retry.is_some()) {
+                        cx.notify();
+                    }
+                });
+                if alive.is_err() {
+                    return;
+                }
+            }
+        });
         let key_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("alk_\u{2026}")
@@ -102,6 +119,7 @@ impl Shell {
             key_input,
             follow: None,
             client,
+            _ticker: ticker,
         }
     }
 
@@ -619,6 +637,65 @@ impl Shell {
                 }
                 Some(el)
             }
+            ConnectionState::Tls { issue, detail } => {
+                // Secure connection failed: same frame as 17.5, with the cause and the fix.
+                Some(
+                    banner_frame(p)
+                        .border_color(c(p.accent_border))
+                        .bg(c(p.accent_subtle))
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(px(space::S1))
+                                .child(
+                                    div()
+                                        .type_style(text::TITLE)
+                                        .text_color(c(p.accent_text))
+                                        .child(format!(
+                                            "\u{1f512} {} \u{b7} {}",
+                                            issue.title(),
+                                            display_address(&snap.server_url)
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .type_style(text::SMALL)
+                                        .text_color(c(p.text_secondary))
+                                        .child(issue.hint()),
+                                )
+                                .child(
+                                    mono_caption(detail.clone(), p).text_color(c(p.danger_text)),
+                                ),
+                        )
+                        .child(
+                            button(
+                                "banner-tls-settings",
+                                "Open settings",
+                                ButtonKind::Secondary,
+                                size::CONTROL,
+                                false,
+                                p,
+                            )
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.select(Screen::Settings, cx)),
+                            ),
+                        )
+                        .child(
+                            button(
+                                "banner-tls-retry",
+                                "Retry now",
+                                ButtonKind::Primary,
+                                size::CONTROL,
+                                false,
+                                p,
+                            )
+                            .on_click(cx.listener(|this, _, _, _| {
+                                let _ = this.commands.send(Command::Retry);
+                            })),
+                        ),
+                )
+            }
             ConnectionState::NotRunning { .. } | ConnectionState::Error(_) => {
                 // 17.5: remote server lost (Start not offered).
                 let raw = match &snap.state {
@@ -647,7 +724,13 @@ impl Shell {
                                     div()
                                         .type_style(text::SMALL)
                                         .text_color(c(p.text_secondary))
-                                        .child("Retrying with backoff (0.5 s doubling to 10 s)."),
+                                        .child(match &snap.retry {
+                                            Some(r) => r.describe(Instant::now()),
+                                            None => {
+                                                "Retrying with backoff (0.5 s doubling to 10 s)."
+                                                    .to_string()
+                                            }
+                                        }),
                                 )
                                 .child(mono_caption(raw, p).text_color(c(p.danger_text))),
                         )

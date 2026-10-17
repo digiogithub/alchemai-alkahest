@@ -25,7 +25,8 @@ use crate::views::icons;
 use crate::views::library::LibraryView;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
-    ButtonKind, button, column_label, dialog, dot, empty_block, kind_badge, meter, pill,
+    ButtonKind, button, column_label, dialog, dismissable, dot, empty_block, kind_badge, meter,
+    pill,
 };
 
 /// How often countdowns re-render.
@@ -461,7 +462,7 @@ impl RunningView {
 }
 
 impl Render for RunningView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Theme::get(cx).palette;
         let cards = self.cards(cx);
         let mut content = v_flex()
@@ -559,7 +560,7 @@ impl Render for RunningView {
                 p,
             )
             .on_click(cx.listener(|this, _, _, cx| this.stop_all(cx)));
-            root = root.child(dialog(
+            let scrim = dialog(
                 format!(
                     "Stop all {} running model{}?",
                     cards.len(),
@@ -573,6 +574,15 @@ impl Render for RunningView {
                 None,
                 vec![cancel, idle, confirm],
                 p,
+            );
+            root = root.child(dismissable(
+                scrim,
+                cx.listener(|this, _: &(), _, cx| {
+                    this.state.cancel_stop_all();
+                    cx.notify();
+                }),
+                window,
+                cx,
             ));
         }
         root
@@ -630,6 +640,7 @@ mod tests {
             service_unit: None,
             notice: None,
             manages_server: false,
+            retry: None,
             runtime: Some(RuntimeSnapshot {
                 status: Arc::new(SchedulerStatus {
                     models: vec![busy, idle],
