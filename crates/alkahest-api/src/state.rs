@@ -14,6 +14,7 @@ use axum::http::Extensions;
 use crate::audit::{AuditSink, UsageRecorder};
 use crate::dialect::{DefaultErrorRenderer, ErrorRenderer};
 use crate::keys::KeyVerifier;
+use crate::shutdown::ShutdownHooks;
 
 /// Static facts about the running server, reported by `/api/version`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +44,7 @@ struct Inner {
     errors: Arc<dyn ErrorRenderer>,
     usage: Option<Arc<dyn UsageRecorder>>,
     audit: Option<Arc<dyn AuditSink>>,
+    shutdown: ShutdownHooks,
 }
 
 impl fmt::Debug for AppState {
@@ -66,6 +68,12 @@ impl AppState {
             usage: None,
             audit: None,
         }
+    }
+
+    /// Hooks run after the server drains on shutdown. Subsystems (the scheduler's engine
+    /// teardown) register here; pass the same handle to [`crate::server::serve_with`].
+    pub fn shutdown_hooks(&self) -> ShutdownHooks {
+        self.inner.shutdown.clone()
     }
 
     /// Per-key usage recorder; handlers report token counts here.
@@ -162,6 +170,7 @@ impl AppStateBuilder {
                 errors: self.errors,
                 usage: self.usage,
                 audit: self.audit,
+                shutdown: ShutdownHooks::default(),
             }),
         }
     }

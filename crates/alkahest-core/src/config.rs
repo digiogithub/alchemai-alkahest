@@ -68,6 +68,9 @@ pub struct ServerConfig {
     /// Whole-request timeout in seconds; `0` disables it. Off by default because a streamed
     /// generation legitimately runs for minutes.
     pub request_timeout_secs: u64,
+    /// Seconds in-flight requests may keep running after a stop signal before the server
+    /// stops waiting for them and tears engines down (ALK-SP-0009.R4).
+    pub shutdown_timeout_secs: u64,
     /// Browser origins allowed by CORS (`https://app.example`, or `*` for any). Empty, the
     /// default, sends no CORS headers at all, so browsers block cross-origin calls.
     pub cors_origins: Vec<String>,
@@ -100,6 +103,9 @@ impl Default for EndpointsConfig {
     }
 }
 
+/// Default drain budget on shutdown, in seconds.
+pub const DEFAULT_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
+
 /// Default request body limit: 64 MiB.
 pub const DEFAULT_MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -110,6 +116,7 @@ impl Default for ServerConfig {
             port: DEFAULT_PORT,
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             request_timeout_secs: 0,
+            shutdown_timeout_secs: DEFAULT_SHUTDOWN_TIMEOUT_SECS,
             cors_origins: Vec::new(),
             endpoints: EndpointsConfig::default(),
         }

@@ -114,6 +114,47 @@ async fn last_used_shows_in_keys_ls_and_the_audit_log() {
     assert!(!audit.contains(&key), "the key must never be logged");
 }
 
+/// Starts a server, sends it `signal` once it answers, and checks it exits 0 promptly.
+#[cfg(unix)]
+async fn stops_cleanly_on(signal: &str) {
+    let home = tempfile::tempdir().unwrap();
+    let host = format!("127.0.0.1:{}", free_port());
+    let mut child = spawn_serve(home.path(), &["--host", &host]);
+    wait_ready(&format!("http://{host}/healthz")).await;
+    let sent = Command::new("kill")
+        .args([&format!("-{signal}"), &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(sent.success());
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(0), "{signal}");
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "server ignored {signal}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let mut stderr = String::new();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
+    assert!(stderr.contains("stopped"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sigterm_stops_the_server_with_exit_code_0() {
+    stops_cleanly_on("TERM").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sigint_stops_the_server_with_exit_code_0() {
+    stops_cleanly_on("INT").await;
+}
+
 /// Waits for a server that is expected to refuse to start; returns its stderr.
 fn refused(mut child: Child) -> String {
     let status = child.wait().unwrap();

@@ -7,7 +7,8 @@
 //! * [`auth`]: authentication middleware, [`RequestContext`], startup exposure check.
 //! * [`dialect`]: API families, admin routes, dialect-shaped middleware errors.
 //! * [`keys`]: API key generation, hashed storage and verification.
-//! * [`server`]: [`bind`] and [`serve`].
+//! * [`server`]: [`bind`], [`serve`] and [`serve_with`] (drain timeout, shutdown hooks).
+//! * [`shutdown`]: [`ShutdownHooks`] and the OS [`stop_signal`].
 
 pub mod audit;
 pub mod auth;
@@ -16,11 +17,13 @@ pub mod error;
 pub mod keys;
 pub mod router;
 pub mod server;
+pub mod shutdown;
 pub mod state;
 
 pub use auth::{AuthPolicy, Caller, Exposure, ExposureError, RequestContext, check_exposure};
 pub use dialect::{DefaultErrorRenderer, ErrorKind, ErrorRenderer, Family};
 pub use error::{ApiError, Result};
 pub use router::{ApiRouter, ApiSettings};
-pub use server::{bind, serve};
+pub use server::{ServeOptions, ShutdownReport, bind, serve, serve_with};
+pub use shutdown::{HookOutcome, ShutdownHooks, stop_signal};
 pub use state::{AppState, AppStateBuilder, ServerInfo};

@@ -1,5 +1,9 @@
 //! `alkahest serve`: runs the API server in the foreground until a stop signal.
 //!
+//! SIGINT/SIGTERM (ctrl-c, ctrl-break, console close and system shutdown on Windows) stop
+//! accepting connections, drain in-flight requests for `server.shutdown_timeout_secs`, run
+//! the shutdown hooks and exit with code 0.
+//!
 //! The scheduler, catalog and engines plug into [`AppState`] as their stories land; today the
 //! server answers the base routes only, behind the authentication layer.
 
@@ -9,7 +13,9 @@ use std::time::Duration;
 
 use alkahest_api::audit::{AuditLog, UsageTracker, usage_path};
 use alkahest_api::keys::{FileKeyVerifier, KeyStore, KeyVerifier};
-use alkahest_api::{ApiRouter, ApiSettings, AppState, Exposure, ServerInfo, check_exposure};
+use alkahest_api::{
+    ApiRouter, ApiSettings, AppState, Exposure, ServeOptions, ServerInfo, check_exposure,
+};
 use alkahest_core::config::Loaded;
 use anyhow::{Context, Result};
 use tokio::sync::watch;
@@ -65,6 +71,16 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
     let flusher = tokio::spawn(usage.run_flusher(USAGE_FLUSH_INTERVAL, async move {
         let _ = stopped_rx.wait_for(|stopped| *stopped).await;
     }));
+    // Registered first, so it runs last: the counters include requests drained at the end.
+    // (The scheduler registers engine teardown later, which then runs before this.)
+    let hooks = state.shutdown_hooks();
+    hooks.register("key usage flush", move || async move {
+        let _ = stopped_tx.send(true);
+        let _ = flusher.await;
+    });
+    // Installed before binding so an early stop signal is not lost.
+    let stop = alkahest_api::stop_signal().context("installing stop-signal handlers")?;
+    let options = ServeOptions::from_config(config);
     let app = ApiRouter::new(state, settings).into_router();
     let listener = alkahest_api::bind(&bind).await?;
     let addr = listener
@@ -78,15 +94,22 @@ async fn serve(loaded: &Loaded, allow_unauthenticated: bool) -> Result<()> {
     };
     eprintln!("alkahest serve: listening on http://{addr} ({note})");
     tracing::info!(%addr, ?exposure, "server started");
-    alkahest_api::serve(listener, app, async {
-        if let Err(err) = tokio::signal::ctrl_c().await {
-            tracing::error!(%err, "cannot listen for ctrl-c");
-        }
-    })
+    let report = alkahest_api::serve_with(
+        listener,
+        app,
+        async move {
+            let signal = stop.await;
+            tracing::info!(signal, "stop signal received");
+        },
+        options,
+        hooks,
+    )
     .await?;
-    // Persist the last usage counters before exiting.
-    let _ = stopped_tx.send(true);
-    let _ = flusher.await;
-    tracing::info!("server stopped");
+    tracing::info!(
+        drained = report.drained,
+        hooks = report.hooks.len(),
+        "server stopped"
+    );
+    eprintln!("alkahest serve: stopped");
     Ok(())
 }
