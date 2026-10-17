@@ -6,27 +6,45 @@ status: backlog
 author: mcp
 labels: [catalog, recipes, models, security]
 created: 2026-10-17T18:38:01Z
-updated: 2026-10-17T18:50:04Z
+updated: 2026-10-17T19:00:09Z
 links:
   - { kind: relates_to, target: ALK-US-0117 }
 requirements:
   R1:
     status: backlog
+    trace:
+      code: [xtask/src/catalog.rs#check, catalog/catalog.toml]
+      tests:
+        - xtask/src/catalog_tests.rs#minimal_catalog_loads
+        - xtask/src/catalog_tests.rs#stem_mismatch_rejected
+        - xtask/src/catalog_tests.rs#other_files_are_ignored
+        - xtask/src/catalog_tests.rs#the_repository_catalog_is_valid
   R2:
     status: backlog
+    trace:
+      code: [xtask/src/catalog.rs#check_manifest]
+      tests:
+        - xtask/src/catalog_tests.rs#newer_major_schema_refused_and_minor_accepted
   R3:
     status: backlog
+    trace:
+      code: [xtask/src/catalog.rs#check]
+      tests: [xtask/src/catalog_tests.rs#strict_check_rejects_unknown_keys]
   R4:
     status: backlog
     trace:
       code:
         - crates/alkahest-recipes/src/recipe.rs#parse_recipes_with
         - crates/alkahest-recipes/src/recipe.rs#RecipeOrigin
+        - xtask/src/catalog.rs#check_engines
+        - xtask/src/catalog.rs#check_drift
       tests:
         - crates/alkahest-recipes/tests/dependencies.rs#catalog_recipe_equals_a_builtin_recipe
         - crates/alkahest-recipes/tests/dependencies.rs#tofu_refused_in_a_git_catalog
         - crates/alkahest-recipes/tests/dependencies.rs#plain_http_refused
         - crates/alkahest-recipes/tests/dependencies.rs#a_branch_source_rev_warns_in_a_git_catalog_only
+        - xtask/src/catalog_tests.rs#tofu_refused_in_a_git_catalog
+        - xtask/src/catalog_tests.rs#drift_between_recipes_and_catalog_engines_detected
   R5:
     status: backlog
     trace:
@@ -58,6 +76,14 @@ requirements:
     status: backlog
   R8:
     status: backlog
+    trace:
+      code:
+        - xtask/src/catalog.rs#generate_index
+        - xtask/src/catalog.rs#check_index
+        - catalog/index.toml
+      tests:
+        - xtask/src/catalog_tests.rs#stale_index_rejected_by_the_check
+        - xtask/src/catalog_tests.rs#index_generation_is_deterministic
   R9:
     status: backlog
   R10:

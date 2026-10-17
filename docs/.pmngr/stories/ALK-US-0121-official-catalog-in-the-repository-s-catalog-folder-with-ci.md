@@ -2,7 +2,7 @@
 id: ALK-US-0121
 type: story
 title: Official catalog in the repository's catalog/ folder with CI validation
-status: backlog
+status: in_progress
 priority: medium
 parent: ALK-EP-0015
 milestone: ALK-M-0006
@@ -10,7 +10,8 @@ author: mcp
 labels: [catalog, ci, recipes]
 estimate: 3
 created: 2026-10-17T18:30:04Z
-updated: 2026-10-17T18:42:04Z
+updated: 2026-10-17T18:53:59Z
+started: 2026-10-17T18:53:59Z
 links:
   - { kind: implements, target: ALK-SP-0011.R1 }
   - { kind: implements, target: ALK-SP-0011.R2 }
