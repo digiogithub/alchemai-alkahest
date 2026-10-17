@@ -5,7 +5,7 @@ title: API compatibility surface
 status: backlog
 labels: [api]
 created: 2026-10-16T22:37:35Z
-updated: 2026-10-17T03:13:14Z
+updated: 2026-10-17T03:48:27Z
 requirements:
   R1:
     status: backlog
@@ -112,6 +112,29 @@ requirements:
         - crates/alkahest-api/tests/conformance.rs#openai_python_conformance
   R6:
     status: backlog
+    trace:
+      code:
+        - crates/alkahest-api/src/admin/mod.rs#ROUTES
+        - crates/alkahest-api/src/admin/mod.rs#openapi_document
+        - crates/alkahest-api/src/admin/context.rs#AdminContext
+        - crates/alkahest-api/src/admin/jobs.rs#JobManager
+        - crates/alkahest-api/src/admin/models.rs
+        - crates/alkahest-api/src/admin/pulls.rs
+        - crates/alkahest-api/src/admin/discover.rs
+        - crates/alkahest-api/src/admin/engines.rs#RecipeEngineManager
+        - crates/alkahest-api/src/admin/keys.rs
+        - crates/alkahest-api/src/admin/settings.rs
+        - crates/alkahest-api/src/admin/system.rs
+        - crates/alkahest-client/src/admin.rs
+      tests:
+        - crates/alkahest-api/tests/admin_api.rs#openapi
+        - crates/alkahest-api/tests/admin_api.rs#admin_routes_need_the_admin_scope_remotely_and_nothing_on_loopback
+        - crates/alkahest-api/tests/admin_api.rs#catalog_lists_kind_source_engine_context_paths_and_runtime
+        - crates/alkahest-api/tests/admin_api.rs#pull_job_reports_progress_completes_and_streams_job_events
+        - crates/alkahest-api/tests/admin_api.rs#engines_list_install_job_and_remove
+        - crates/alkahest-api/tests/admin_api.rs#create_key_shows_the_secret_once_and_listing_never_does
+        - crates/alkahest-api/tests/admin_api.rs#network_settings_are_saved_for_the_next_start
+        - crates/alkahest-api/src/admin/mod.rs#openapi_describes_every_route
 ---
 
 ## Purpose

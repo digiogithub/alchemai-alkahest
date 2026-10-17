@@ -2,13 +2,14 @@
 id: ALK-US-0097
 type: story
 title: Admin catalog route for the desktop Library (kind, source, engine, context, store paths)
-status: in_progress
+status: done
 parent: ALK-EP-0007
 author: mcp
 labels: [api, admin, desktop]
 created: 2026-10-17T03:18:36Z
-updated: 2026-10-17T03:19:00Z
+updated: 2026-10-17T03:51:28Z
 started: 2026-10-17T03:19:00Z
+closed: 2026-10-17T03:51:28Z
 inbox:
   status: accepted
   source: mcp
