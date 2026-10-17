@@ -13,3 +13,15 @@ publish = false
 workspace = true
 
 [dependencies]
+futures.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alkahest-engine.workspace = true
+alkahest-gguf.workspace = true
+axum.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
