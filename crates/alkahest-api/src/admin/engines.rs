@@ -115,6 +115,16 @@ pub trait EngineManager: Send + Sync {
         version: Option<&str>,
         variant: Option<&str>,
     ) -> Result<Vec<Value>, HttpError>;
+    /// Install directories [`EngineManager::remove`] would delete for the same arguments
+    /// (blocking), so the handler can refuse while a loaded model runs from one of them.
+    fn install_dirs(
+        &self,
+        _engine: &str,
+        _version: Option<&str>,
+        _variant: Option<&str>,
+    ) -> Vec<PathBuf> {
+        Vec::new()
+    }
 }
 
 /// [`EngineManager`] over recipes and the engines directory.
@@ -368,6 +378,23 @@ impl EngineManager for RecipeEngineManager {
             .map(|e| json!({"engine": e.id, "version": e.tag, "variant": e.variant}))
             .collect())
     }
+
+    fn install_dirs(
+        &self,
+        engine: &str,
+        version: Option<&str>,
+        variant: Option<&str>,
+    ) -> Vec<PathBuf> {
+        list_installed(&self.engines_dir)
+            .into_iter()
+            .filter(|e| {
+                e.id == engine
+                    && version.is_none_or(|v| e.tag == v)
+                    && variant.is_none_or(|v| e.variant == v)
+            })
+            .map(|e| e.dir)
+            .collect()
+    }
 }
 
 fn manager(state: &AppState) -> Result<Arc<dyn EngineManager>, HttpError> {
@@ -425,13 +452,27 @@ pub(super) async fn start_install(State(state): State<AppState>, body: Bytes) ->
     reply(&state, r)
 }
 
+/// Names of the models whose engine executable lies under one of `dirs`.
+fn models_using(snap: &alkahest_sched::SchedulerSnapshot, dirs: &[PathBuf]) -> Vec<String> {
+    snap.models
+        .iter()
+        .filter(|m| {
+            m.executable
+                .as_deref()
+                .is_some_and(|exe| dirs.iter().any(|d| Path::new(exe).starts_with(d)))
+        })
+        .map(|m| m.name.clone())
+        .collect()
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub(super) struct RemoveQuery {
     version: Option<String>,
     variant: Option<String>,
 }
 
-/// `DELETE /alkahest/v1/engines/{id}`.
+/// `DELETE /alkahest/v1/engines/{id}`. Refused with 409 while a loaded (or loading) model
+/// runs on one of the builds it would delete: unload those models first.
 pub(super) async fn remove(
     State(state): State<AppState>,
     UrlPath(id): UrlPath<String>,
@@ -439,6 +480,27 @@ pub(super) async fn remove(
 ) -> Response {
     let r = async {
         let m = manager(&state)?;
+        let dirs = {
+            let (m, id, q) = (
+                m.clone(),
+                id.clone(),
+                (q.version.clone(), q.variant.clone()),
+            );
+            blocking(move || Ok(m.install_dirs(&id, q.0.as_deref(), q.1.as_deref()))).await?
+        };
+        if let Some(s) = state.service::<alkahest_sched::Scheduler>() {
+            let users = models_using(&s.snapshot(), &dirs);
+            if !users.is_empty() {
+                return Err(HttpError::new(
+                    ErrorKind::Conflict,
+                    format!(
+                        "the engine build is in use by {}; unload {} first",
+                        users.join(", "),
+                        if users.len() == 1 { "it" } else { "them" }
+                    ),
+                ));
+            }
+        }
         let gone =
             blocking(move || m.remove(&id, q.version.as_deref(), q.variant.as_deref())).await?;
         if gone.is_empty() {

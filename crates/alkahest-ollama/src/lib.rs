@@ -2,6 +2,7 @@
 //!
 //! - [`library`] searches the public model library on ollama.com (ALK-SP-0002.R6). The site
 //!   has no stable JSON search API, so the HTML result page is parsed defensively.
+//! - [`tags`] lists the tags (quantisations, sizes) of one library model from its tags page.
 //! - [`registry`] speaks the registry protocol: manifests, manifest lists, blob redirects
 //!   (ALK-SP-0002.R1).
 //! - [`pull`] installs a registry model into the Alkahest store; the blob download step and the
@@ -10,6 +11,7 @@
 pub mod library;
 pub mod pull;
 pub mod registry;
+pub mod tags;
 
 pub use alkahest_pull::{BlobSpec, PlannedBlob, PullEvent, PullProgress, Transfer, TransferError};
 pub use library::{
@@ -17,3 +19,4 @@ pub use library::{
 };
 pub use pull::{PullError, PullOptions, PullOutcome, pull_ollama};
 pub use registry::{RegistryClient, RegistryError, ResolvedManifest};
+pub use tags::{LibraryTag, parse_tags_html};

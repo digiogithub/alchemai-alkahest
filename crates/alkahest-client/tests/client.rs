@@ -185,3 +185,32 @@ async fn runtime_status_and_unauthorized_events() {
     let err = c.events().await.err().unwrap();
     assert!(matches!(err, ClientError::Api { status: 401, .. }), "{err}");
 }
+
+/// ALK-US-0099: library tags and the load progress field of the snapshot.
+#[tokio::test]
+async fn ollama_tags_and_load_progress() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/ollama/tags"))
+        .and(wiremock::matchers::query_param("name", "smollm2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"name": "smollm2", "tags": [
+            {"name": "smollm2:135m", "tag": "135m", "digest": "9077fe9d2ae1", "size": "271MB",
+             "size_bytes": 271000000u64, "context": "8K", "inputs": ["text"], "quantization": null}
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/alkahest/v1/ps"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"models": [
+            {"name": "m", "state": "loading", "load_progress": 0.4, "executable": "/e/llama-server"}
+        ]})))
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    let tags = c.ollama_tags("smollm2").await.unwrap();
+    assert_eq!(tags[0].size_bytes, Some(271_000_000));
+    assert_eq!(tags[0].context.as_deref(), Some("8K"));
+    let ps = c.runtime_status().await.unwrap();
+    assert_eq!(ps.models[0].load_progress, Some(0.4));
+    assert_eq!(ps.models[0].executable.as_deref(), Some("/e/llama-server"));
+}

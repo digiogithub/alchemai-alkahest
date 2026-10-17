@@ -120,6 +120,9 @@ pub enum ErrorKind {
     MethodNotAllowed,
     /// The request took longer than the server allows (408).
     RequestTimeout,
+    /// The resource is in use or in a state that forbids the operation (409), e.g. removing
+    /// an engine build a loaded model runs on.
+    Conflict,
     /// The request body exceeds `server.max_body_bytes` (413).
     PayloadTooLarge,
     /// Unexpected server failure (500).
@@ -142,6 +145,7 @@ impl ErrorKind {
             Self::BadRequest => StatusCode::BAD_REQUEST,
             Self::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
             Self::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
+            Self::Conflict => StatusCode::CONFLICT,
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -159,6 +163,7 @@ impl ErrorKind {
             404 => Self::NotFound,
             405 => Self::MethodNotAllowed,
             408 => Self::RequestTimeout,
+            409 => Self::Conflict,
             413 => Self::PayloadTooLarge,
             501 => Self::NotImplemented,
             502 | 504 => Self::BadGateway,
@@ -191,6 +196,7 @@ impl ErrorRenderer for DefaultErrorRenderer {
                     ErrorKind::NotFound => ("invalid_request_error", Some("not_found")),
                     ErrorKind::ModelNotFound => ("invalid_request_error", Some("model_not_found")),
                     ErrorKind::BadRequest => ("invalid_request_error", None),
+                    ErrorKind::Conflict => ("invalid_request_error", Some("conflict")),
                     ErrorKind::MethodNotAllowed => {
                         ("invalid_request_error", Some("method_not_allowed"))
                     }
@@ -212,6 +218,7 @@ impl ErrorRenderer for DefaultErrorRenderer {
                     ErrorKind::Forbidden => "permission_error",
                     ErrorKind::NotFound | ErrorKind::ModelNotFound => "not_found_error",
                     ErrorKind::BadRequest
+                    | ErrorKind::Conflict
                     | ErrorKind::NotImplemented
                     | ErrorKind::MethodNotAllowed => "invalid_request_error",
                     ErrorKind::PayloadTooLarge => "request_too_large",

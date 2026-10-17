@@ -25,8 +25,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 mod library;
+mod library_tags;
+mod rest;
 
 pub use library::{LibraryModel, OpenAiModel, OpenAiModels};
+pub use library_tags::LibraryTag;
 
 /// Default server port (`alkahest serve`).
 pub const DEFAULT_PORT: u16 = 11435;
@@ -278,6 +281,10 @@ pub struct RuntimeModel {
     pub loaded_at: Option<String>,
     /// How long the load took.
     pub load_duration_ms: Option<u64>,
+    /// Estimated load progress in `[0, 1]` while `state` is `loading` (time-based).
+    pub load_progress: Option<f32>,
+    /// Executable of the engine build running the model.
+    pub executable: Option<String>,
 }
 
 /// CPU/GPU split of a loaded model's memory, in percent.

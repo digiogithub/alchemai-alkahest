@@ -233,3 +233,35 @@ async fn subscribers_see_state_changes() {
     drop(lease);
     assert!(rx.has_changed().unwrap());
 }
+
+/// ALK-US-0099: a loading model reports an estimated, growing load progress; a ready one none.
+#[tokio::test(start_paused = true)]
+async fn loading_models_report_estimated_progress() {
+    let (b, s) = setup(24, SchedulerOptions::default());
+    *b.launch_delay.lock() = Duration::from_secs(10);
+    let s2 = s.clone();
+    let load = tokio::spawn(async move { s2.acquire("m", &none(), None).await.map(drop) });
+    settle().await;
+    let first = s.snapshot().models[0].load_progress.unwrap();
+    assert_eq!(s.snapshot().models[0].state, ModelState::Loading);
+    assert!((0.0..=0.95).contains(&first), "{first}");
+    tokio::time::advance(Duration::from_secs(2)).await;
+    settle().await;
+    let later = s.snapshot().models[0].load_progress.unwrap();
+    assert!(later > first, "{first} -> {later}");
+    assert!(later <= 0.95);
+    tokio::time::advance(Duration::from_secs(10)).await;
+    load.await.unwrap().unwrap();
+    let m = &s.snapshot().models[0];
+    assert_eq!(m.state, ModelState::Ready);
+    assert_eq!(m.load_progress, None);
+}
+
+#[test]
+fn load_progress_estimate_is_capped() {
+    use alkahest_sched::load_progress;
+    assert_eq!(load_progress(None, 4 * GIB), 0.0);
+    let p = load_progress(Some(Duration::from_secs(2)), 4 * GIB);
+    assert!((p - 0.5).abs() < 0.01, "{p}");
+    assert_eq!(load_progress(Some(Duration::from_secs(60)), 4 * GIB), 0.95);
+}

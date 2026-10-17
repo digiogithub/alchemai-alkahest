@@ -214,6 +214,19 @@ impl EngineManager for FakeEngines {
             .map(|_| json!({"engine": engine}))
             .collect())
     }
+    fn install_dirs(
+        &self,
+        engine: &str,
+        _version: Option<&str>,
+        variant: Option<&str>,
+    ) -> Vec<PathBuf> {
+        self.installed
+            .lock()
+            .iter()
+            .filter(|e| e.id == engine && variant.is_none_or(|v| v == e.variant))
+            .map(|_| PathBuf::from("/e"))
+            .collect()
+    }
 }
 
 struct Admin {
@@ -952,6 +965,7 @@ async fn engine_log_tails_and_names_cannot_escape() {
 const MODEL_INFO: &str = include_str!("../../alkahest-hf/tests/fixtures/model_info.json");
 const SEARCH: &str = include_str!("../../alkahest-hf/tests/fixtures/search.json");
 const LIBRARY: &str = include_str!("../../alkahest-ollama/tests/fixtures/search_qwen.html");
+const TAGS: &str = include_str!("../../alkahest-ollama/tests/fixtures/tags_smollm2.html");
 
 #[tokio::test]
 async fn hf_and_ollama_discovery_go_through_the_server() {
@@ -976,6 +990,11 @@ async fn hf_and_ollama_discovery_go_through_the_server() {
     Mock::given(method("GET"))
         .and(path("/search"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(LIBRARY, "text/html"))
+        .mount(&hub)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/library/smollm2/tags"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(TAGS, "text/html"))
         .mount(&hub)
         .await;
     let mut config = Config::default();
@@ -1050,6 +1069,21 @@ async fn hf_and_ollama_discovery_go_through_the_server() {
     let models = doc["models"].as_array().unwrap();
     assert!(!models.is_empty() && models.len() <= 3);
     assert!(models[0]["name"].is_string());
+
+    // ALK-US-0099: tags of one library model.
+    let (status, doc) = send(&h, "GET", "/alkahest/v1/ollama/tags?name=smollm2", None).await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
+    let tags = doc["tags"].as_array().unwrap();
+    assert_eq!(tags.len(), 4);
+    assert_eq!(tags[2]["name"], "smollm2:135m-instruct-q4_K_M");
+    assert_eq!(tags[2]["quantization"], "Q4_K_M");
+    assert_eq!(tags[2]["size_bytes"], 105_000_000);
+    let (status, _) = send(&h, "GET", "/alkahest/v1/ollama/tags?name=nothing", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = send(&h, "GET", "/alkahest/v1/ollama/tags?name=..%2Fx", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = send(&h, "GET", "/alkahest/v1/ollama/tags", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -1135,4 +1169,57 @@ async fn tls_is_toggled_in_the_network_settings() {
     assert!(warnings.contains("certs generate"), "{warnings}");
     let file = std::fs::read_to_string(a.tmp.path().join("config.toml")).unwrap();
     assert!(Config::from_toml_str(&file).unwrap().server.tls.enabled);
+}
+
+/// ALK-US-0099: removing an engine build a loaded model runs on is refused (409) until the
+/// model is unloaded.
+#[tokio::test]
+async fn engine_removal_is_refused_while_a_loaded_model_uses_it() {
+    let a = admin_ctx(Config::default(), false);
+    let h = harness(&a).await;
+    let (status, doc) = send(
+        &h,
+        "POST",
+        "/alkahest/v1/engines/install",
+        Some(json!({"engine": "llama-cpp", "variant": "cpu"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{doc}");
+    wait_job(&h, doc["job"]["id"].as_str().unwrap()).await;
+    // Load the model (its fake engine runs `/e/llama-server`).
+    let (status, _) = send(
+        &h,
+        "POST",
+        "/api/generate",
+        Some(json!({"model": "llama3.2"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, ps) = send(&h, "GET", "/alkahest/v1/ps", None).await;
+    assert_eq!(ps["models"][0]["executable"], "/e/llama-server");
+    let (status, doc) = send(
+        &h,
+        "DELETE",
+        "/alkahest/v1/engines/llama-cpp?variant=cpu",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{doc}");
+    assert!(doc["error"].as_str().unwrap().contains("llama3.2"), "{doc}");
+    let (status, _) = send(
+        &h,
+        "POST",
+        "/alkahest/v1/unload",
+        Some(json!({"all": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, doc) = send(
+        &h,
+        "DELETE",
+        "/alkahest/v1/engines/llama-cpp?variant=cpu",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doc}");
 }

@@ -45,7 +45,12 @@ fn hf_error(e: &HfError) -> HttpError {
 }
 
 fn library_error(e: &LibraryError) -> HttpError {
-    HttpError::new(ErrorKind::BadGateway, format!("Ollama library: {e}"))
+    let kind = match e {
+        LibraryError::InvalidUrl(_) => ErrorKind::BadRequest,
+        LibraryError::Status { status: 404, .. } => ErrorKind::NotFound,
+        _ => ErrorKind::BadGateway,
+    };
+    HttpError::new(kind, format!("Ollama library: {e}"))
 }
 
 fn hf_client(ctx: &AdminContext) -> Result<HfClient, HttpError> {
@@ -386,6 +391,34 @@ pub(super) async fn ollama_search(
             .await
             .map_err(|e| library_error(&e))?;
         Ok(Json(json!({ "models": models })).into_response())
+    }
+    .await;
+    reply(&state, r)
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct TagsParams {
+    #[serde(default)]
+    name: String,
+}
+
+/// `GET /alkahest/v1/ollama/tags?name=`: the tags of one library model (quantisations and
+/// sizes with digest, download size, context window), scraped from its tags page.
+pub(super) async fn ollama_tags(
+    State(state): State<AppState>,
+    Query(p): Query<TagsParams>,
+) -> Response {
+    let r = async {
+        if p.name.trim().is_empty() {
+            return Err(HttpError::bad_request("name is required"));
+        }
+        let ctx = admin(&state)?;
+        let lib = OllamaLibrary::new(&ctx.ollama_library).map_err(|e| library_error(&e))?;
+        let tags = lib
+            .tags(p.name.trim())
+            .await
+            .map_err(|e| library_error(&e))?;
+        Ok(Json(json!({ "name": p.name.trim(), "tags": tags })).into_response())
     }
     .await;
     reply(&state, r)

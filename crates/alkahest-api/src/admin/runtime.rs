@@ -4,7 +4,8 @@
 //!   [`alkahest_sched::SchedulerSnapshot`]).
 //! * `GET /alkahest/v1/events`: server-sent events: `status` carrying the scheduler snapshot,
 //!   sent on connect and whenever the scheduler reports a change (load, unload, request
-//!   start/end, usage, crash), at most every 250 ms; and `job` carrying a [`Job`] on every
+//!   start/end, usage, crash), at most every 250 ms and every second while a model loads
+//!   (its `load_progress` estimate); and `job` carrying a [`Job`] on every
 //!   job state change and throttled progress (pulls, engine installs). The desktop app's live
 //!   view (ALK-T-0100).
 //! * `POST /alkahest/v1/unload` `{"model": ".."}` or `{"all": true}`: stops models now.
@@ -13,7 +14,7 @@
 use std::convert::Infallible;
 use std::time::Duration;
 
-use alkahest_sched::Scheduler;
+use alkahest_sched::{ModelState, Scheduler};
 use axum::Json;
 use axum::body::{Body, Bytes};
 use axum::extract::State;
@@ -33,6 +34,9 @@ use crate::state::AppState;
 
 /// Minimum spacing of status events.
 const EVENT_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Status event period while a model loads, so its `load_progress` estimate advances.
+const LOADING_TICK: Duration = Duration::from_secs(1);
 
 async fn fresh_snapshot(s: &Scheduler) -> Result<alkahest_sched::SchedulerSnapshot, HttpError> {
     let s = s.clone();
@@ -83,12 +87,18 @@ fn status_events(s: Scheduler) -> impl Stream<Item = Result<Event, Infallible>> 
         loop {
             rx.borrow_and_update();
             let snap = s.snapshot();
+            let loading = snap.models.iter().any(|m| m.state == ModelState::Loading);
             match Event::default().event("status").json_data(&snap) {
                 Ok(ev) => yield Ok(ev),
                 Err(e) => tracing::warn!(error = %e, "cannot encode a status event"),
             }
             tokio::time::sleep(EVENT_INTERVAL).await;
-            if rx.changed().await.is_err() {
+            if loading {
+                // The load progress estimate moves without scheduler changes: tick.
+                if let Ok(Err(_)) = tokio::time::timeout(LOADING_TICK, rx.changed()).await {
+                    return;
+                }
+            } else if rx.changed().await.is_err() {
                 return;
             }
         }

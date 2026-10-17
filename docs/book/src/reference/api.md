@@ -116,11 +116,11 @@ Under `/alkahest/v1/`, described by an OpenAPI 3.1 document served at
 
 | Area | Routes |
 |---|---|
-| System | `GET info`, `GET ps`, `GET events` (server-sent events: scheduler and job updates), `POST unload` |
+| System | `GET info`, `GET ps` (with an estimated `load_progress` while a model loads), `GET events` (server-sent events: scheduler and job updates), `POST unload` |
 | Models | `GET models`, `GET/DELETE models/{name}`, `POST copy`, `GET/PUT/DELETE models/{name}/settings`, `GET models/{name}/recommended`, `GET models/{name}/estimate` (memory estimate) |
 | Downloads | `POST/GET pulls`, `DELETE pulls/{id}`, `GET jobs`, `GET jobs/{id}`, `POST jobs/{id}/cancel`, `DELETE jobs/{id}` |
-| Discovery | `GET hf/search`, `GET hf/model`, `GET hf/files`, `GET/PUT/DELETE hf/token`, `GET ollama/search` |
-| Engines | `GET engines`, `POST engines/install`, `DELETE engines/{id}` |
+| Discovery | `GET hf/search`, `GET hf/model`, `GET hf/files`, `GET/PUT/DELETE hf/token`, `GET ollama/search`, `GET ollama/tags` (tags of a library model) |
+| Engines | `GET engines`, `POST engines/install`, `DELETE engines/{id}` (409 while a loaded model runs on the build) |
 | Keys | `GET keys`, `POST keys` (the secret is returned once), `DELETE keys/{id}` |
 | Settings | `GET/PUT settings/network`, `GET/PUT settings/server` |
 | Logs | `GET logs/engines`, `GET logs/engines/{name}`, `GET logs/server` |

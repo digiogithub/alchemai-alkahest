@@ -528,6 +528,9 @@ impl EngineInstance for FakeEngine {
             }
         })
     }
+    fn executable(&self) -> Option<std::path::PathBuf> {
+        Some(std::path::PathBuf::from("/e/llama-server"))
+    }
     fn stop(&self) -> BoxFuture<'static, ExitInfo> {
         self.exit.send_if_modified(|e| {
             if e.is_none() {

@@ -73,6 +73,10 @@ pub trait EngineInstance: Send + Sync + fmt::Debug {
     fn resource_usage(&self) -> Option<ResourceUsage> {
         None
     }
+    /// The engine executable, when there is one (which installed build a model runs on).
+    fn executable(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 impl EngineInstance for EngineHandle {
@@ -122,6 +126,10 @@ impl EngineInstance for EngineHandle {
         let pid = EngineHandle::pid(self)?;
         let mut sampler = alkahest_engine::ResourceSampler::new();
         sampler.sample(pid)
+    }
+
+    fn executable(&self) -> Option<PathBuf> {
+        Some(self.spec().program.clone())
     }
 }
 

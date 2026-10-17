@@ -106,6 +106,7 @@ routes! {
     put "/alkahest/v1/hf/token" "discover" "Store the Hugging Face token in the server keyring" => discover::hf_token_set;
     delete "/alkahest/v1/hf/token" "discover" "Remove the stored Hugging Face token" => discover::hf_token_delete;
     get "/alkahest/v1/ollama/search" "discover" "Search the Ollama library (q, limit)" => discover::ollama_search;
+    get "/alkahest/v1/ollama/tags" "discover" "Tags of one Ollama library model with digest, size, context and quantisation (name)" => discover::ollama_tags;
     get "/alkahest/v1/engines" "engines" "Installed engine builds and installable recipe variants" => engines::list;
     post "/alkahest/v1/engines/install" "engines" "Start an engine install job" => engines::start_install;
     delete "/alkahest/v1/engines/{id}" "engines" "Remove managed installs of an engine (version, variant)" => engines::remove;
