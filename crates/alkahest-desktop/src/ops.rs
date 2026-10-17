@@ -7,6 +7,7 @@
 
 use std::future::Future;
 
+use alkahest_client::admin::CatalogModel;
 use alkahest_client::{Client, ClientError, LibraryModel};
 
 use crate::library::read_only_hint;
@@ -41,7 +42,8 @@ pub trait ModelOps: Send + Sync + 'static {
     fn delete(&self, model: &str) -> impl Future<Output = Result<(), ClientError>> + Send;
     /// Unloads everything (`POST /alkahest/v1/unload`).
     fn unload_all(&self) -> impl Future<Output = Result<(), ClientError>> + Send;
-    /// The model list (see [`Client::library`]).
+    /// The model list: the admin catalog (`GET /alkahest/v1/models`, one call), else the
+    /// list composed from the Ollama-compatible routes ([`Client::library`]).
     fn library(&self) -> impl Future<Output = Result<Vec<LibraryModel>, ClientError>> + Send;
 }
 
@@ -63,7 +65,38 @@ impl ModelOps for Client {
     }
 
     async fn library(&self) -> Result<Vec<LibraryModel>, ClientError> {
-        Client::library(self).await
+        match self.models().await {
+            Ok(catalog) => Ok(catalog.models.iter().map(library_model).collect()),
+            // A server without the admin catalog route (older build) or a key without the
+            // admin scope: compose the list from the public routes instead.
+            Err(ClientError::Api {
+                status: 401 | 403 | 404 | 405,
+                ..
+            }) => Client::library(self).await,
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// The Library row of an admin catalog entry. The catalog knows source, kind, engine and
+/// loadability for every model, so nothing stays unknown.
+pub fn library_model(m: &CatalogModel) -> LibraryModel {
+    let opt = |s: &str| (!s.is_empty()).then(|| s.to_string());
+    LibraryModel {
+        name: m.name.clone(),
+        size: m.size,
+        digest: m.digest.clone(),
+        modified: m.modified.clone(),
+        format: m.format.clone(),
+        quantization: m.quantization.clone(),
+        family: m.family.clone(),
+        parameters: m.parameters.clone(),
+        capabilities: m.capabilities.clone(),
+        source: opt(&m.source),
+        kind: opt(&m.kind),
+        engine: opt(&m.engine),
+        context_length: m.context_length,
+        loadable: Some(m.loadable),
     }
 }
 
@@ -158,6 +191,31 @@ mod tests {
             *fake.calls.lock().unwrap(),
             ["load a", "unload a", "delete a", "unload all"]
         );
+    }
+
+    #[test]
+    fn catalog_entries_become_library_rows() {
+        let m = CatalogModel {
+            name: "qwen3:8b".into(),
+            size: 5,
+            source: "ollama".into(),
+            kind: "chat".into(),
+            format: "gguf".into(),
+            quantization: Some("Q4_K_M".into()),
+            engine: "llama-cpp".into(),
+            context_length: Some(40_960),
+            loadable: true,
+            ..CatalogModel::default()
+        };
+        let row = library_model(&m);
+        assert_eq!(row.source.as_deref(), Some("ollama"));
+        assert_eq!(row.kind.as_deref(), Some("chat"));
+        assert_eq!(row.engine.as_deref(), Some("llama-cpp"));
+        assert_eq!(row.loadable, Some(true));
+        assert_eq!(row.context_length, Some(40_960));
+        let bare = library_model(&CatalogModel::default());
+        assert_eq!(bare.source, None);
+        assert_eq!(bare.kind, None);
     }
 
     #[tokio::test]
