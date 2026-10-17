@@ -71,6 +71,8 @@ utoipa = { version = "=6.0.0", features = ["axum_extras"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 toml = "=1.1.8"
+# Comment-preserving edits of the user config file (admin network settings).
+toml_edit = "=0.25.17"
 serde_norway = "=0.9.42"
 directories = "=6.0.0"
 

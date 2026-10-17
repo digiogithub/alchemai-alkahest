@@ -7,8 +7,13 @@
 //! connection is reported as [`ClientError::NotRunning`] so commands can tell the user to
 //! start the server. Remote servers need an API key ([`Client::with_api_key`]).
 //!
+//! The [`admin`] module adds the rest of the admin API (catalog, settings, jobs, discovery,
+//! engines, keys, network settings, info, logs) as further `Client` methods.
+//!
 //! Response types deserialize leniently (`#[serde(default)]`): unknown fields are ignored and
 //! missing optional ones take defaults, so the client keeps working against older servers.
+
+pub mod admin;
 
 use std::pin::Pin;
 
