@@ -23,6 +23,8 @@ gui-test = ["gui", "gpui-kit/test-support"]
 
 [dependencies]
 alkahest-client.workspace = true
+# `ModelKind` (badge label, glyph, `kind.*` token key); GPUI-free and dependency-light.
+alkahest-gguf.workspace = true
 futures.workspace = true
 gpui-kit = { workspace = true, optional = true }
 keyring.workspace = true

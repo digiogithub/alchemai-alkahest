@@ -16,9 +16,10 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use alkahest_client::{Client, ClientError};
+use alkahest_client::{Client, ClientError, SchedulerStatus};
 use futures::{Stream, StreamExt};
 use tokio::sync::{mpsc, watch};
 
@@ -35,6 +36,10 @@ pub const START_POLL: Duration = Duration::from_millis(500);
 pub const START_TIMEOUT: Duration = Duration::from_secs(30);
 /// Health probe (and model count refresh) while connected.
 pub const HEALTH_INTERVAL: Duration = Duration::from_secs(10);
+/// Fresh scheduler snapshot (`/alkahest/v1/ps`, which also re-measures memory) while
+/// connected. Events only arrive on scheduler changes; the poll keeps memory figures and
+/// counters at most this old (ALK-SP-0008.R6 asks for 2 s).
+pub const RUNTIME_POLL: Duration = Duration::from_secs(2);
 
 /// What a successful probe learned.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +82,24 @@ pub struct StatusUpdate {
     pub loaded: usize,
     /// Requests waiting.
     pub queued: usize,
+}
+
+impl From<&SchedulerStatus> for StatusUpdate {
+    fn from(s: &SchedulerStatus) -> Self {
+        Self {
+            loaded: s.models.len(),
+            queued: s.queued,
+        }
+    }
+}
+
+/// The latest scheduler snapshot and when it arrived (countdowns run from `received_at`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeSnapshot {
+    /// The snapshot (shared: every UI snapshot clone points at the same data).
+    pub status: Arc<SchedulerStatus>,
+    /// Arrival time on the manager's clock.
+    pub received_at: Instant,
 }
 
 /// Where the connection is. Shown in the service card.
@@ -248,7 +271,7 @@ impl Machine {
 }
 
 /// What the UI renders: the state plus what it may offer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     /// Server base URL.
     pub server_url: String,
@@ -258,6 +281,9 @@ pub struct Snapshot {
     pub can_start: bool,
     /// Name of the systemd user unit when one is installed (`alkahest.service`).
     pub service_unit: Option<String>,
+    /// The latest scheduler snapshot while connected (`None` before the first one, when
+    /// disconnected, or when the server refuses the admin routes to this key).
+    pub runtime: Option<RuntimeSnapshot>,
 }
 
 /// An action button on the service card.
@@ -368,8 +394,8 @@ pub enum Command {
     Retry,
 }
 
-/// A boxed stream of live status updates.
-pub type StatusStream = Pin<Box<dyn Stream<Item = Result<StatusUpdate, ProbeError>> + Send>>;
+/// A boxed stream of live scheduler snapshots.
+pub type StatusStream = Pin<Box<dyn Stream<Item = Result<SchedulerStatus, ProbeError>> + Send>>;
 
 /// What the desktop needs from a server.
 pub trait ServerApi: Send + Sync + 'static {
@@ -377,6 +403,8 @@ pub trait ServerApi: Send + Sync + 'static {
     fn probe(&self) -> impl Future<Output = Result<ServerInfo, ProbeError>> + Send;
     /// The live status updates (`/alkahest/v1/events`).
     fn status_events(&self) -> impl Future<Output = Result<StatusStream, ProbeError>> + Send;
+    /// A fresh scheduler snapshot (`/alkahest/v1/ps`).
+    fn runtime(&self) -> impl Future<Output = Result<SchedulerStatus, ProbeError>> + Send;
 }
 
 impl ServerApi for Client {
@@ -395,16 +423,14 @@ impl ServerApi for Client {
         let events = self.events().await?;
         Ok(Box::pin(events.filter_map(|ev| async move {
             match ev {
-                Ok(ev) => ev.status().map(|s| {
-                    s.map(|s| StatusUpdate {
-                        loaded: s.models.len(),
-                        queued: s.queued,
-                    })
-                    .map_err(ProbeError::from)
-                }),
+                Ok(ev) => ev.status().map(|s| s.map_err(ProbeError::from)),
                 Err(e) => Some(Err(ProbeError::from(e))),
             }
         })))
+    }
+
+    async fn runtime(&self) -> Result<SchedulerStatus, ProbeError> {
+        Ok(self.runtime_status().await?)
     }
 }
 
@@ -418,6 +444,7 @@ pub struct ConnectionManager<C, L> {
     service_unit: Option<String>,
     commands: mpsc::UnboundedReceiver<Command>,
     snapshots: watch::Sender<Snapshot>,
+    runtime: Option<RuntimeSnapshot>,
 }
 
 /// The UI's ends of a [`ConnectionManager`].
@@ -441,6 +468,7 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
             state: machine.state().clone(),
             can_start: machine.offers_start(),
             service_unit: service_unit.clone(),
+            runtime: None,
         };
         let (snap_tx, snap_rx) = watch::channel(first);
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -453,6 +481,7 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
                 service_unit,
                 commands: cmd_rx,
                 snapshots: snap_tx,
+                runtime: None,
             },
             ConnectionHandle {
                 commands: cmd_tx,
@@ -461,12 +490,16 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
         )
     }
 
-    fn publish(&self) {
+    fn publish(&mut self) {
+        if !matches!(self.machine.state(), ConnectionState::Connected(_)) {
+            self.runtime = None;
+        }
         let snap = Snapshot {
             server_url: self.server_url.clone(),
             state: self.machine.state().clone(),
             can_start: self.machine.offers_start(),
             service_unit: self.service_unit.clone(),
+            runtime: self.runtime.clone(),
         };
         self.snapshots.send_if_modified(|cur| {
             if *cur == snap {
@@ -539,10 +572,26 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
     /// checking again, or `None` when the UI went away.
     async fn follow_events(&mut self) -> Option<Duration> {
         let mut events = self.api.status_events().await.ok();
+        let mut poll = tokio::time::interval(RUNTIME_POLL);
+        poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // A key without the admin scope gets 401/403 from the runtime routes: stop asking.
+        let mut poll_runtime = true;
+        let health = tokio::time::sleep(HEALTH_INTERVAL);
+        tokio::pin!(health);
         loop {
-            let health = tokio::time::sleep(HEALTH_INTERVAL);
             tokio::select! {
-                () = health => {
+                _ = poll.tick(), if poll_runtime => {
+                    match self.api.runtime().await {
+                        Ok(status) => {
+                            self.on_runtime(status);
+                            self.publish();
+                        }
+                        Err(ProbeError::Unauthorized) => poll_runtime = false,
+                        Err(_) => {}
+                    }
+                }
+                () = &mut health => {
+                    health.as_mut().reset(tokio::time::Instant::now() + HEALTH_INTERVAL);
                     let result = self.api.probe().await;
                     let d = self.machine.on_probe(result, now());
                     self.publish();
@@ -554,8 +603,8 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
                     }
                 }
                 ev = next_event(&mut events) => match ev {
-                    Some(Ok(update)) => {
-                        self.machine.on_status(update);
+                    Some(Ok(status)) => {
+                        self.on_runtime(status);
                         self.publish();
                     }
                     // The stream ended (server stopping?) or broke: check the server soon.
@@ -571,6 +620,17 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
     }
 }
 
+impl<C, L> ConnectionManager<C, L> {
+    /// Keeps a new scheduler snapshot and updates the loaded counter from it.
+    fn on_runtime(&mut self, status: SchedulerStatus) {
+        self.machine.on_status(StatusUpdate::from(&status));
+        self.runtime = Some(RuntimeSnapshot {
+            status: Arc::new(status),
+            received_at: now(),
+        });
+    }
+}
+
 /// The current time on tokio's clock, so the start deadline follows paused time in tests.
 fn now() -> Instant {
     tokio::time::Instant::now().into_std()
@@ -578,7 +638,9 @@ fn now() -> Instant {
 
 /// The next item of an optional stream; pending forever without one (the server does not
 /// offer events, so only the health probe runs).
-async fn next_event(events: &mut Option<StatusStream>) -> Option<Result<StatusUpdate, ProbeError>> {
+async fn next_event(
+    events: &mut Option<StatusStream>,
+) -> Option<Result<SchedulerStatus, ProbeError>> {
     match events {
         Some(stream) => stream.next().await,
         None => std::future::pending().await,
@@ -689,6 +751,7 @@ mod tests {
             state,
             can_start,
             service_unit: None,
+            runtime: None,
         }
     }
 
@@ -747,7 +810,7 @@ mod tests {
         started: Arc<AtomicBool>,
         probes_since_start: Arc<AtomicUsize>,
         boot_probes: usize,
-        events: Arc<Mutex<Vec<StatusUpdate>>>,
+        events: Arc<Mutex<Vec<SchedulerStatus>>>,
     }
 
     impl ServerApi for FakeServer {
@@ -769,6 +832,11 @@ mod tests {
             Ok(Box::pin(
                 futures::stream::iter(items).chain(futures::stream::pending()),
             ))
+        }
+
+        async fn runtime(&self) -> Result<SchedulerStatus, ProbeError> {
+            // Like a key without the admin scope: the manager must stop polling.
+            Err(ProbeError::Unauthorized)
         }
     }
 
@@ -820,9 +888,12 @@ mod tests {
     async fn no_server() {
         let server = FakeServer {
             boot_probes: 3,
-            events: Arc::new(Mutex::new(vec![StatusUpdate {
-                loaded: 2,
-                queued: 0,
+            events: Arc::new(Mutex::new(vec![SchedulerStatus {
+                models: vec![
+                    alkahest_client::RuntimeModel::default(),
+                    alkahest_client::RuntimeModel::default(),
+                ],
+                ..SchedulerStatus::default()
             }])),
             ..FakeServer::default()
         };
@@ -860,6 +931,7 @@ mod tests {
         })
         .await;
         assert_eq!(s.counters().models, Some(3));
+        assert_eq!(s.runtime.as_ref().map(|r| r.status.models.len()), Some(2));
 
         drop(handle);
         tokio::time::timeout(Duration::from_secs(60), task)
