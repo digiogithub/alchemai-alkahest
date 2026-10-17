@@ -9,6 +9,7 @@ mod hf_cmd;
 mod keys_cmd;
 mod model_config_cmd;
 mod models_cmd;
+mod ps_cmd;
 mod pull_cmd;
 mod search_cmd;
 mod serve_cmd;
@@ -91,6 +92,8 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Command::Sysinfo => sysinfo_cmd::run(cli.global.json),
         Command::Hf { action } => hf_cmd::run(action, &loaded.config, cli.global.json),
         Command::Ls => models_cmd::ls(&loaded, cli.global.json),
+        Command::Ps => ps_cmd::ps(&loaded, cli.global.json),
+        Command::Stop { model } => ps_cmd::stop(model, &loaded, cli.global.json),
         Command::Rm { models } => models_cmd::rm(models, &loaded, cli.global.json),
         Command::Cp {
             source,
