@@ -1,6 +1,8 @@
 # Alkahest website
 
-Static site published with GitHub Pages by `.github/workflows/pages.yml`.
+Static site at https://alkahest.alchemai.es, published with GitHub Pages by
+`.github/workflows/pages.yml`. The custom domain is set in the repository Pages settings and
+resolves through a DNS-only CNAME `alkahest.alchemai.es → digiogithub.github.io` in Cloudflare.
 
 ```
 pages/

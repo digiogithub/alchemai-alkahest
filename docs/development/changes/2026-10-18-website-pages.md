@@ -37,3 +37,11 @@ Homebrew tap `digiogithub/homebrew-tap` does not exist yet, so the site does not
   sizes) render.
 - `scripts/setup/install.sh --dry-run` resolves URLs under `digiogithub/alchemai-alkahest`;
   `releases/latest` resolves to `v1.0.2`.
+
+## Hosting
+
+- GitHub Pages enabled with `build_type=workflow`, custom domain `alkahest.alchemai.es`
+  (`gh api repos/digiogithub/alchemai-alkahest/pages`); repository homepage set to it.
+- Cloudflare zone `alchemai.es`: CNAME `alkahest → digiogithub.github.io`, DNS only (not
+  proxied) so GitHub can issue the certificate.
+- Pages use absolute `og:image`, `og:url` and `canonical` URLs on that domain.
