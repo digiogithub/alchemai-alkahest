@@ -9,11 +9,11 @@
 # matches. Run `install.sh --dry-run` to see every step without changing anything.
 #
 # Archives and SHA256SUMS are produced by .github/workflows/release.yml (ALK-US-0074); the
-# repository below is the planned public home, override it with --base-url until it exists.
+# repository below is the public home; override it with --base-url for a mirror or fork.
 set -euo pipefail
 
 # Release location; override with --base-url or ALKAHEST_RELEASE_BASE_URL.
-DEFAULT_BASE_URL="https://github.com/digiogithub/alkahest/releases/download"
+DEFAULT_BASE_URL="https://github.com/digiogithub/alchemai-alkahest/releases/download"
 DEFAULT_VERSION="latest"
 
 DRY_RUN=0

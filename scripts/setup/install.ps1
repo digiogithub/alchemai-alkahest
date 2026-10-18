@@ -8,8 +8,8 @@ verified against the release checksum file (or from a local build), adds it to t
 and installs the recommended llama.cpp engine build. Nothing downloaded is executed before its
 checksum matches. Use -DryRun to see every step without changing anything.
 
-The release URLs are placeholders until the release pipeline (ALK-US-0074) publishes
-archives; use -FromLocal or -BaseUrl until then.
+Releases come from the public GitHub repository; use -BaseUrl for a mirror or fork and
+-FromLocal for a local build.
 
 .PARAMETER DryRun
 Print what would happen; change nothing, download nothing (same as --dry-run in install.sh).
@@ -43,7 +43,7 @@ param(
     [switch]$NoEngine,
     [switch]$Service,
     [string]$Version = $(if ($env:ALKAHEST_VERSION) { $env:ALKAHEST_VERSION } else { 'latest' }),
-    [string]$BaseUrl = $(if ($env:ALKAHEST_RELEASE_BASE_URL) { $env:ALKAHEST_RELEASE_BASE_URL } else { 'https://github.com/digiogithub/alkahest/releases/download' }),
+    [string]$BaseUrl = $(if ($env:ALKAHEST_RELEASE_BASE_URL) { $env:ALKAHEST_RELEASE_BASE_URL } else { 'https://github.com/digiogithub/alchemai-alkahest/releases/download' }),
     [string]$FromLocal = ''
 )
 
@@ -116,7 +116,7 @@ try {
                 Invoke-WebRequest -UseBasicParsing -Uri "$urlDir/SHA256SUMS" -OutFile (Join-Path $tmp 'SHA256SUMS')
                 Invoke-WebRequest -UseBasicParsing -Uri "$urlDir/$archive" -OutFile (Join-Path $tmp $archive)
             } catch {
-                throw "download failed (release URLs are placeholders until ALK-US-0074; try -FromLocal): $_"
+                throw "download failed (check -BaseUrl and -Version, or try -FromLocal): $_"
             }
             $line = Get-Content (Join-Path $tmp 'SHA256SUMS') |
                 Where-Object { ($_ -split '\s+', 2)[1] -replace '^\*', '' -eq $archive } |

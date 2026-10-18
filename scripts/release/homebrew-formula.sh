@@ -6,7 +6,7 @@
 # <version>     the release version without the leading `v` (0.1.0, 0.2.0-rc.1)
 # <SHA256SUMS>  the checksum file of the release (`<hash>  <file>` lines)
 # [base-url]    where the archives are served; default
-#               https://github.com/digiogithub/alkahest/releases/download/v<version>
+#               https://github.com/digiogithub/alchemai-alkahest/releases/download/v<version>
 #
 # Reads the two macOS headless archives, alkahest-<version>-aarch64-apple-darwin.tar.gz and
 # alkahest-<version>-x86_64-apple-darwin.tar.gz, from the checksum file and fails when either is
@@ -19,7 +19,7 @@ if [[ $# -lt 2 || $# -gt 3 ]]; then
 fi
 version="$1"
 sums="$2"
-base="${3:-https://github.com/digiogithub/alkahest/releases/download/v${version}}"
+base="${3:-https://github.com/digiogithub/alchemai-alkahest/releases/download/v${version}}"
 template="$(dirname "$0")/../../packaging/homebrew/alkahest.rb.in"
 
 # sha256 of the archive named $1 in the checksum file; `*` marks binary mode in some tools.

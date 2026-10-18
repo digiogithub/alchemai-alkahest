@@ -8,7 +8,7 @@ edition = "2024"
 license = "MIT"
 authors = ["Digio"]
 # Placeholder until the public repository exists.
-repository = "https://github.com/digiogithub/alkahest"
+repository = "https://github.com/digiogithub/alchemai-alkahest"
 rust-version = "1.98"
 publish = false
 
