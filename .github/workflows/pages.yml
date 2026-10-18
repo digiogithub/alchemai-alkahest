@@ -1,0 +1,44 @@
+name: Pages
+
+# Publishes the website in pages/ to GitHub Pages. Download links are resolved in the browser
+# from the latest release, so a new release does not need a redeploy.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pages/**"
+      - "design/screens/png/**"
+      - "design/brand/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Assemble the site
+        run: pages/build.sh _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alkahest · Run AI models on your own machine</title>
+<meta name="description" content="Alkahest is a local AI model server and manager: one compact binary, an Ollama-style CLI, every common API (Ollama, OpenAI, Anthropic, decisions) and a desktop app.">
+<meta name="theme-color" content="#0F1214">
+<link rel="icon" href="assets/brand/mark-small.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="en" href="./">
+<link rel="alternate" hreflang="es" href="es/">
+<meta property="og:title" content="Alkahest · Any model, any engine, one local API">
+<meta property="og:description" content="Download, run and serve AI models on your own hardware with one compact binary and a desktop app.">
+<meta property="og:image" content="assets/screens/10-library.png">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="assets/site.css">
+<script defer src="assets/site.js"></script>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="assets/brand/mark-small.svg" alt="">alkahest</a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#app">Desktop app</a>
+      <a href="#engines">Engines</a>
+      <a href="#api">API</a>
+      <a href="#tech">Under the hood</a>
+      <a href="#download">Download</a>
+    </nav>
+    <div class="nav-right">
+      <div class="lang" aria-label="Language"><span>EN</span><a href="es/" hreflang="es" lang="es">ES</a></div>
+      <a class="icon-link" href="https://github.com/digiogithub/alchemai-alkahest" aria-label="Source code on GitHub">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      </a>
+      <a class="btn primary" href="#download">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- Hero -->
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-copy">
+      <a class="release-pill" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">
+        <span class="dot-tag" data-version>latest</span><span data-release-date>Open source · MIT</span><span aria-hidden="true">→</span>
+      </a>
+      <h1>Any model, any engine,<br><em>one local API.</em></h1>
+      <p class="lede">Alkahest downloads, runs and serves AI models on your own hardware. One compact binary with an Ollama-style CLI, every common API on one port, and a desktop app to see what runs where.</p>
+      <div class="hero-cta">
+        <a class="btn primary" href="#download">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          Download Alkahest
+        </a>
+        <a class="btn" href="#app">See the desktop app</a>
+      </div>
+      <div class="hero-terminal">
+        <span class="prompt">$</span>
+        <code id="hero-cmd">alkahest pull qwen3:8b &amp;&amp; alkahest run qwen3:8b</code>
+        <button class="copy" type="button" data-copy="hero-cmd">copy</button>
+      </div>
+    </div>
+
+    <div class="showcase">
+      <div class="float f1">
+        <span class="eyebrow">Processor</span>
+        <div class="stack">
+          <span class="pill gpu">GPU 100%</span>
+          <span class="pill split">GPU 38% · CPU 62%</span>
+          <span class="pill loading">Loading… 64%</span>
+        </div>
+      </div>
+      <div class="float f2">
+        <span class="eyebrow">Formats</span>
+        <div class="stack">
+          <span class="tag">GGUF · Q4_K_M</span>
+          <span class="tag ternary">GGUF · PQ2_0</span>
+          <span class="tag">safetensors · BF16</span>
+          <span class="tag ro">ollama store · read-only</span>
+        </div>
+      </div>
+      <div class="float f3">
+        <span class="eyebrow">Serving</span>
+        <span class="mono" style="color:var(--ok-text)">● 127.0.0.1:11435</span>
+      </div>
+      <div class="window">
+        <div class="window-bar"><i></i><i></i><i></i><span>alkahest — Library</span></div>
+        <img src="assets/screens/10-library.png" width="1440" height="1080" alt="The Alkahest library: fourteen models of every kind, with their format, engine, size, context and whether they are loaded on the GPU">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Funnel -->
+<section class="alt" id="how">
+  <div class="wrap">
+    <div class="section-head center reveal">
+      <span class="eyebrow"><b>01</b> · The universal solvent</span>
+      <h2>Many sources pour in. One API comes out.</h2>
+      <p>The mark is a funnel drawn as the alchemical sign for water: models arrive from anywhere through the wide lip, the core holds what is loaded, and one drop leaves through the apex.</p>
+    </div>
+    <div class="funnel reveal">
+      <div class="flow-col left">
+        <h3>Sources</h3>
+        <div class="flow-item"><span class="ic">O</span><div><b>Ollama registry</b><span>alkahest pull qwen3:8b</span></div></div>
+        <div class="flow-item"><span class="ic">HF</span><div><b>Hugging Face</b><span>GGUF and safetensors</span></div></div>
+        <div class="flow-item"><span class="ic">git</span><div><b>Git catalogs</b><span>alkahest/qwen/qwen2.5-0.5b</span></div></div>
+        <div class="flow-item"><span class="ic">./</span><div><b>Files on disk</b><span>alkahest import ./model.gguf</span></div></div>
+        <div class="flow-item ro"><span class="ic">RO</span><div><b>Your Ollama store</b><span>reused read-only, no copy</span></div></div>
+      </div>
+      <div class="core" aria-hidden="true">
+        <svg viewBox="0 0 64 70" fill="none" stroke="#E3A63B" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
+          <path d="M6 12 H58"/><path d="M13 12 L32 52 L51 12"/>
+          <circle cx="32" cy="27" r="6.5" fill="#E3A63B" stroke="none"/>
+          <path d="M32 52 V59"/>
+          <circle class="drop" cx="32" cy="65" r="2.2" fill="#E3A63B" stroke="none"/>
+        </svg>
+        <p class="core-label"><b>scheduler</b><br>load on demand · keep-alive<br>GPU / CPU split · queues</p>
+      </div>
+      <div class="flow-col right">
+        <h3>One port · 11435</h3>
+        <div class="flow-item"><span class="ic">O</span><div><b>Ollama API</b><span>/api/chat · /api/generate · /api/tags</span></div></div>
+        <div class="flow-item"><span class="ic">AI</span><div><b>OpenAI API</b><span>/v1/chat/completions · /v1/responses</span></div></div>
+        <div class="flow-item"><span class="ic">A</span><div><b>Anthropic Messages</b><span>/v1/messages · count_tokens</span></div></div>
+        <div class="flow-item"><span class="ic">⊢</span><div><b>Decision API</b><span>/v1/decisions · /v1/systemone</span></div></div>
+        <div class="flow-item"><span class="ic">⚙</span><div><b>Admin API</b><span>OpenAPI 3.1 · server-sent events</span></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow"><b>02</b> · What it does</span>
+      <h2>Everything a local model server should do, in one binary.</h2>
+      <p>No Python environment, no container required. Install a package, and the server, the CLI and the desktop app are there.</p>
+    </div>
+    <div class="grid g3">
+      <article class="card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></div>
+        <h3>Downloads from anywhere</h3>
+        <p>The Ollama registry, Hugging Face, curated git catalogs, or the GGUF file and folder you already have. Resumable, parallel, verified by digest.</p>
+        <div class="chips"><span class="tag">pull</span><span class="tag">search</span><span class="tag">import</span></div>
+      </article>
+      <article class="card reveal">
+        <div class="ico ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+        <h3>Loads on demand</h3>
+        <p>Models load on the first request and unload after a keep-alive, so idle models cost nothing. Several at once, on GPU, CPU or split between them.</p>
+        <div class="chips"><span class="pill gpu">GPU 100%</span><span class="pill idle">Not loaded</span></div>
+      </article>
+      <article class="card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg></div>
+        <h3>Picks the right engine</h3>
+        <p>llama.cpp for GGUF, the PrismML fork for ternary Bonsai models, vLLM for safetensors, whisper.cpp for speech, stable-diffusion.cpp for images.</p>
+        <div class="chips"><span class="tag">CUDA</span><span class="tag">Vulkan</span><span class="tag">ROCm</span><span class="tag">Metal</span><span class="tag">CPU</span></div>
+      </article>
+      <article class="card reveal">
+        <div class="ico info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h10M4 17h7"/><path d="m16 15 3 3 3-3"/></svg></div>
+        <h3>Speaks every common API</h3>
+        <p>Ollama, OpenAI, Anthropic Messages and a decision API on one port. Existing clients, SDKs and agents work by changing the base URL.</p>
+        <div class="chips"><span class="tag">ollama</span><span class="tag">openai</span><span class="tag">anthropic</span></div>
+      </article>
+      <article class="card reveal">
+        <div class="ico ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <h3>Safe to expose</h3>
+        <p>Loopback needs no key; every other machine does. Scoped, expiring keys per model, TLS, usage records and an audit log.</p>
+        <div class="chips"><span class="tag">alk_••••</span><span class="tag">TLS</span><span class="tag">audit</span></div>
+      </article>
+      <article class="card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+        <h3>Has a desktop app</h3>
+        <p><code>alkahest desktop</code> opens a native app to browse, download, tune and watch models, with a tray icon. It uses the same API as any client.</p>
+        <div class="chips"><span class="tag">Linux</span><span class="tag">macOS</span><span class="tag">Windows</span></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- Desktop app -->
+<section class="alt" id="app">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow"><b>03</b> · Desktop app</span>
+      <h2>See every model, where it runs and what it costs.</h2>
+      <p>A dense, instrument-like interface built natively in Rust. Brass marks the one action that matters, verdigris means live.</p>
+    </div>
+    <div class="tabs reveal" role="tablist" data-tabs aria-label="Screens">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="s-library" id="t-library">Library</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="s-discover" id="t-discover" tabindex="-1">Discover</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="s-settings" id="t-settings" tabindex="-1">Model settings</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="s-running" id="t-running" tabindex="-1">Running</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="s-engines" id="t-engines" tabindex="-1">Engines</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="s-keys" id="t-keys" tabindex="-1">API keys</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="s-catalogs" id="t-catalogs" tabindex="-1">Catalogs</button>
+    </div>
+    <div class="reveal">
+      <div class="screen-panel" id="s-library" role="tabpanel" aria-labelledby="t-library">
+        <div class="screen-stage">
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i><span>Library</span></div><img loading="lazy" src="assets/screens/10-library.png" width="1440" height="1080" alt="Library screen"></div>
+          <div class="screen-notes"><h3>Library</h3><p>Every local model in one table, including the ones already in your Ollama store.</p><ul><li>Kind, format, engine, size and context at a glance</li><li>Live state: GPU, CPU, split or loading</li><li>Filter by kind, source and format</li><li>Load, unload and tune each model</li></ul></div>
+        </div>
+      </div>
+      <div class="screen-panel" id="s-discover" role="tabpanel" aria-labelledby="t-discover" hidden>
+        <div class="screen-stage">
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i><span>Discover</span></div><img loading="lazy" src="assets/screens/11b-discover-catalog.png" width="1440" height="1080" alt="Discover screen"></div>
+          <div class="screen-notes"><h3>Discover</h3><p>Search Hugging Face, the Ollama library and your git catalogs from one box.</p><ul><li>Memory estimate of each quant before you download</li><li>Recommended quant for your hardware</li><li>Resumable downloads with progress</li></ul></div>
+        </div>
+      </div>
+      <div class="screen-panel" id="s-settings" role="tabpanel" aria-labelledby="t-settings" hidden>
+        <div class="screen-stage">
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i><span>Model settings</span></div><img loading="lazy" src="assets/screens/12-model-settings.png" width="1440" height="1080" alt="Model settings screen"></div>
+          <div class="screen-notes"><h3>Model settings</h3><p>Per-model overrides with a live memory estimate.</p><ul><li>Context, GPU layers, KV cache type, parallel slots</li><li>Engine and build override</li><li>Keep-alive and sampling defaults</li></ul></div>
+        </div>
+      </div>
+      <div class="screen-panel" id="s-running" role="tabpanel" aria-labelledby="t-running" hidden>
+        <div class="screen-stage">
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i><span>Running</span></div><img loading="lazy" src="assets/screens/13-running.png" width="1440" height="1080" alt="Running screen"></div>
+          <div class="screen-notes"><h3>Running</h3><p>What is loaded right now, and what it uses.</p><ul><li>VRAM and RAM per model, GPU and CPU utilisation</li><li>Recent requests: route, model, tokens, duration</li><li>Unload, or kill a hung engine</li></ul></div>
+        </div>
+      </div>
+      <div class="screen-panel" id="s-engines" role="tabpanel" aria-labelledby="t-engines" hidden>
+        <div class="screen-stage">
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i><span>Engines</span></div><img loading="lazy" src="assets/screens/15-engines.png" width="1440" height="1080" alt="Engines screen"></div>
+          <div class="screen-notes"><h3>Engines</h3><p>Install the best build of each engine for this machine.</p><ul><li>Prebuilt downloads for CUDA, Vulkan, ROCm and Metal</li><li>Or compile one tuned to your CPU, with the build log</li><li>Detected accelerators and drivers</li></ul></div>
+        </div>
+      </div>
+      <div class="screen-panel" id="s-keys" role="tabpanel" aria-labelledby="t-keys" hidden>
+        <div class="screen-stage">
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i><span>API keys</span></div><img loading="lazy" src="assets/screens/14-api-keys.png" width="1440" height="1080" alt="API keys screen"></div>
+          <div class="screen-notes"><h3>API keys</h3><p>Share the server with other machines safely.</p><ul><li>Inference or admin scope, per-model limits</li><li>Expiry and revocation</li><li>Usage per key; the secret is shown once</li></ul></div>
+        </div>
+      </div>
+      <div class="screen-panel" id="s-catalogs" role="tabpanel" aria-labelledby="t-catalogs" hidden>
+        <div class="screen-stage">
+          <div class="window"><div class="window-bar"><i></i><i></i><i></i><span>Settings · Catalogs</span></div><img loading="lazy" src="assets/screens/16b-settings-catalogs.png" width="1440" height="1080" alt="Catalog settings screen"></div>
+          <div class="screen-notes"><h3>Catalogs</h3><p>Curated lists of models and engine recipes read straight from git repositories.</p><ul><li>The official catalog, plus your own private ones</li><li>Pinned to a commit, verified by digest</li><li>New entries arrive without a new release</li></ul></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Kinds -->
+<section id="kinds">
+  <div class="wrap">
+    <div class="section-head center reveal">
+      <span class="eyebrow"><b>04</b> · Model kinds</span>
+      <h2>Not just chat.</h2>
+      <p>Each model is recognised by what it does, and routed to the API that fits it.</p>
+    </div>
+    <div class="kinds reveal">
+      <span class="badge" style="--k:var(--kind-chat)"><span class="g">◆</span>Chat</span>
+      <span class="badge" style="--k:var(--kind-embeddings)"><span class="g">⋮</span>Embeddings</span>
+      <span class="badge" style="--k:var(--kind-rerank)"><span class="g">⇅</span>Rerank</span>
+      <span class="badge" style="--k:var(--kind-vision)"><span class="g">◉</span>Vision</span>
+      <span class="badge" style="--k:var(--kind-audio)"><span class="g">∿</span>Audio</span>
+      <span class="badge" style="--k:var(--kind-image)"><span class="g">▣</span>Image</span>
+      <span class="badge" style="--k:var(--kind-video)"><span class="g">▶</span>Video</span>
+      <span class="badge" style="--k:var(--kind-decision)"><span class="g">⊢</span>Decision</span>
+    </div>
+  </div>
+</section>
+
+<!-- Engines -->
+<section class="alt" id="engines">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow"><b>05</b> · Engines</span>
+      <h2>The best engine for each model, built for your machine.</h2>
+      <p>Engines run as supervised subprocesses. Alkahest chooses one from the model format, downloads a prebuilt release or compiles it for your CPU from a recipe, and restarts it if it crashes.</p>
+    </div>
+    <div class="grid g3">
+      <article class="card engine wide reveal">
+        <div class="head"><h3>llama.cpp</h3><span class="badge" style="--k:var(--kind-chat)"><span class="g">◆</span>default</span></div>
+        <p>Every GGUF model: chat, vision with its projector, embeddings and reranking. A CPU build ships in every package; GPU builds install with one command.</p>
+        <div class="accel"><span class="tag">GGUF · Q4_K_M</span><span class="tag">CUDA 12</span><span class="tag">Vulkan</span><span class="tag">ROCm</span><span class="tag">Metal</span><span class="tag">CPU native</span></div>
+      </article>
+      <article class="card engine reveal">
+        <div class="head"><h3>PrismML fork</h3></div>
+        <p>Ternary Bonsai models in the PQ2_0 and PTQ1_0 formats, picked automatically.</p>
+        <div class="accel"><span class="tag ternary">PQ2_0</span><span class="tag ternary">PTQ1_0</span></div>
+      </article>
+      <article class="card engine reveal">
+        <div class="head"><h3>vLLM</h3></div>
+        <p>Safetensors models on Linux with NVIDIA, and on Apple Silicon where supported.</p>
+        <div class="accel"><span class="tag">safetensors · BF16</span></div>
+      </article>
+      <article class="card engine reveal">
+        <div class="head"><h3>whisper.cpp</h3><span class="badge" style="--k:var(--kind-audio)"><span class="g">∿</span>audio</span></div>
+        <p>Speech to text behind <code>/v1/audio/transcriptions</code>.</p>
+        <div class="accel"><span class="tag">GGML · Q5_0</span></div>
+      </article>
+      <article class="card engine reveal">
+        <div class="head"><h3>stable-diffusion.cpp</h3><span class="badge" style="--k:var(--kind-image)"><span class="g">▣</span>image</span></div>
+        <p>Image generation behind <code>/v1/images/generations</code>.</p>
+        <div class="accel"><span class="tag">GGUF · Q4_K_S</span></div>
+      </article>
+    </div>
+    <div class="hero-terminal reveal" style="max-width:640px;margin-top:36px">
+      <span class="prompt">$</span>
+      <code id="engine-cmd">alkahest engines install llama-cpp --native</code>
+      <button class="copy" type="button" data-copy="engine-cmd">copy</button>
+    </div>
+  </div>
+</section>
+
+<!-- API -->
+<section id="api">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow"><b>06</b> · One port, every API</span>
+      <h2>Your tools already speak it.</h2>
+      <p>Point any Ollama, OpenAI or Anthropic client at <code>http://127.0.0.1:11435</code>. Port 11435 is one above Ollama's, so both can run side by side.</p>
+    </div>
+    <div class="api">
+      <div class="routes reveal">
+        <div class="route-group"><h4>Ollama <span>native</span></h4><code><b>POST</b>/api/chat · /api/generate<br><b>POST</b>/api/embed · /api/pull<br><b>GET</b>/api/tags · /api/ps · /api/version</code></div>
+        <div class="route-group"><h4>OpenAI <span>/v1</span></h4><code><b>POST</b>/chat/completions · /responses<br><b>POST</b>/embeddings · /rerank<br><b>POST</b>/audio · /images<br><b>GET</b>/models</code></div>
+        <div class="route-group"><h4>Anthropic <span>/v1</span></h4><code><b>POST</b>/messages · /messages/count_tokens</code></div>
+        <div class="route-group"><h4>Decisions <span>/v1</span></h4><code><b>POST</b>/decisions · /systemone</code></div>
+      </div>
+      <div class="code-card reveal">
+        <div class="tabs" role="tablist" data-tabs aria-label="Examples">
+          <button class="tab" role="tab" aria-selected="true" aria-controls="c-openai" id="ct-openai">OpenAI</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="c-ollama" id="ct-ollama" tabindex="-1">Ollama</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="c-anthropic" id="ct-anthropic" tabindex="-1">Anthropic</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="c-decision" id="ct-decision" tabindex="-1">Decisions</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="c-cli" id="ct-cli" tabindex="-1">CLI</button>
+        </div>
+<pre id="c-openai" role="tabpanel" aria-labelledby="ct-openai"><span class="k">from</span> openai <span class="k">import</span> OpenAI
+
+client = OpenAI(base_url=<span class="s">"http://127.0.0.1:11435/v1"</span>, api_key=<span class="s">"unused-on-loopback"</span>)
+reply = client.chat.completions.create(
+    model=<span class="s">"qwen3:8b"</span>,
+    messages=[{<span class="s">"role"</span>: <span class="s">"user"</span>, <span class="s">"content"</span>: <span class="s">"Why is the sky blue?"</span>}],
+)
+<span class="n">print</span>(reply.choices[<span class="n">0</span>].message.content)</pre>
+<pre id="c-ollama" role="tabpanel" aria-labelledby="ct-ollama" hidden>curl http://127.0.0.1:11435/api/chat -d <span class="s">'{
+  "model": "qwen3:8b",
+  "messages": [{"role": "user", "content": "Hello"}]
+}'</span>
+
+<span class="c"># any Ollama client: set OLLAMA_HOST=127.0.0.1:11435</span></pre>
+<pre id="c-anthropic" role="tabpanel" aria-labelledby="ct-anthropic" hidden><span class="k">import</span> anthropic
+
+c = anthropic.Anthropic(base_url=<span class="s">"http://127.0.0.1:11435"</span>, api_key=<span class="s">"alk_..."</span>)
+m = c.messages.create(
+    model=<span class="s">"qwen3:8b"</span>, max_tokens=<span class="n">200</span>,
+    messages=[{<span class="s">"role"</span>: <span class="s">"user"</span>, <span class="s">"content"</span>: <span class="s">"Hello"</span>}],
+)</pre>
+<pre id="c-decision" role="tabpanel" aria-labelledby="ct-decision" hidden><span class="c"># deterministic answers with probabilities, scored from logits</span>
+curl http://127.0.0.1:11435/v1/decisions -d <span class="s">'{
+  "model": "tev1:0.8b",
+  "input": "I was charged twice for my order.",
+  "questions": [
+    {"type": "choice", "name": "route",
+     "choices": [{"value": "billing"}, {"value": "shipping"}, {"value": "technical"}]},
+    {"type": "predicate", "instructions": "Is the customer angry?"}
+  ]}'</span></pre>
+<pre id="c-cli" role="tabpanel" aria-labelledby="ct-cli" hidden>alkahest pull qwen3:8b                         <span class="c"># Ollama registry</span>
+alkahest pull hf.co/ggml-org/tiny-llamas:Q4_0  <span class="c"># Hugging Face</span>
+alkahest pull alkahest/qwen/qwen2.5-0.5b-instruct  <span class="c"># git catalog</span>
+alkahest import ~/models/qwen2-vl/ --link      <span class="c"># a folder, in place</span>
+alkahest serve                                 <span class="c"># 127.0.0.1:11435</span>
+alkahest ps                                    <span class="c"># what is loaded</span>
+alkahest keys create laptop --expires 30d      <span class="c"># share it</span></pre>
+        <div class="code-foot"><span>Admin API: OpenAPI 3.1 at /alkahest/v1/openapi.json</span><a href="https://github.com/digiogithub/alchemai-alkahest/blob/main/docs/book/src/reference/api.md">API reference →</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Tech -->
+<section class="alt" id="tech">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow"><b>07</b> · Under the hood</span>
+      <h2>Small, fast, and checked on every commit.</h2>
+      <p>Written in Rust. Budgets for size and start-up time are enforced by CI, and every release is built and tested on Linux, macOS and Windows.</p>
+    </div>
+    <div class="stats reveal">
+      <div class="stat"><div class="v">&lt;30<small>MiB</small></div><div class="l">headless binary, CPU engine shipped beside it</div></div>
+      <div class="stat"><div class="v">50<small>ms</small></div><div class="l">CLI start-up budget; <code>serve</code> healthy in 500 ms</div></div>
+      <div class="stat"><div class="v">5</div><div class="l">release targets: Linux x64/arm64, macOS Intel/Apple Silicon, Windows</div></div>
+      <div class="stat"><div class="v">1.4<small>k</small></div><div class="l">automated tests, plus SDK conformance with the official clients</div></div>
+    </div>
+    <div class="grid g3 tech">
+      <article class="card reveal"><h3>Supervised subprocesses</h3><p>Engines speak HTTP in their own process. A crash never takes the server down; an orphan watchdog stops engines if the server dies.</p></article>
+      <article class="card reveal"><h3>Scheduler</h3><p>Admission by memory estimate, eviction of idle models, per-model queues and parallel slots, keep-alive unload.</p></article>
+      <article class="card reveal"><h3>Content-addressed store</h3><p>Blobs by SHA-256 digest, shared between models, garbage-collected. The Ollama store is read, never written.</p></article>
+      <article class="card reveal"><h3>Hardware detection</h3><p>CPU features, RAM, NVIDIA through NVML loaded at run time, AMD, Vulkan and Metal: the right build and the right split.</p></article>
+      <article class="card reveal"><h3>Git catalogs</h3><p>Recipes and model entries fetched over HTTPS, pinned to a commit, checked against an index of digests.</p></article>
+      <article class="card reveal"><h3>Native desktop</h3><p>GPUI, GPU-accelerated, in the same binary. It talks to the server over HTTP like any other client.</p></article>
+    </div>
+  </div>
+</section>
+
+<!-- Security -->
+<section id="security">
+  <div class="wrap sec">
+    <div class="reveal">
+      <div class="section-head" style="margin-bottom:28px">
+        <span class="eyebrow"><b>08</b> · Serve other machines</span>
+        <h2>Open it to your network without opening it to the world.</h2>
+        <p>Loopback stays frictionless. Everything else needs a key.</p>
+      </div>
+      <div class="hero-terminal" style="margin:0;max-width:none">
+        <span class="prompt">$</span>
+        <code id="sec-cmd">alkahest serve --host 0.0.0.0:11435</code>
+        <button class="copy" type="button" data-copy="sec-cmd">copy</button>
+      </div>
+    </div>
+    <ul class="sec-list reveal">
+      <li><span class="n">01</span><div><b>API keys with scopes</b><span>Inference or admin, limited to some models, with an expiry. Stored as salted hashes.</span></div></li>
+      <li><span class="n">02</span><div><b>TLS built in</b><span>Your certificate or a generated one, reloaded on SIGHUP.</span></div></li>
+      <li><span class="n">03</span><div><b>Browser-safe admin API</b><span>Origin, Sec-Fetch-Site and Host checks against CSRF and DNS rebinding.</span></div></li>
+      <li><span class="n">04</span><div><b>Usage and audit</b><span>Per-key usage, request log without content, Prometheus metrics.</span></div></li>
+      <li><span class="n">05</span><div><b>Runs as a service</b><span>systemd, launchd or a Windows service, with a dedicated user.</span></div></li>
+    </ul>
+  </div>
+</section>
+
+<!-- Download -->
+<section class="alt" id="download">
+  <div class="wrap">
+    <div class="section-head center reveal">
+      <span class="eyebrow"><b>09</b> · Download</span>
+      <h2>Get Alkahest <span data-version></span></h2>
+      <p>Every package includes a CPU build of llama.cpp, so it works out of the box. Free and open source under the MIT licence.</p>
+    </div>
+    <div class="os-grid">
+      <article class="card os reveal" data-os="linux">
+        <div class="os-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 10 3 2-3 2M12 15h5"/></svg><h3>Linux</h3><span class="here">your system</span></div>
+        <a class="btn" data-asset="appimage" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">AppImage · x86_64 <small data-size></small></a>
+        <div class="alts">
+          <a data-asset="deb" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Debian, Ubuntu (.deb) · amd64 <span data-size></span></a>
+          <a data-asset="rpm" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Fedora, RHEL, openSUSE (.rpm) · x86_64 <span data-size></span></a>
+          <a data-asset="tar-linux-x64" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Server and CLI (.tar.gz) · x86_64 <span data-size></span></a>
+          <a data-asset="tar-linux-arm" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Server and CLI (.tar.gz) · arm64 <span data-size></span></a>
+          <a data-asset="rpm-headless" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Headless .rpm · x86_64 <span data-size></span></a>
+        </div>
+      </article>
+      <article class="card os reveal" data-os="macos">
+        <div class="os-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20l-2-4H4z"/></svg><h3>macOS</h3><span class="here">your system</span></div>
+        <a class="btn" data-asset="dmg-arm" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Apple Silicon (.dmg) · arm64 <small data-size></small></a>
+        <div class="alts">
+          <a data-asset="dmg-x64" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Intel (.dmg) · x64 <span data-size></span></a>
+          <a data-asset="tar-mac-arm" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Server and CLI (.tar.gz) · arm64 <span data-size></span></a>
+          <a data-asset="tar-mac-x64" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Server and CLI (.tar.gz) · x64 <span data-size></span></a>
+        </div>
+      </article>
+      <article class="card os reveal" data-os="windows">
+        <div class="os-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg><h3>Windows</h3><span class="here">your system</span></div>
+        <a class="btn" data-asset="exe" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Installer (.exe) · x64 <small data-size></small></a>
+        <div class="alts">
+          <a data-asset="zip" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">Portable (.zip) · x64 <span data-size></span></a>
+          <a href="#install">PowerShell setup script <span>install.ps1</span></a>
+        </div>
+      </article>
+    </div>
+
+    <div class="code-card install-alt reveal" id="install">
+      <div class="tabs" role="tablist" data-tabs aria-label="Other ways to install">
+        <button class="tab" role="tab" aria-selected="true" aria-controls="i-sh" id="it-sh">Linux / macOS script</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="i-ps" id="it-ps" tabindex="-1">Windows script</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="i-docker" id="it-docker" tabindex="-1">Docker</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="i-src" id="it-src" tabindex="-1">From source</button>
+      </div>
+<pre id="i-sh" role="tabpanel" aria-labelledby="it-sh">curl -fsSL https://raw.githubusercontent.com/digiogithub/alchemai-alkahest/main/scripts/setup/install.sh | bash
+<span class="c"># detects your OS, CPU and GPU, installs the best engine build; --service runs it at login</span></pre>
+<pre id="i-ps" role="tabpanel" aria-labelledby="it-ps" hidden>irm https://raw.githubusercontent.com/digiogithub/alchemai-alkahest/main/scripts/setup/install.ps1 | iex</pre>
+<pre id="i-docker" role="tabpanel" aria-labelledby="it-docker" hidden>docker build -t alkahest .
+docker run -d --name alkahest -p 11435:11435 \
+  -e ALKAHEST_API_KEY="$(openssl rand -hex 32)" \
+  -v alkahest:/var/lib/alkahest alkahest</pre>
+<pre id="i-src" role="tabpanel" aria-labelledby="it-src" hidden>git clone https://github.com/digiogithub/alchemai-alkahest && cd alchemai-alkahest
+cargo build --release -p alkahest --no-default-features   <span class="c"># server and CLI</span>
+cargo build --release -p alkahest --features desktop      <span class="c"># with the desktop app</span></pre>
+      <div class="code-foot"><span>Already installed? <code>alkahest update</code> moves to the newest release.</span><a href="https://github.com/digiogithub/alchemai-alkahest/blob/main/docs/book/src/install.md">Install guide →</a></div>
+    </div>
+    <div class="dl-meta reveal">
+      <a href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">All files and release notes</a>
+      <a data-asset="sums" href="https://github.com/digiogithub/alchemai-alkahest/releases/latest">SHA256SUMS</a>
+      <a href="https://github.com/digiogithub/alchemai-alkahest/releases">Previous releases</a>
+    </div>
+  </div>
+</section>
+
+<section class="cta-band">
+  <div class="wrap reveal">
+    <img src="assets/brand/app-icon.svg" alt="">
+    <h2>Your models, your hardware, your API.</h2>
+    <p>Install it once and every local tool you use has a model server.</p>
+    <a class="btn primary" href="#download">Download Alkahest</a>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Digio · Alkahest is MIT licensed</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/digiogithub/alchemai-alkahest">GitHub</a>
+      <a href="https://github.com/digiogithub/alchemai-alkahest/tree/main/docs/book/src">Documentation</a>
+      <a href="https://github.com/digiogithub/alchemai-alkahest/releases">Releases</a>
+      <a href="https://github.com/digiogithub/alchemai-alkahest/issues">Issues</a>
+      <a href="es/" hreflang="es" lang="es">Español</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

@@ -11,6 +11,8 @@ extend-exclude = [
     # Product owner notes and the design hand-off are partly Spanish.
     "initial_requirements.md",
     "design/**",
+    # Spanish website.
+    "pages/es/**",
 ]
 
 [default.extend-words]
