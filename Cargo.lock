@@ -514,6 +514,7 @@ dependencies = [
  "alkahest-hf",
  "hex",
  "proptest",
+ "same-file",
  "serde",
  "serde_json",
  "sha2 0.11.1",

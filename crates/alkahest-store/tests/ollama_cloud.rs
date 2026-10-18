@@ -154,6 +154,9 @@ fn cloud_model_is_ignored_without_warning() {
         .with_writer(move || writer.clone())
         .finish();
     tracing::subscriber::with_default(subscriber, || {
+        // Other tests in this process may have registered the call site while no subscriber
+        // was interested; refresh the cached interest so this thread-local one is asked.
+        tracing::callsite::rebuild_interest_cache();
         for _ in 0..3 {
             w.catalog.list().unwrap();
         }

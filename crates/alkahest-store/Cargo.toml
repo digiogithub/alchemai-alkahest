@@ -16,6 +16,7 @@ workspace = true
 alkahest-core.workspace = true
 alkahest-gguf.workspace = true
 hex.workspace = true
+same-file.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

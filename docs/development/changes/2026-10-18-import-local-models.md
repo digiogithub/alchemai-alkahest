@@ -94,3 +94,14 @@ CLI reference regenerated.
 
 - Desktop Library "Add from file… / Add from folder…" (canvas design first, ALK-US-0081 flow).
 - LoRA `ADAPTER` support in the engines.
+
+## Follow-up: linked-file check on Windows (2026-10-18)
+
+The Windows CI job failed `linked_file_changed`: `is_link_blob` only counts hard links on Unix,
+so on Windows a hard-linked blob was taken for a store-owned copy and only its size was compared.
+NTFS also serves size and times read by path from that name's directory entry, which is not
+refreshed when the file is written through another hard link. `linked_files_problem` now reads
+metadata through an open handle and recognises a hard link by comparing the blob's file identity
+with the recorded source path (`same-file`, MIT/Unlicense, already in the lock file through
+walkdir). `cloud_model_is_ignored_without_warning` (ALK-US-0126) rebuilds the tracing interest
+cache so it also passes under `cargo test` with several tests in one process.

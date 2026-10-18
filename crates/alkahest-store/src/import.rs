@@ -465,7 +465,10 @@ pub fn linked_files_problem(entry: &ModelEntry) -> Option<String> {
             continue;
         };
         let blob = &layer.path;
-        let meta = match fs::metadata(blob) {
+        // Through an open handle: on NTFS the size and times read by path come from the
+        // directory entry of that name, which is not refreshed when the file is written
+        // through another hard link.
+        let meta = match File::open(blob).and_then(|h| h.metadata()) {
             Ok(m) => m,
             Err(_) => {
                 return Some(format!(
@@ -475,7 +478,10 @@ pub fn linked_files_problem(entry: &ModelEntry) -> Option<String> {
                 ));
             }
         };
-        let owned = !is_link_blob(blob);
+        // Windows reports no hard-link count through std, so a hard link is recognised by
+        // comparing the blob's file identity with the recorded source path instead.
+        let owned = !is_link_blob(blob)
+            && !same_file::is_same_file(blob, Path::new(&f.path)).unwrap_or(false);
         let changed = if owned {
             meta.len() != f.size
         } else {

@@ -132,6 +132,8 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Secu
 windows-service = "=0.8.1"
 byteorder = "=1.5.0"
 walkdir = "=2.5.0"
+# File identity across hard links (Windows has no stable link count in std).
+same-file = "=1.0.6"
 # Engine archives (pure Rust, no C): gzip, tar and zip.
 flate2 = "=1.1.9"
 tar = { version = "=0.4.46", default-features = false }
