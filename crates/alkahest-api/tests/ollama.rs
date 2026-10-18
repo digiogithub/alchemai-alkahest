@@ -417,6 +417,19 @@ async fn openai_routes_answer_without_the_v1_prefix() {
     assert_eq!(h.get("/tags").await.status(), 404);
 }
 
+/// An Ollama client given the OpenAI-compatible base URL (`.../v1`) still reaches the native
+/// routes: `/v1/api/version`, `/v1/api/tags` and `/v1/v1/systemone` (Pando's decision provider).
+#[tokio::test]
+async fn a_v1_base_url_reaches_the_ollama_routes() {
+    let h = Harness::start(&models()).await;
+    let v: Value = h.get("/v1/api/version").await.json().await.unwrap();
+    assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+    let v: Value = h.get("/v1/api/tags").await.json().await.unwrap();
+    assert_eq!(v["models"][0]["name"], "llama3.2:latest");
+    // `/v1/v1/models` is the doubled prefix of an existing route, so it is no longer unknown.
+    assert_eq!(h.get("/v1/v1/models").await.status(), 200);
+}
+
 /// Scenario "ollama client" (list part): `/api/tags`, `/api/show`, `/api/ps`.
 #[tokio::test]
 async fn ollama_client_list_show_and_ps() {

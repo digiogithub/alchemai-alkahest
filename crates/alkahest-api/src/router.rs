@@ -192,23 +192,33 @@ const UNPREFIXED_V1: &[&str] = &[
 ///   path and clients depend on it: Pando, for one, requests `base + "/api/tags"`, which becomes
 ///   `//api/tags` when the configured base URL ends in `/`;
 /// - an OpenAI or Anthropic route without its `/v1` prefix (`/models`, `/chat/completions`)
-///   gets it ([`UNPREFIXED_V1`]).
+///   gets it ([`UNPREFIXED_V1`]);
+/// - a base URL that already ends in `/v1` is forgiven: `/v1/api/version` reaches
+///   `/api/version` and `/v1/v1/systemone` reaches `/v1/systemone`. Ollama clients append
+///   `/api/...` or `/v1/systemone` to their base URL, and users often paste the
+///   OpenAI-compatible base (`http://127.0.0.1:11435/v1`) into them; Pando's decision provider
+///   then probes `/v1/api/version` before it trusts the server.
 ///
 /// The clean route is served directly rather than redirected, which also covers clients that do
 /// not follow redirects. No route has an empty segment or a meaningful trailing slash, and
 /// authentication runs after this rewrite, so the route family is judged on the final path.
 pub(crate) fn normalize_path<B>(mut req: Request<B>) -> Request<B> {
     let path = req.uri().path();
-    let first = path.split('/').find(|s| !s.is_empty()).unwrap_or("");
-    let add_v1 = UNPREFIXED_V1.contains(&first);
-    if !add_v1 && !path.contains("//") && !(path.len() > 1 && path.ends_with('/')) {
+    let mut segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let doubled_v1 =
+        segments.first() == Some(&"v1") && matches!(segments.get(1), Some(&"api") | Some(&"v1"));
+    if doubled_v1 {
+        segments.remove(0);
+    }
+    let add_v1 = segments.first().is_some_and(|s| UNPREFIXED_V1.contains(s));
+    if !add_v1 && !doubled_v1 && !path.contains("//") && !(path.len() > 1 && path.ends_with('/')) {
         return req;
     }
     let mut clean = String::with_capacity(path.len() + 3);
     if add_v1 {
         clean.push_str("/v1");
     }
-    for segment in path.split('/').filter(|s| !s.is_empty()) {
+    for segment in segments {
         clean.push('/');
         clean.push_str(segment);
     }
