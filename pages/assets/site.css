@@ -68,7 +68,7 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
 }
-img { max-width: 100%; display: block; }
+img { max-width: 100%; height: auto; display: block; }
 a { color: var(--accent-text); text-decoration: none; }
 a:hover { text-decoration: underline; }
 code, kbd, pre, .mono { font-family: var(--mono); }
