@@ -33,6 +33,21 @@ sha256 = "0eef725f21d179b0ecbb301c8e31a23fca1e7e9ee5baeb670e9d34f16b14cee3"
 size = 3380
 
 [[files]]
+path = "models/prism-ml/ternary-bonsai-2-2b.toml"
+sha256 = "8f46f7513fb17a0b10cd2d3153f713afb55bc413355123a87fbd3f5e3e9962ac"
+size = 3932
+
+[[files]]
+path = "models/prism-ml/ternary-bonsai-2-4b.toml"
+sha256 = "04d7cf3d27759509196a8eed9e10c8ed5d4a97da64732a16314abc36317f0f19"
+size = 3934
+
+[[files]]
+path = "models/prism-ml/ternary-bonsai-2-9b.toml"
+sha256 = "75a026afabb6af3898a5f8474ebfd3cfffc801ae02af2b8dc670b8254e2b13ba"
+size = 3935
+
+[[files]]
 path = "models/qwen/qwen2.5-0.5b-instruct.toml"
 sha256 = "3a39356c0e76508c9d63dc34da29958d44e3201e3a713520847b5c8d94c0e54d"
 size = 1590

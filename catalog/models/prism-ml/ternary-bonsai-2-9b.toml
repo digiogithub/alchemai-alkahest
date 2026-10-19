@@ -1,0 +1,73 @@
+# Model entry (ALK-SP-0011.R7): PrismML Ternary Bonsai 2 9B, a vision-language model with ternary
+# weights derived from Qwen3.5-9B (hybrid attention, 262K context).
+# Pulled as `alkahest/prism-ml/ternary-bonsai-2-9b[:tag]` (first variant = default tag).
+# Files come from the Hugging Face repository prism-ml/Ternary-Bonsai-2-9B-gguf (Apache-2.0) pinned at commit
+# 5b2abb02362efbed46bbe204014b02837778b2c2; sha256 and size are the LFS values reported by the Hugging Face API.
+# PQ2_0 and PTQ1_0 need the PrismML llama.cpp fork (engine `prism-llama-cpp`); Q2_0 also runs on
+# recent mainline llama.cpp, but the fork is pinned here because it is the tested runtime.
+# Every variant carries the Q8_0 vision projector (the model card advises against the BF16 one
+# under concurrent image requests). Parameters are the model card's thinking-mode defaults; for
+# short answers turn thinking off per request (`chat_template_kwargs: {enable_thinking: false}`).
+# The chat template is the one embedded in the GGUF.
+name = "prism-ml/ternary-bonsai-2-9b"
+description = "Ternary Bonsai 2 9B (PrismML): vision-language model with ternary weights from Qwen3.5-9B, 262K context."
+license = "apache-2.0"
+homepage = "https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-gguf"
+tags = ["chat", "vision", "thinking", "ternary", "bonsai", "small"]
+
+[[variants]]
+tag = "pq2_0"
+format = "gguf"
+quant = "PQ2_0"
+engine = "prism-llama-cpp"
+params = { num_ctx = 32768, temperature = 1.0, top_p = 0.95, top_k = 20, min_p = 0.0, presence_penalty = 1.0, repeat_penalty = 1.0 }
+[[variants.files]]
+kind = "model"
+url = "https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-gguf/resolve/5b2abb02362efbed46bbe204014b02837778b2c2/Ternary-Bonsai-2-9B-PQ2_0.gguf"
+sha256 = "7a89ab48f5038c704480f60781f9b8d4035351f5f6beb7d11fad80001fde23f9"
+size = 2416851840
+filename = "Ternary-Bonsai-2-9B-PQ2_0.gguf"
+[[variants.files]]
+kind = "projector"
+url = "https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-gguf/resolve/5b2abb02362efbed46bbe204014b02837778b2c2/Ternary-Bonsai-2-9B-mmproj-Q8_0.gguf"
+sha256 = "e0cb6f6988cea323ef798cd77d019bbb819af75582f034eaab0e7232314953db"
+size = 624229664
+filename = "Ternary-Bonsai-2-9B-mmproj-Q8_0.gguf"
+
+[[variants]]
+tag = "ptq1_0"
+format = "gguf"
+quant = "PTQ1_0"
+engine = "prism-llama-cpp"
+params = { num_ctx = 32768, temperature = 1.0, top_p = 0.95, top_k = 20, min_p = 0.0, presence_penalty = 1.0, repeat_penalty = 1.0 }
+[[variants.files]]
+kind = "model"
+url = "https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-gguf/resolve/5b2abb02362efbed46bbe204014b02837778b2c2/Ternary-Bonsai-2-9B-PTQ1_0.gguf"
+sha256 = "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b"
+size = 1997486976
+filename = "Ternary-Bonsai-2-9B-PTQ1_0.gguf"
+[[variants.files]]
+kind = "projector"
+url = "https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-gguf/resolve/5b2abb02362efbed46bbe204014b02837778b2c2/Ternary-Bonsai-2-9B-mmproj-Q8_0.gguf"
+sha256 = "e0cb6f6988cea323ef798cd77d019bbb819af75582f034eaab0e7232314953db"
+size = 624229664
+filename = "Ternary-Bonsai-2-9B-mmproj-Q8_0.gguf"
+
+[[variants]]
+tag = "q2_0"
+format = "gguf"
+quant = "Q2_0"
+engine = "prism-llama-cpp"
+params = { num_ctx = 32768, temperature = 1.0, top_p = 0.95, top_k = 20, min_p = 0.0, presence_penalty = 1.0, repeat_penalty = 1.0 }
+[[variants.files]]
+kind = "model"
+url = "https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-gguf/resolve/5b2abb02362efbed46bbe204014b02837778b2c2/Ternary-Bonsai-2-9B-Q2_0.gguf"
+sha256 = "1f884aa56aacd2bbbb2e4b7abaead2b1102b74a9c75a23fc33dab916813a384d"
+size = 2556640128
+filename = "Ternary-Bonsai-2-9B-Q2_0.gguf"
+[[variants.files]]
+kind = "projector"
+url = "https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-gguf/resolve/5b2abb02362efbed46bbe204014b02837778b2c2/Ternary-Bonsai-2-9B-mmproj-Q8_0.gguf"
+sha256 = "e0cb6f6988cea323ef798cd77d019bbb819af75582f034eaab0e7232314953db"
+size = 624229664
+filename = "Ternary-Bonsai-2-9B-mmproj-Q8_0.gguf"
