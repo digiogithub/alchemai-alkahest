@@ -68,6 +68,9 @@ pub struct LaunchOptions {
     pub serve_program: Option<std::path::PathBuf>,
     /// Arguments placed before `serve` (for example `--config <file>`).
     pub serve_args: Vec<std::ffi::OsString>,
+    /// Where a server this app spawns writes its stderr (`<log_dir>/desktop-serve.stderr.log`),
+    /// so an early exit can be explained; `None` discards it.
+    pub serve_stderr_log: Option<std::path::PathBuf>,
     /// Open the window, wait for the first frame, then exit with status 0 (CI smoke test).
     /// Skips the keyring, which could prompt for an unlock.
     pub smoke_test: bool,
@@ -82,6 +85,7 @@ impl Default for LaunchOptions {
             settings_file: None,
             serve_program: None,
             serve_args: Vec::new(),
+            serve_stderr_log: None,
             smoke_test: false,
         }
     }

@@ -279,7 +279,10 @@ pub(crate) fn connect(
         .serve_program
         .clone()
         .filter(|_| is_local_url(&server_url))
-        .map(|program| LocalLauncher::new(program, options.serve_args.clone()));
+        .map(|program| {
+            LocalLauncher::new(program, options.serve_args.clone())
+                .with_stderr_log(options.serve_stderr_log.clone())
+        });
     let url = client.base_url().to_string();
     let (manager, handle) = ConnectionManager::new(client.clone(), launcher, url.clone());
     tokio_bridge::handle(cx).spawn(manager.run());

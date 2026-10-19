@@ -10,6 +10,10 @@
 //! - Exposing the server ("Allow access from other machines") is saved for the next start and
 //!   always shows the plain-HTTP warning; the server refuses an unauthenticated network bind
 //!   unless explicitly confirmed, which this screen never does.
+//! - While remote callers need a key and no active key exists, exposing the server is
+//!   blocked before anything is saved ([`bind_needs_key`], ALK-US-0131): `alkahest serve`
+//!   refuses to start that way (ALK-SP-0006), so saving it would only break the next restart.
+//!   The screen explains why and offers to create a key first.
 
 use alkahest_client::admin::{ApiKey, NetworkPatch, NetworkSettings, NetworkSettingsDoc};
 use serde_json::{Map, Value};
@@ -20,6 +24,11 @@ use time::format_description::well_known::Rfc3339;
 pub const LOOPBACK_HOST: &str = "127.0.0.1";
 /// Bind host for "every interface".
 pub const ANY_HOST: &str = "0.0.0.0";
+
+/// Why exposing the server is blocked while no active key exists (shown inline).
+pub const BIND_NEEDS_KEY: &str = "Create an API key first. Other machines must authenticate \
+     with a key, and with no active key the server refuses to start on a network address, so \
+     this setting is not saved until a key exists.";
 
 /// How recent a use makes revoking a key need its name typed.
 pub const RECENT_USE_SECS: i64 = 24 * 3600;
@@ -204,8 +213,13 @@ impl NetworkDraft {
 
     /// The patch that saves this draft over `saved`, or what is wrong with it. Only changed
     /// fields are sent. Never confirms an unauthenticated network bind: the server then
-    /// refuses, which is the point.
-    pub fn patch(&self, saved: &NetworkSettings) -> Result<Option<NetworkPatch>, String> {
+    /// refuses, which is the point. Switching to a network bind while no key exists
+    /// (`active_keys == 0`) is refused with [`BIND_NEEDS_KEY`] ([`bind_needs_key`]).
+    pub fn patch(
+        &self,
+        saved: &NetworkSettings,
+        active_keys: u64,
+    ) -> Result<Option<NetworkPatch>, String> {
         let port: u16 = self
             .port
             .trim()
@@ -227,6 +241,9 @@ impl NetworkDraft {
             LOOPBACK_HOST
         };
         if is_loopback_host(&saved.host) == self.allow_remote {
+            if bind_needs_key(host, saved.require_key_for_remote, active_keys) {
+                return Err(BIND_NEEDS_KEY.to_string());
+            }
             p.host = Some(host.to_string());
         }
         if port != saved.port {
@@ -253,9 +270,20 @@ impl NetworkDraft {
     }
 }
 
-/// `127.0.0.1`, `::1`, `localhost`.
+/// Loopback bind hosts: `localhost`, `127.0.0.0/8`, `::1` (brackets allowed). `0.0.0.0`,
+/// `::` and every other address or name are not.
 pub fn is_loopback_host(host: &str) -> bool {
-    host.eq_ignore_ascii_case("localhost") || host == "::1" || host.starts_with("127.")
+    let h = host.trim().trim_start_matches('[').trim_end_matches(']');
+    h.eq_ignore_ascii_case("localhost")
+        || h.parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Whether binding `host` must wait for an API key: the host is not loopback, remote callers
+/// need a key (`auth.require_key_for_remote`) and no active key exists. The server refuses to
+/// start in exactly that case (ALK-SP-0006), so the desktop blocks saving it (ALK-US-0131).
+pub fn bind_needs_key(host: &str, require_key_for_remote: bool, active_keys: u64) -> bool {
+    !is_loopback_host(host) && require_key_for_remote && active_keys == 0
 }
 
 /// The banner text under the exposure toggle, if any: the plain-HTTP warning whenever the
@@ -314,6 +342,9 @@ pub struct KeysState {
     pub busy: bool,
     /// The secret was copied (the button says so).
     pub copied: bool,
+    /// Exposing the server was just refused for want of a key: the network card explains it
+    /// and offers to create one ([`KeysState::bind_blocked`]).
+    pub bind_refused: bool,
 }
 
 impl KeysState {
@@ -321,6 +352,63 @@ impl KeysState {
     pub fn set_network(&mut self, doc: NetworkSettingsDoc) {
         self.draft = Some(NetworkDraft::from_saved(&doc.saved));
         self.network = Some(doc);
+    }
+
+    /// Active keys on the server: the network document's count, kept current by
+    /// [`KeysState::on_key_added`] and [`KeysState::on_key_revoked`].
+    pub fn active_keys(&self) -> u64 {
+        self.network.as_ref().map_or(0, |n| n.active_keys)
+    }
+
+    /// "Allow access from other machines" was clicked: flips the draft and returns `true`
+    /// (the caller saves), or, when turning it on needs a key that does not exist, leaves the
+    /// draft alone, raises [`KeysState::bind_refused`] and returns `false`: nothing is saved.
+    pub fn toggle_remote(&mut self) -> bool {
+        let (Some(doc), Some(draft)) = (&self.network, &mut self.draft) else {
+            return false;
+        };
+        let turning_on = !draft.allow_remote;
+        if turning_on && bind_needs_key(ANY_HOST, doc.saved.require_key_for_remote, doc.active_keys)
+        {
+            self.bind_refused = true;
+            return false;
+        }
+        draft.allow_remote = turning_on;
+        self.bind_refused = false;
+        true
+    }
+
+    /// Whether the network card shows [`BIND_NEEDS_KEY`] with its "Create a key" button: a
+    /// network bind was refused, or one is saved, while no key exists and remote callers
+    /// need one.
+    pub fn bind_blocked(&self) -> bool {
+        let Some(doc) = &self.network else {
+            return false;
+        };
+        let saved_exposed = !is_loopback_host(&doc.saved.host);
+        (self.bind_refused || saved_exposed)
+            && bind_needs_key(ANY_HOST, doc.saved.require_key_for_remote, doc.active_keys)
+    }
+
+    /// A key was created on the server: list it and count it.
+    pub fn on_key_added(&mut self, key: ApiKey) {
+        if key.status == "active"
+            && let Some(n) = self.network.as_mut()
+        {
+            n.active_keys = n.active_keys.saturating_add(1);
+        }
+        self.keys.push(key);
+    }
+
+    /// Key `id` was revoked: drop it from the list and the count.
+    pub fn on_key_revoked(&mut self, id: &str) {
+        let before = self.keys.len();
+        self.keys.retain(|k| k.id != id);
+        if self.keys.len() < before
+            && let Some(n) = self.network.as_mut()
+        {
+            n.active_keys = n.active_keys.saturating_sub(1);
+        }
     }
 
     /// Opens the revoke confirmation for key `id`.
@@ -507,10 +595,10 @@ mod tests {
         assert!(network_warnings(&d).is_empty());
         let mut draft = NetworkDraft::from_saved(&d.saved);
         assert!(!draft.allow_remote);
-        assert_eq!(draft.patch(&d.saved).unwrap(), None, "nothing changed");
+        assert_eq!(draft.patch(&d.saved, 1).unwrap(), None, "nothing changed");
         draft.allow_remote = true;
         draft.anthropic = false;
-        let p = draft.patch(&d.saved).unwrap().unwrap();
+        let p = draft.patch(&d.saved, 1).unwrap().unwrap();
         assert_eq!(p.host.as_deref(), Some("0.0.0.0"));
         assert!(
             !p.confirm_unauthenticated,
@@ -521,6 +609,109 @@ mod tests {
         let exposed = doc("0.0.0.0");
         assert!(network_warnings(&exposed)[0].contains("plain HTTP"));
         draft.port = "0".into();
-        assert!(draft.patch(&d.saved).is_err());
+        assert!(draft.patch(&d.saved, 1).is_err());
+    }
+
+    #[test]
+    fn loopback_hosts() {
+        for h in [
+            "127.0.0.1",
+            "127.1.2.3",
+            "::1",
+            "[::1]",
+            "localhost",
+            "LocalHost",
+        ] {
+            assert!(is_loopback_host(h), "{h}");
+        }
+        for h in [
+            "0.0.0.0",
+            "::",
+            "[::]",
+            "192.168.1.10",
+            "gpu-box",
+            "127.example.com",
+            "",
+        ] {
+            assert!(!is_loopback_host(h), "{h}");
+        }
+    }
+
+    /// ALK-US-0131: a network bind without an active key is blocked before it is saved,
+    /// because `alkahest serve` refuses to start that way (ALK-SP-0006).
+    #[test]
+    fn a_network_bind_without_keys_is_blocked() {
+        // Non-loopback + require_key_for_remote + no keys = blocked.
+        assert!(bind_needs_key("0.0.0.0", true, 0));
+        assert!(bind_needs_key("::", true, 0));
+        assert!(bind_needs_key("192.168.1.10", true, 0));
+        // Loopback = allowed.
+        assert!(!bind_needs_key("127.0.0.1", true, 0));
+        assert!(!bind_needs_key("::1", true, 0));
+        assert!(!bind_needs_key("localhost", true, 0));
+        // An active key = allowed.
+        assert!(!bind_needs_key("0.0.0.0", true, 1));
+        // Keys not required = not this check (the server asks for an explicit confirmation).
+        assert!(!bind_needs_key("0.0.0.0", false, 0));
+
+        let d = doc("127.0.0.1");
+        let mut draft = NetworkDraft::from_saved(&d.saved);
+        draft.allow_remote = true;
+        assert_eq!(draft.patch(&d.saved, 0).unwrap_err(), BIND_NEEDS_KEY);
+        assert!(draft.patch(&d.saved, 2).unwrap().unwrap().host.is_some());
+        let mut open = d.saved.clone();
+        open.require_key_for_remote = false;
+        assert!(draft.patch(&open, 0).unwrap().unwrap().host.is_some());
+        // Going back to loopback is never blocked, nor is a port change on a saved bind.
+        let exposed = doc("0.0.0.0");
+        let mut back = NetworkDraft::from_saved(&exposed.saved);
+        back.port = "11500".into();
+        assert_eq!(
+            back.patch(&exposed.saved, 0).unwrap().unwrap().port,
+            Some(11500)
+        );
+        back.allow_remote = false;
+        assert!(
+            back.patch(&exposed.saved, 0)
+                .unwrap()
+                .unwrap()
+                .host
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn the_toggle_waits_for_a_key_and_the_card_offers_one() {
+        let mut s = KeysState::default();
+        assert!(!s.toggle_remote(), "nothing loaded yet");
+        s.set_network(doc("127.0.0.1"));
+        assert_eq!(s.active_keys(), 0);
+        assert!(!s.bind_blocked());
+        // Refused: the draft stays local only, nothing is saved, the card explains.
+        assert!(!s.toggle_remote());
+        assert!(!s.draft.as_ref().unwrap().allow_remote);
+        assert!(s.bind_blocked());
+        // A key is created: the explanation goes and the toggle works.
+        s.on_key_added(key("k1", "laptop", None, 0));
+        assert_eq!(s.active_keys(), 1);
+        assert!(!s.bind_blocked());
+        assert!(s.toggle_remote());
+        let saved = s.network.as_ref().unwrap().saved.clone();
+        let draft = s.draft.clone().unwrap();
+        assert!(draft.allow_remote);
+        assert!(draft.patch(&saved, s.active_keys()).is_ok());
+        // Turning it off never needs a key.
+        s.on_key_revoked("k1");
+        assert_eq!(s.active_keys(), 0);
+        assert!(s.toggle_remote());
+        assert!(!s.draft.as_ref().unwrap().allow_remote);
+        // A network bind already saved with no key left: the card says so too.
+        let mut s = KeysState::default();
+        s.set_network(doc("0.0.0.0"));
+        assert!(s.bind_blocked());
+        let mut open = doc("0.0.0.0");
+        open.saved.require_key_for_remote = false;
+        s.set_network(open);
+        assert!(!s.bind_blocked());
     }
 }

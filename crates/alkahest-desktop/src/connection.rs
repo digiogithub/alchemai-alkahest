@@ -338,10 +338,16 @@ impl Machine {
             {
                 START_POLL
             }
-            (Err(ProbeError::NotRunning), ConnectionState::Starting { .. }) => {
+            (Err(ProbeError::NotRunning), ConnectionState::Starting { method, .. }) => {
+                let log = match method {
+                    LaunchMethod::SystemdUser => {
+                        format!("`journalctl --user -u {}`", crate::launcher::USER_UNIT)
+                    }
+                    LaunchMethod::Process { .. } => "its log".to_string(),
+                };
                 self.state = ConnectionState::NotRunning {
                     error: Some(format!(
-                        "the server did not answer within {} s; see its log",
+                        "the server did not answer within {} s; see {log}",
                         START_TIMEOUT.as_secs()
                     )),
                 };
@@ -726,6 +732,9 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
             }
             let result = self.api.probe().await;
             delay = self.machine.on_probe(result, now());
+            if let Some(d) = self.check_startup() {
+                delay = d;
+            }
             self.publish();
             if self.machine.launch_due() {
                 // The old server of a restart is gone: start the new one.
@@ -782,6 +791,19 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
                 self.machine.on_launch_failed(e.to_string())
             }
         }
+    }
+
+    /// While a server we started has not answered yet: asks the launcher whether it already
+    /// gave up (exited, unit failed) and, if so, ends the start with the server's own error
+    /// text instead of waiting for the deadline and reporting it as merely unreachable
+    /// (ALK-US-0131). Returns the new probe delay when the start failed.
+    fn check_startup(&mut self) -> Option<Duration> {
+        let ConnectionState::Starting { method, .. } = self.machine.state() else {
+            return None;
+        };
+        let why = self.launcher.as_ref()?.startup_failure(method)?;
+        tracing::warn!(error = %why, "the started server exited");
+        Some(self.machine.on_launch_failed(why))
     }
 
     /// Stops the local server (then starts it again when `restart`).
@@ -1163,6 +1185,8 @@ mod tests {
         server: FakeServer,
         launches: Arc<AtomicUsize>,
         fail: bool,
+        /// The launched server exits at once with this stderr summary.
+        exits_with: Option<String>,
     }
 
     impl ServerLauncher for FakeLauncher {
@@ -1171,8 +1195,15 @@ mod tests {
             if self.fail {
                 return Err(LaunchError::Spawn("no such file".into()));
             }
-            self.server.started.store(true, Ordering::SeqCst);
+            if self.exits_with.is_none() {
+                self.server.started.store(true, Ordering::SeqCst);
+            }
             Ok(LaunchMethod::Process { pid: 42 })
+        }
+
+        fn startup_failure(&self, method: &LaunchMethod) -> Option<String> {
+            assert_eq!(method, &LaunchMethod::Process { pid: 42 });
+            self.exits_with.clone()
         }
 
         fn service_unit(&self) -> Option<String> {
@@ -1203,6 +1234,7 @@ mod tests {
             server: server.clone(),
             launches: launches.clone(),
             fail: false,
+            exits_with: None,
         };
         let (manager, mut handle) =
             ConnectionManager::new(server, Some(launcher), "http://127.0.0.1:11435".into());
@@ -1238,6 +1270,66 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+    }
+
+    /// ALK-US-0131: a restart whose new server refuses to start (a network bind without API
+    /// keys) shows the server's own error in the connection state, not just "not running",
+    /// and does not wait for the start deadline.
+    #[tokio::test(start_paused = true)]
+    async fn an_early_exit_on_restart_shows_the_servers_error() {
+        let server = FakeServer {
+            started: Arc::new(AtomicBool::new(true)),
+            ..FakeServer::default()
+        };
+        let why = "the server exited while starting: refusing to serve 0.0.0.0:11435: no \
+                   active API keys exist";
+        let launcher = FakeLauncher {
+            server: server.clone(),
+            launches: Arc::new(AtomicUsize::new(0)),
+            fail: false,
+            exits_with: Some(why.to_string()),
+        };
+        let (manager, mut handle) =
+            ConnectionManager::new(server, Some(launcher), "http://127.0.0.1:11435".into());
+        let task = tokio::spawn(manager.run());
+        wait_for(&mut handle.snapshots, "connected", |s| {
+            matches!(s.state, ConnectionState::Connected(_))
+        })
+        .await;
+        let t0 = tokio::time::Instant::now();
+        handle
+            .commands
+            .send(Command::RestartServer { pid: Some(42) })
+            .unwrap();
+        let s = wait_for(&mut handle.snapshots, "start error", |s| {
+            matches!(&s.state, ConnectionState::NotRunning { error: Some(_) })
+        })
+        .await;
+        assert!(t0.elapsed() < START_TIMEOUT, "reported before the deadline");
+        let card = s.service_card();
+        assert_eq!(card.title, "Service not running");
+        assert!(card.detail.contains("refusing to serve 0.0.0.0:11435"));
+        assert_eq!(s.card_action(), Some(CardAction::StartServer));
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(60), task)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[test]
+    fn a_systemd_start_timeout_points_at_the_journal() {
+        let t0 = Instant::now();
+        let mut m = Machine::new(true);
+        m.on_probe(Err(ProbeError::NotRunning), t0);
+        m.on_launched(LaunchMethod::SystemdUser, t0);
+        m.on_probe(Err(ProbeError::NotRunning), t0 + START_TIMEOUT);
+        match m.state() {
+            ConnectionState::NotRunning { error: Some(e) } => {
+                assert!(e.contains("journalctl --user -u alkahest.service"), "{e}");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     async fn wait_for(
@@ -1281,6 +1373,7 @@ mod tests {
             server: server.clone(),
             launches: launches.clone(),
             fail: false,
+            exits_with: None,
         };
         let (manager, mut handle) =
             ConnectionManager::new(server, Some(launcher), "http://127.0.0.1:11435".into());
@@ -1326,6 +1419,7 @@ mod tests {
             server: server.clone(),
             launches: Arc::new(AtomicUsize::new(0)),
             fail: true,
+            exits_with: None,
         };
         let (manager, mut handle) =
             ConnectionManager::new(server.clone(), Some(launcher), "http://127.0.0.1:1".into());

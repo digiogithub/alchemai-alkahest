@@ -220,6 +220,13 @@ fn desktop(args: &cli::DesktopArgs, global: &GlobalArgs, loaded: &Loaded) -> Res
         settings_file: Some(loaded.paths.config_dir.join("desktop.toml")),
         serve_program: std::env::current_exe().ok(),
         serve_args,
+        serve_stderr_log: Some(
+            loaded
+                .config
+                .resolve_paths(&loaded.paths)
+                .log_dir
+                .join("desktop-serve.stderr.log"),
+        ),
         smoke_test: args.smoke_test,
     };
     alkahest_desktop::run(options)?;

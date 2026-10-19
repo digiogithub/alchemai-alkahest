@@ -16,7 +16,7 @@ use alkahest_client::{Client, ClientError};
 use time::OffsetDateTime;
 
 use crate::connection::{ConnectionState, Snapshot};
-use crate::keys::{KeyRow, KeysState, curl_example, key_rows, network_warnings};
+use crate::keys::{BIND_NEEDS_KEY, KeyRow, KeysState, curl_example, key_rows, network_warnings};
 use crate::theme::tokens::{Palette, radius, size, space, text};
 use crate::tokio_bridge;
 use crate::ui::input::{Input, InputEvent, InputState};
@@ -252,7 +252,7 @@ impl KeysView {
         let (Some(doc), Some(draft)) = (&self.state.network, &self.state.draft) else {
             return;
         };
-        let patch = match draft.patch(&doc.saved) {
+        let patch = match draft.patch(&doc.saved, self.state.active_keys()) {
             Ok(Some(p)) => p,
             Ok(None) => return,
             Err(e) => {
@@ -318,7 +318,7 @@ impl KeysView {
                 match r {
                     Ok(created) => {
                         v.state.on_created(&created.record.name, &created.key);
-                        v.state.keys.push(created.record);
+                        v.state.on_key_added(created.record);
                         v.state.notice = None;
                     }
                     Err(e) => v.state.notice = Some((true, e)),
@@ -366,7 +366,7 @@ impl KeysView {
             async move { c.revoke_key(&id).await },
             move |v, r, _, _| match r {
                 Ok(_) => {
-                    v.state.keys.retain(|k| k.id != ask.id);
+                    v.state.on_key_revoked(&ask.id);
                     v.state.notice = Some((
                         false,
                         format!("Revoked {}: clients using it now get 401.", ask.name),
@@ -453,10 +453,13 @@ impl KeysView {
                 "Off"
             }))
             .on_click(cx.listener(|this, _, window, cx| {
-                if let Some(d) = this.state.draft.as_mut() {
-                    d.allow_remote = !d.allow_remote;
+                // Without a key a network bind is refused here, before anything is saved
+                // (ALK-US-0131); the card then explains and offers to create one.
+                if this.state.toggle_remote() {
+                    this.save_network(window, cx);
+                } else {
+                    cx.notify();
                 }
-                this.save_network(window, cx);
             }));
         let field = |label: &str, child: AnyElement| {
             v_flex()
@@ -532,7 +535,7 @@ impl KeysView {
                     )),
             );
         let dirty = draft
-            .patch(&doc.saved)
+            .patch(&doc.saved, self.state.active_keys())
             .is_ok_and(|p| p.is_some_and(|p| p.port.is_some() || p.cors_origins.is_some()));
         if dirty {
             body = body.child(
@@ -549,7 +552,29 @@ impl KeysView {
                 ),
             );
         }
+        let blocked = self.state.bind_blocked();
+        if blocked {
+            // Secondary: the header's "New key" stays the one primary action of the screen.
+            body = body.child(
+                warning_banner(BIND_NEEDS_KEY, p).child(
+                    button(
+                        "keys-bind-create-key",
+                        "Create a key",
+                        ButtonKind::Secondary,
+                        size::CONTROL_SMALL,
+                        self.state.busy,
+                        p,
+                    )
+                    .flex_shrink_0()
+                    .on_click(cx.listener(|this, _, window, cx| this.open_new_key(window, cx))),
+                ),
+            );
+        }
         for w in network_warnings(&doc) {
+            // The server's own "no active API key" warning says what the banner above says.
+            if blocked && w.contains("no active API key") {
+                continue;
+            }
             body = body.child(warning_banner(w, p));
         }
         if doc.restart_required {
