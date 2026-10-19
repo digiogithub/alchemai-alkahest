@@ -2,7 +2,7 @@
 # fills in the binary path and the groups.
 [Unit]
 Description=Alkahest local AI model server
-Documentation=https://github.com/digio/alkahest
+Documentation=https://alkahest.alchemai.es
 After=network-online.target
 Wants=network-online.target
 

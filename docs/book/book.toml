@@ -11,6 +11,6 @@ build-dir = "../../target/book"
 create-missing = false
 
 [output.html]
-git-repository-url = "https://github.com/digio/alkahest"
+git-repository-url = "https://github.com/digiogithub/alchemai-alkahest"
 default-theme = "light"
 preferred-dark-theme = "navy"

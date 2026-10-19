@@ -2,7 +2,7 @@
 # the user's systemd instance; run `loginctl enable-linger $USER` to start it at boot.
 [Unit]
 Description=Alkahest local AI model server (user)
-Documentation=https://github.com/digio/alkahest
+Documentation=https://alkahest.alchemai.es
 After=network-online.target
 
 [Service]
