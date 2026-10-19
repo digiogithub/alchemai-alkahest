@@ -92,25 +92,95 @@ impl FromStr for EngineId {
     type Err = EngineError;
 
     /// Parses an engine id. Accepts the canonical id plus a few spellings users type
-    /// (`llama.cpp`, `llamacpp`, `prism`, `whisper`, `sd`).
+    /// (`llama.cpp`, `llamacpp`, `prism`, `whisper`, `sd`); the alias table is
+    /// [`alkahest_recipes::builtin_engine_id`], which recipe validation shares.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let norm = s.trim().to_ascii_lowercase().replace(['_', '.'], "-");
-        let id = match norm.as_str() {
-            "llama-cpp" | "llamacpp" | "llama" | "llama-server" => EngineId::LlamaCpp,
-            "prism-llama-cpp" | "prism" | "prismml" | "prism-llama" => EngineId::PrismLlamaCpp,
-            "vllm" => EngineId::Vllm,
-            "whisper-cpp" | "whisper" | "whispercpp" => EngineId::WhisperCpp,
-            "stable-diffusion-cpp" | "sd" | "sd-cpp" | "stable-diffusion" | "sdcpp" => {
-                EngineId::StableDiffusionCpp
-            }
-            _ => {
-                return Err(EngineError::UnknownEngine {
-                    id: s.to_string(),
-                    known: EngineId::known_list(),
-                });
-            }
-        };
-        Ok(id)
+        alkahest_recipes::builtin_engine_id(s)
+            .and_then(|canonical| EngineId::ALL.into_iter().find(|e| e.as_str() == canonical))
+            .ok_or_else(|| EngineError::UnknownEngine {
+                id: s.to_string(),
+                known: EngineId::known_list(),
+            })
+    }
+}
+
+/// An engine as models and configuration name it: a built-in engine, or a *fork engine*
+/// (ALK-US-0132).
+///
+/// A fork is a recipe with `base = "<family>"` (`llama-cpp-turboquant` with
+/// `base = "llama-cpp"`): it installs under its own id
+/// (`<engines_dir>/<id>/<version>-<variant>/`), has its own `engines.overrides.<id>`, is never
+/// found on `PATH` and is never chosen automatically, but runs through its family's adapter
+/// (same command line, same HTTP dialect). For a built-in engine the key is just its
+/// [`EngineId`].
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EngineKey {
+    family: EngineId,
+    fork: Option<String>,
+}
+
+impl EngineKey {
+    /// The built-in engine `family`.
+    pub fn builtin(family: EngineId) -> Self {
+        Self { family, fork: None }
+    }
+
+    /// The fork engine `id`, run through the adapter of `family`. The id is not checked here;
+    /// recipes validate it ([`alkahest_recipes::check_fork_id`]).
+    pub fn fork(id: impl Into<String>, family: EngineId) -> Self {
+        Self {
+            family,
+            fork: Some(id.into()),
+        }
+    }
+
+    /// The engine family whose adapter runs this engine.
+    pub fn family(&self) -> EngineId {
+        self.family
+    }
+
+    /// The fork id, or `None` for a built-in engine.
+    pub fn fork_id(&self) -> Option<&str> {
+        self.fork.as_deref()
+    }
+
+    /// Whether this is a fork engine.
+    pub fn is_fork(&self) -> bool {
+        self.fork.is_some()
+    }
+
+    /// The id used in configuration, the engines directory and `alkahest engines install`.
+    pub fn as_str(&self) -> &str {
+        self.fork.as_deref().unwrap_or(self.family.as_str())
+    }
+
+    /// Whether a bare executable on `PATH` may serve this engine: never for a fork, whose
+    /// binary has the same name as its family's.
+    pub fn path_lookup_allowed(&self) -> bool {
+        self.fork.is_none() && self.family.path_lookup_allowed()
+    }
+
+    /// The command that installs this engine.
+    pub fn install_command(&self) -> String {
+        format!("alkahest engines install {}", self.as_str())
+    }
+}
+
+impl From<EngineId> for EngineKey {
+    fn from(family: EngineId) -> Self {
+        Self::builtin(family)
+    }
+}
+
+impl fmt::Display for EngineKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for EngineKey {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
     }
 }
 
@@ -160,6 +230,25 @@ mod tests {
         assert_eq!(
             "sd".parse::<EngineId>().unwrap(),
             EngineId::StableDiffusionCpp
+        );
+    }
+
+    #[test]
+    fn fork_keys_name_the_fork_and_run_as_their_family() {
+        let k = EngineKey::fork("llama-cpp-turboquant", EngineId::LlamaCpp);
+        assert_eq!(k.as_str(), "llama-cpp-turboquant");
+        assert_eq!(k.family(), EngineId::LlamaCpp);
+        assert!(!k.path_lookup_allowed());
+        assert_eq!(
+            k.install_command(),
+            "alkahest engines install llama-cpp-turboquant"
+        );
+        let b = EngineKey::from(EngineId::LlamaCpp);
+        assert_eq!(b.as_str(), "llama-cpp");
+        assert!(b.path_lookup_allowed() && !b.is_fork());
+        assert_eq!(
+            serde_json::to_string(&k).unwrap(),
+            "\"llama-cpp-turboquant\""
         );
     }
 

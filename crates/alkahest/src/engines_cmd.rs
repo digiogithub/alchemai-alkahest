@@ -54,6 +54,8 @@ pub fn run(action: &EnginesAction, loaded: &Loaded, json: bool) -> Result<ExitCo
             with_runtime,
             with,
             native,
+            cuda_arch,
+            dry_run,
         } => {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -70,6 +72,8 @@ pub fn run(action: &EnginesAction, loaded: &Loaded, json: bool) -> Result<ExitCo
                     with_runtime: *with_runtime,
                     with,
                     native: *native,
+                    cuda_arch: cuda_arch.as_deref(),
+                    dry_run: *dry_run,
                 },
                 &engines_dir,
                 loaded,
@@ -214,6 +218,49 @@ fn ls(catalog: &Catalog, engines_dir: &Path, json: bool) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// `engines install --dry-run`: what would be installed, and how.
+fn dry_run(recipe: &Recipe, from_source: bool, host: &Host, json: bool) -> Result<ExitCode> {
+    let source = recipe.source.as_ref().filter(|_| from_source);
+    let mut out = std::io::stdout().lock();
+    if json {
+        writeln!(
+            out,
+            "{}",
+            json!({"event": "dry_run", "engine": recipe.id, "base": recipe.base,
+                   "version": recipe.tag, "variant": recipe.variant,
+                   "from_source": from_source || recipe.needs_source_build(host),
+                   "native": recipe.native, "source": source})
+        )?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    writeln!(
+        out,
+        "would install {} {} ({}){}",
+        recipe.id,
+        recipe.tag,
+        recipe.variant,
+        recipe
+            .base
+            .as_deref()
+            .map(|b| format!(", a fork of {b}"))
+            .unwrap_or_default()
+    )?;
+    match source {
+        Some(s) => {
+            writeln!(out, "from source: {} @ {}", s.git, s.rev)?;
+            writeln!(out, "cmake flags: {}", s.cmake_flags.join(" "))?;
+            if !s.targets.is_empty() {
+                writeln!(out, "targets: {}", s.targets.join(" "))?;
+            }
+        }
+        None => match recipe.asset_for(host) {
+            Some(a) => writeln!(out, "download: {}", a.url)?,
+            None => writeln!(out, "no prebuilt archive for {}/{}", host.os, host.arch)?,
+        },
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 /// `engines info <id>`.
 fn info(catalog: &Catalog, engine: &str, engines_dir: &Path, json: bool) -> Result<ExitCode> {
     let host = Host::current();
@@ -254,6 +301,13 @@ fn info(catalog: &Catalog, engine: &str, engines_dir: &Path, json: bool) -> Resu
     let first = catalog.variants(engine, &versions[0]);
     if let Some(r) = first.first() {
         writeln!(out, "{engine}: {}", r.description)?;
+        if let Some(base) = &r.base {
+            writeln!(
+                out,
+                "fork of {base}: runs only for models that name it \
+                 (`alkahest config model <model> set engine={engine}`)"
+            )?;
+        }
         if let Some(l) = &r.license {
             writeln!(out, "licence: {l}")?;
         }
@@ -283,9 +337,14 @@ fn info(catalog: &Catalog, engine: &str, engines_dir: &Path, json: bool) -> Resu
                 writeln!(out, "      {}", r.notes)?;
             }
             if r.native {
+                let what = if r.accelerator == alkahest_recipes::AcceleratorKind::Cuda {
+                    "this machine's CUDA GPUs (`--cuda-arch <list>` to choose)"
+                } else {
+                    "this CPU"
+                };
                 writeln!(
                     out,
-                    "      native build for this CPU: `alkahest engines install {} --native`",
+                    "      native build for {what}: `alkahest engines install {} --native`",
                     r.id
                 )?;
             }
@@ -357,6 +416,8 @@ struct InstallArgs<'a> {
     with_runtime: bool,
     with: &'a [String],
     native: bool,
+    cuda_arch: Option<&'a str>,
+    dry_run: bool,
 }
 
 /// `alkahest engines install <id>`.
@@ -389,7 +450,7 @@ async fn install_cmd(
             &host,
         )?
     };
-    let from_source = args.from_source || recipe.native;
+    let from_source = args.from_source || recipe.native || args.cuda_arch.is_some();
     if from_source && recipe.source.is_none() {
         bail!(
             "{} {} ({}) has no source build steps in its recipe",
@@ -397,6 +458,17 @@ async fn install_cmd(
             recipe.tag,
             recipe.variant
         );
+    }
+    let mut recipe = recipe.clone();
+    if let (Some(archs), Some(src)) = (args.cuda_arch, &recipe.source) {
+        recipe.source = Some(
+            src.with_cuda_architectures(archs)
+                .map_err(|e| anyhow::anyhow!("{} ({}): {e}", recipe.id, recipe.variant))?,
+        );
+    }
+    let recipe = &recipe;
+    if args.dry_run {
+        return dry_run(recipe, from_source, &host, json);
     }
     if !from_source && !recipe.installable_on(&host) {
         bail!(

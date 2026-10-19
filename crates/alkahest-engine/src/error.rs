@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use alkahest_gguf::ModelFormat;
 
-use crate::id::EngineId;
+use crate::id::{EngineId, EngineKey};
 use crate::supervisor::ExitInfo;
 
 /// Result alias using [`EngineError`].
@@ -14,8 +14,13 @@ pub type Result<T, E = EngineError> = std::result::Result<T, E>;
 /// Everything that can go wrong between "this model should run" and "its engine is serving".
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
-    /// An engine id that Alkahest does not know (configuration or per-model override).
-    #[error("unknown engine `{id}`; known engines: {known}")]
+    /// An engine id that Alkahest does not know (configuration or per-model override): neither
+    /// a built-in engine nor a fork engine defined by a recipe or installed.
+    #[error(
+        "unknown engine `{id}`; known engines: {known}. A fork engine needs a recipe with \
+         `base = \"<family>\"` (in <data dir>/recipes/ or a catalog), then \
+         `alkahest engines install {id}`"
+    )]
     UnknownEngine {
         /// The id as written.
         id: String,
@@ -33,8 +38,8 @@ pub enum EngineError {
         command = engine.install_command()
     )]
     NotInstalled {
-        /// The engine that was looked for.
-        engine: EngineId,
+        /// The engine that was looked for (a fork names itself, not its family).
+        engine: EngineKey,
         /// The pinned version, when one was required.
         pin: Option<String>,
         /// Why this engine was chosen ("PQ2_0 weights", "safetensors weights").
@@ -48,8 +53,8 @@ pub enum EngineError {
         path.display()
     )]
     OverridePathMissing {
-        /// Engine whose override is broken.
-        engine: EngineId,
+        /// Engine whose override is broken (a built-in id or a fork id).
+        engine: String,
         /// Configured path.
         path: PathBuf,
     },
@@ -95,7 +100,7 @@ pub enum EngineError {
     #[error("could not install engine `{engine}` automatically: {reason}")]
     AutoInstallFailed {
         /// Engine that was being installed.
-        engine: EngineId,
+        engine: EngineKey,
         /// Why (no recipe, download or digest failure).
         reason: String,
     },

@@ -4,8 +4,10 @@
 //!   detected accelerators.
 //! * `POST /alkahest/v1/engines/install` `{"engine": "llama-cpp", "version": null,
 //!   "variant": null, "from_source": false, "force": false, "with": ["cuda-runtime"],
-//!   "native": false}`: starts an install job. `with` names optional dependencies to install
-//!   too; `native` installs the native variant built for this CPU (ALK-SP-0011.R5, R6).
+//!   "native": false, "cuda_arch": null}`: starts an install job. `with` names optional
+//!   dependencies to install too; `native` installs the native variant built for this machine
+//!   (`cuda-native` on a CUDA host, else `cpu-native`; ALK-SP-0011.R5, R6); `cuda_arch`
+//!   (`"86;89"`) sets the CUDA architectures of a CUDA source build (ALK-US-0132).
 //! * `DELETE /alkahest/v1/engines/{id}?version=&variant=`: removes managed installs (409
 //!   while a loaded model runs on one).
 //! * `POST /alkahest/v1/engines/reload`: re-reads the recipe directories and reports the
@@ -50,8 +52,13 @@ use crate::state::AppState;
 /// One engine build, installed or installable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EngineVariant {
-    /// Engine id (`llama-cpp`, `prism-llama-cpp`, `vllm`).
+    /// Engine id (`llama-cpp`, `prism-llama-cpp`, `vllm`, or a fork id).
     pub id: String,
+    /// For a fork engine (ALK-US-0132), the built-in family whose adapter runs it
+    /// (`llama-cpp`). Forks are never picked automatically; a model opts in with its `engine`
+    /// setting.
+    #[serde(default)]
+    pub base: Option<String>,
     /// Pinned upstream version (`b11669`).
     pub version: String,
     /// Build variant (`cpu`, `cuda12.8`, `vulkan`).
@@ -139,9 +146,12 @@ pub struct EngineInstallRequest {
     pub force: bool,
     /// Optional dependencies to install too (ids; ALK-SP-0011.R5).
     pub with: Vec<String>,
-    /// Install the native variant of this machine (built from source for the host CPU;
-    /// ALK-SP-0011.R6). Conflicts with `variant`.
+    /// Install the native variant of this machine (built from source for the host CPU, or
+    /// for the local CUDA GPUs on a CUDA host; ALK-SP-0011.R6). Conflicts with `variant`.
     pub native: bool,
+    /// CUDA architectures of a CUDA source build (`89`, `86;89`), replacing the `native` of
+    /// `-DCMAKE_CUDA_ARCHITECTURES` (ALK-US-0132).
+    pub cuda_arch: Option<String>,
 }
 
 /// Byte progress of an install: `(done, total)`.
@@ -351,6 +361,17 @@ impl RecipeEngineManager {
                 recipe.id, recipe.tag, recipe.variant
             )));
         }
+        if let Some(archs) = &req.cuda_arch {
+            if !from_source {
+                return Err(HttpError::bad_request(
+                    "cuda_arch applies to source builds: set from_source or native",
+                ));
+            }
+            if let Some(src) = &recipe.source {
+                src.with_cuda_architectures(archs)
+                    .map_err(HttpError::bad_request)?;
+            }
+        }
         if !from_source && !recipe.installable_on(&self.host) {
             return Err(HttpError::bad_request(format!(
                 "{} {} ({}) has no prebuilt archive for {}/{}; install it from source",
@@ -412,6 +433,7 @@ impl EngineManager for RecipeEngineManager {
                 present.extend(e.companions.iter().cloned());
                 EngineVariant {
                     id: e.id.clone(),
+                    base: e.base.clone().or_else(|| r.and_then(|r| r.base.clone())),
                     version: e.tag.clone(),
                     variant: e.variant.clone(),
                     accelerator: r.and_then(kind_label),
@@ -457,6 +479,7 @@ impl EngineManager for RecipeEngineManager {
                     };
                     engines.push(EngineVariant {
                         id: r.id.clone(),
+                        base: r.base.clone(),
                         version: r.tag.clone(),
                         variant: r.variant.clone(),
                         accelerator: kind_label(r),
@@ -506,7 +529,10 @@ impl EngineManager for RecipeEngineManager {
         let this = self.clone();
         Box::pin(async move {
             let catalog = this.catalog();
-            let recipe = this.resolve(&catalog, &req).map_err(|e| e.message)?.clone();
+            let mut recipe = this.resolve(&catalog, &req).map_err(|e| e.message)?.clone();
+            if let (Some(archs), Some(src)) = (&req.cuda_arch, &recipe.source) {
+                recipe.source = Some(src.with_cuda_architectures(archs)?);
+            }
             let on_bytes: alkahest_fetch::ProgressFn = Arc::new(move |e: ProgressEvent| match e {
                 ProgressEvent::Planned {
                     total,
@@ -742,23 +768,49 @@ pub(super) async fn reload(State(state): State<AppState>) -> Response {
     reply(&state, r)
 }
 
-/// The canonical id of an engine named in a path, or 404.
-fn engine_id(raw: &str) -> Result<&'static str, HttpError> {
-    raw.parse::<alkahest_engine::EngineId>()
-        .map(alkahest_engine::EngineId::as_str)
-        .map_err(|_| {
-            HttpError::new(
-                ErrorKind::NotFound,
-                format!(
-                    "unknown engine '{raw}'; known engines: {}",
-                    alkahest_engine::EngineId::ALL
-                        .iter()
-                        .map(|e| e.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            )
-        })
+/// The canonical id of an engine named in a path, or 404: a built-in id or alias, or a
+/// well-formed fork engine id (ALK-US-0132; its override may be saved before it is
+/// installed).
+fn engine_id(raw: &str) -> Result<String, HttpError> {
+    if let Ok(id) = raw.parse::<alkahest_engine::EngineId>() {
+        return Ok(id.as_str().to_string());
+    }
+    if alkahest_recipes::check_fork_id(raw).is_ok() {
+        return Ok(raw.to_string());
+    }
+    Err(HttpError::new(
+        ErrorKind::NotFound,
+        format!(
+            "unknown engine '{raw}'; known engines: {} (or a fork engine id)",
+            alkahest_engine::EngineId::ALL
+                .iter()
+                .map(|e| e.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    ))
+}
+
+/// [`engine_id`], requiring a fork id to be known to the engine manager (a recipe or an
+/// installed build), so a typo is a 404 rather than a saved override nobody reads.
+async fn known_engine_id(state: &AppState, raw: &str) -> Result<String, HttpError> {
+    let id = engine_id(raw)?;
+    if raw.parse::<alkahest_engine::EngineId>().is_ok() {
+        return Ok(id);
+    }
+    let not_found = || {
+        HttpError::new(
+            ErrorKind::NotFound,
+            format!("unknown engine '{raw}': no recipe or installed build has this id"),
+        )
+    };
+    let m = manager(state).map_err(|_| not_found())?;
+    let listing = blocking(move || m.list()).await?;
+    if listing.engines.iter().any(|v| v.id == id) {
+        Ok(id)
+    } else {
+        Err(not_found())
+    }
 }
 
 fn override_json(o: Option<&EngineOverride>) -> Value {
@@ -782,10 +834,12 @@ pub(super) async fn get_override(
     State(state): State<AppState>,
     UrlPath(raw): UrlPath<String>,
 ) -> Response {
-    let r = engine_id(&raw).and_then(|id| {
+    let r = async {
+        let id = known_engine_id(&state, &raw).await?;
         let ctx = admin(&state)?;
-        Ok(Json(override_document(&ctx, id)).into_response())
-    });
+        Ok(Json(override_document(&ctx, &id)).into_response())
+    }
+    .await;
     reply(&state, r)
 }
 
@@ -806,7 +860,7 @@ pub(super) async fn put_override(
     body: Bytes,
 ) -> Response {
     let r = async {
-        let id = engine_id(&raw)?;
+        let id = known_engine_id(&state, &raw).await?;
         let b: OverrideBody = parse_body(&body)?;
         if let Some(p) = &b.path
             && !p.is_absolute()
@@ -827,9 +881,9 @@ pub(super) async fn put_override(
         let ctx = admin(&state)?;
         let doc = blocking(move || {
             let mut saved = ctx.saved_overrides.lock();
-            write_override(&ctx.config_file, id, &b)?;
+            write_override(&ctx.config_file, &id, &b)?;
             if b.path.is_none() && b.extra_args.is_empty() {
-                saved.remove(id);
+                saved.remove(&id);
             } else {
                 saved.insert(
                     id.to_string(),
@@ -840,8 +894,8 @@ pub(super) async fn put_override(
                 );
             }
             drop(saved);
-            tracing::info!(engine = id, file = %ctx.config_file.display(), "engine override saved");
-            Ok(override_document(&ctx, id))
+            tracing::info!(engine = %id, file = %ctx.config_file.display(), "engine override saved");
+            Ok(override_document(&ctx, &id))
         })
         .await?;
         Ok(Json(doc).into_response())
@@ -908,7 +962,8 @@ mod tests {
         let c = alkahest_core::Config::from_toml_str(&text).unwrap();
         assert!(c.engines.overrides.is_empty());
         assert!(engine_id("llama.cpp").is_ok_and(|id| id == "llama-cpp"));
-        assert!(engine_id("nope").is_err());
+        assert!(engine_id("NOPE!").is_err());
+        assert!(engine_id("llama-cpp-turboquant").is_ok_and(|id| id == "llama-cpp-turboquant"));
     }
 
     #[test]

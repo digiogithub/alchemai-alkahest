@@ -25,7 +25,7 @@ async fn tofu_asset_installs_and_records_the_digest_it_hashed_to() {
         .mount(&server)
         .await;
 
-    let text = "id = \"eng\"\nversion = \"b5\"\nexecutable = \"srv\"\n\
+    let text = "id = \"eng\"\nbase = \"llama-cpp\"\nversion = \"b5\"\nexecutable = \"srv\"\n\
                 [variants.cpu]\naccelerator = \"cpu\"\n\
                 [[variants.cpu.assets]]\nos = \"linux\"\narch = \"x86_64\"\n\
                 url = \"https://example.org/a.tar.gz\"\ntofu = true\nformat = \"tar.gz\"\n";

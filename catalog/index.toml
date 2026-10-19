@@ -9,8 +9,8 @@ size = 504
 
 [[files]]
 path = "engines/llama-cpp.toml"
-sha256 = "d87e805249419e8a383ec63e1a7b84609b3a4037e42e48ff501a05567821deca"
-size = 13944
+sha256 = "dbe02809cfea031a8244b3af5a8560b253716cb2ddfbcf7db1a20116a3ac51f4"
+size = 15113
 
 [[files]]
 path = "engines/prism-llama-cpp.toml"

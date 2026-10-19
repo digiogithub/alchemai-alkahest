@@ -21,7 +21,7 @@ use alkahest_sysinfo::Accelerator;
 use serde::Serialize;
 
 use crate::error::{EngineError, Result};
-use crate::id::EngineId;
+use crate::id::{EngineId, EngineKey};
 
 /// Where an install came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -87,7 +87,7 @@ impl EngineInstall {
     pub fn runs_on(&self, wanted: Accelerator) -> Accelerator {
         match (self.variant.as_deref(), wanted) {
             (Some("cpu"), Accelerator::Metal) => Accelerator::Metal,
-            (Some("cpu"), _) => Accelerator::Cpu,
+            (Some("cpu" | "cpu-native"), _) => Accelerator::Cpu,
             _ => wanted,
         }
     }
@@ -103,6 +103,10 @@ pub struct LocateQuery {
     pub preferred_version: Option<String>,
     /// Backend the model will run on; decides which build variants are usable.
     pub accelerator: Accelerator,
+    /// A fork engine of the family being located (ALK-US-0132): its installs live in
+    /// `<engines_dir>/<fork>/`, its override is `engines.overrides.<fork>`, and it is never
+    /// taken from `PATH`.
+    pub fork: Option<String>,
 }
 
 impl LocateQuery {
@@ -112,7 +116,14 @@ impl LocateQuery {
             pin: None,
             preferred_version: None,
             accelerator,
+            fork: None,
         }
+    }
+
+    /// The same query for the fork engine `fork`.
+    pub fn with_fork(mut self, fork: impl Into<String>) -> Self {
+        self.fork = Some(fork.into());
+        self
     }
 }
 
@@ -126,6 +137,13 @@ pub trait EngineLocator: Send + Sync + fmt::Debug {
     /// Every install of `engine` this locator can see (for `alkahest engines ls`): managed
     /// installs newest first, then the `PATH` binary. Configuration overrides are not listed.
     fn installed(&self, engine: EngineId) -> Vec<EngineInstall>;
+
+    /// The family of the installed fork engine `id` (ALK-US-0132), read from its install
+    /// marker, so an installed fork runs even when its recipe is gone. `None` when no fork of
+    /// that id is installed (the default for locators without managed installs).
+    fn installed_fork_family(&self, _id: &str) -> Option<EngineId> {
+        None
+    }
 }
 
 /// The built-in locator over the engines directory, configuration overrides and `PATH`.
@@ -183,27 +201,34 @@ impl FsLocator {
         &self.engines_dir
     }
 
-    fn override_for(&self, engine: EngineId) -> Option<&EngineOverride> {
-        self.overrides.get(engine.as_str())
+    /// The configuration override of the engine named `name` (a built-in id or a fork id).
+    fn override_for(&self, name: &str) -> Option<&EngineOverride> {
+        self.overrides.get(name)
     }
 
-    fn extra_args(&self, engine: EngineId) -> Vec<String> {
-        self.override_for(engine)
+    fn extra_args(&self, name: &str) -> Vec<String> {
+        self.override_for(name)
             .map(|o| o.extra_args.clone())
             .unwrap_or_default()
     }
 
-    /// Managed installs of `engine`, unsorted.
-    fn managed(&self, engine: EngineId) -> Vec<EngineInstall> {
+    /// Managed installs of the engine named `name` (served by `engine`'s binary), unsorted.
+    fn managed(&self, engine: EngineId, name: &str) -> Vec<EngineInstall> {
         let mut out = Vec::new();
         for root in std::iter::once(&self.engines_dir).chain(&self.extra_roots) {
-            self.managed_in(&root.join(engine.as_str()), engine, &mut out);
+            self.managed_in(&root.join(name), engine, name, &mut out);
         }
         out
     }
 
-    /// Installs of `engine` directly below `dir`, appended to `out`.
-    fn managed_in(&self, dir: &Path, engine: EngineId, out: &mut Vec<EngineInstall>) {
+    /// Installs of `engine` (named `name`) directly below `dir`, appended to `out`.
+    fn managed_in(
+        &self,
+        dir: &Path,
+        engine: EngineId,
+        engine_name: &str,
+        out: &mut Vec<EngineInstall>,
+    ) {
         let Ok(read) = std::fs::read_dir(dir) else {
             return;
         };
@@ -240,7 +265,7 @@ impl FsLocator {
                 root: Some(root.clone()),
                 library_dirs,
                 source: InstallSource::Managed,
-                extra_args: self.extra_args(engine),
+                extra_args: self.extra_args(engine_name),
             });
         }
     }
@@ -263,7 +288,7 @@ impl FsLocator {
                     variant: None,
                     root: None,
                     source: InstallSource::SystemPath,
-                    extra_args: self.extra_args(engine),
+                    extra_args: self.extra_args(engine.as_str()),
                 });
             }
         }
@@ -273,9 +298,17 @@ impl FsLocator {
 
 impl EngineLocator for FsLocator {
     fn locate(&self, engine: EngineId, query: &LocateQuery) -> Result<EngineInstall> {
-        if let Some(path) = self.override_for(engine).and_then(|o| o.path.clone()) {
+        let name = query.fork.as_deref().unwrap_or(engine.as_str());
+        let key = match &query.fork {
+            Some(f) => EngineKey::fork(f.clone(), engine),
+            None => EngineKey::builtin(engine),
+        };
+        if let Some(path) = self.override_for(name).and_then(|o| o.path.clone()) {
             if !is_executable(&path) {
-                return Err(EngineError::OverridePathMissing { engine, path });
+                return Err(EngineError::OverridePathMissing {
+                    engine: name.to_string(),
+                    path,
+                });
             }
             let parent = path.parent().map(Path::to_path_buf);
             return Ok(EngineInstall {
@@ -286,12 +319,12 @@ impl EngineLocator for FsLocator {
                 root: parent.clone(),
                 library_dirs: parent.into_iter().collect(),
                 source: InstallSource::ConfigOverride,
-                extra_args: self.extra_args(engine),
+                extra_args: self.extra_args(name),
             });
         }
 
         let mut candidates: Vec<(u8, EngineInstall)> = self
-            .managed(engine)
+            .managed(engine, name)
             .into_iter()
             .filter_map(|i| variant_score(i.variant.as_deref(), query.accelerator).map(|s| (s, i)))
             .collect();
@@ -309,6 +342,7 @@ impl EngineLocator for FsLocator {
         }
 
         if query.pin.is_none()
+            && key.path_lookup_allowed()
             && let Some(found) = self.on_path(engine)
         {
             return Ok(found);
@@ -316,16 +350,16 @@ impl EngineLocator for FsLocator {
 
         let mut searched: Vec<PathBuf> = std::iter::once(&self.engines_dir)
             .chain(&self.extra_roots)
-            .map(|r| r.join(engine.as_str()))
+            .map(|r| r.join(name))
             .collect();
-        if engine.path_lookup_allowed()
+        if key.path_lookup_allowed()
             && query.pin.is_none()
             && let Some(p) = &self.search_path
         {
             searched.extend(std::env::split_paths(p));
         }
         Err(EngineError::NotInstalled {
-            engine,
+            engine: key,
             pin: query.pin.clone(),
             needed_for: None,
             searched,
@@ -333,19 +367,35 @@ impl EngineLocator for FsLocator {
     }
 
     fn installed(&self, engine: EngineId) -> Vec<EngineInstall> {
-        let mut out = self.managed(engine);
+        let mut out = self.managed(engine, engine.as_str());
         out.sort_by(|a, b| compare_installs(b, a));
         if let Some(p) = self.on_path(engine) {
             out.push(p);
         }
         out
     }
+
+    fn installed_fork_family(&self, id: &str) -> Option<EngineId> {
+        std::iter::once(&self.engines_dir)
+            .chain(&self.extra_roots)
+            .flat_map(|root| alkahest_recipes::list_installed(root))
+            .filter(|e| e.id == id)
+            .find_map(|e| e.base.as_deref().and_then(|b| b.parse().ok()))
+    }
 }
 
 /// Splits an install directory name into version and variant. The variant is the last
 /// `-`-separated segment when it names a build backend (`cpu`, `cuda12.4`, `vulkan`, `rocm`,
-/// `metal`); versions may contain dashes themselves (`prism-b10777-e3de715-cuda12.4`).
+/// `metal`), or the last two for a native build (`cpu-native`, `cuda-native`); versions may
+/// contain dashes themselves (`prism-b10777-e3de715-cuda12.4`).
 pub fn split_install_dir(name: &str) -> (&str, Option<&str>) {
+    if let Some(rest) = name.strip_suffix("-native")
+        && let Some((version, backend)) = rest.rsplit_once('-')
+        && !version.is_empty()
+        && is_native_backend(backend)
+    {
+        return (version, Some(&name[version.len() + 1..]));
+    }
     if let Some((version, last)) = name.rsplit_once('-')
         && !version.is_empty()
         && is_variant_label(last)
@@ -353,6 +403,11 @@ pub fn split_install_dir(name: &str) -> (&str, Option<&str>) {
         return (version, Some(last));
     }
     (name, None)
+}
+
+/// Backends a `<backend>-native` variant can name.
+fn is_native_backend(s: &str) -> bool {
+    matches!(s, "cpu" | "cuda" | "rocm" | "vulkan" | "metal" | "sycl")
 }
 
 fn is_variant_label(s: &str) -> bool {
@@ -373,10 +428,22 @@ fn parse_cuda(s: &str) -> Option<(u32, u32)> {
 ///
 /// Exact label match 4, an older CUDA build on a newer driver 3, CPU or unlabelled builds 1.
 /// A GPU build of another backend, or a CUDA build newer than the driver, is unusable.
+///
+/// A native build (`cpu-native`, `cuda-native`; ALK-SP-0011.R6) was compiled on request for this
+/// machine, so it scores one more than the portable build of its backend and wins over it.
 fn variant_score(variant: Option<&str>, accel: Accelerator) -> Option<u8> {
     let Some(v) = variant else {
         return Some(1);
     };
+    if let Some(backend) = v.strip_suffix("-native") {
+        let base = match (backend, accel) {
+            ("cpu", _) => Some(1),
+            ("cuda", Accelerator::Cuda { .. }) => Some(4),
+            (b, a) if b == accel_kind(a) => Some(4),
+            _ => None,
+        };
+        return base.map(|s| s + 1);
+    }
     if v == "cpu" {
         return Some(1);
     }
@@ -387,6 +454,17 @@ fn variant_score(variant: Option<&str>, accel: Accelerator) -> Option<u8> {
         return (build <= (major, minor)).then_some(3);
     }
     None
+}
+
+/// The backend kind of `accel` as variant names spell it (`cuda`, `vulkan`, ...).
+fn accel_kind(accel: Accelerator) -> &'static str {
+    match accel {
+        Accelerator::Cpu => "cpu",
+        Accelerator::Cuda { .. } => "cuda",
+        Accelerator::Rocm => "rocm",
+        Accelerator::Vulkan => "vulkan",
+        Accelerator::Metal => "metal",
+    }
 }
 
 fn matches_version(install: &EngineInstall, want: &str) -> bool {
@@ -509,6 +587,15 @@ mod tests {
             ("prism-b10777-e3de715", None)
         );
         assert_eq!(split_install_dir("cpu"), ("cpu", None));
+        assert_eq!(
+            split_install_dir("b11669-cuda-native"),
+            ("b11669", Some("cuda-native"))
+        );
+        assert_eq!(
+            split_install_dir("b11669-cpu-native"),
+            ("b11669", Some("cpu-native"))
+        );
+        assert_eq!(split_install_dir("x-native"), ("x-native", None));
     }
 
     #[test]
@@ -532,5 +619,10 @@ mod tests {
         assert_eq!(variant_score(Some("cuda12.4"), Accelerator::Cpu), None);
         assert_eq!(variant_score(Some("vulkan"), Accelerator::Vulkan), Some(4));
         assert_eq!(variant_score(None, Accelerator::Metal), Some(1));
+        // Native builds beat the portable build of their backend.
+        assert_eq!(variant_score(Some("cuda-native"), cuda), Some(5));
+        assert_eq!(variant_score(Some("cpu-native"), cuda), Some(2));
+        assert_eq!(variant_score(Some("cuda-native"), Accelerator::Cpu), None);
+        assert_eq!(variant_score(Some("cpu-native"), Accelerator::Cpu), Some(2));
     }
 }

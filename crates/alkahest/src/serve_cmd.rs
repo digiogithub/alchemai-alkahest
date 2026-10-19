@@ -28,7 +28,9 @@ use alkahest_api::{
 };
 use alkahest_core::Source;
 use alkahest_core::config::Loaded;
-use alkahest_engine::{EngineRegistry, Platform, ProcessLedger, SpawnOptions};
+use alkahest_engine::{
+    DynamicRecipes, EngineRegistry, Platform, ProcessLedger, RecipeSource, SpawnOptions,
+};
 use alkahest_fetch::FetchConfig;
 use alkahest_sched::{CatalogBackend, Scheduler, SchedulerOptions};
 use alkahest_store::{Catalog, ModelSettings};
@@ -111,6 +113,30 @@ fn signal_control() -> Result<ServeControl> {
 
 /// Exit code after a third stop signal (128 + SIGINT, as shells report an interrupted job).
 const EXIT_FORCED: i32 = 130;
+
+/// The layered recipe catalog the engine registry reads on demand (built-in, git catalogs,
+/// `recipes/` next to the binary, `<data dir>/recipes`), the same layering as
+/// `alkahest engines` and the admin API. Read live so that a fork engine recipe added while the
+/// server runs can be named by a model without a restart (ALK-US-0132).
+fn recipe_source(
+    data_dir: &std::path::Path,
+    set: alkahest_catalog::CatalogSet,
+) -> Arc<dyn RecipeSource> {
+    let mut dirs = Vec::new();
+    if let Some(parent) = std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(std::path::Path::parent)
+    {
+        dirs.push(parent.join("recipes"));
+    }
+    dirs.push(data_dir.join("recipes"));
+    let data_dir = data_dir.to_path_buf();
+    Arc::new(DynamicRecipes::new(move || {
+        let states = alkahest_catalog::load_states(&data_dir, &set.sources());
+        alkahest_catalog::recipe_catalog(&states, &dirs).0
+    }))
+}
 
 async fn serve(
     loaded: &Loaded,
@@ -195,7 +221,16 @@ async fn serve(
             e.pid, e.model
         );
     }
-    let registry = Arc::new(EngineRegistry::from_config(config, &paths));
+    // One live set of catalog sources and limits: catalog edits through the admin API apply
+    // to the engine manager, the engine registry (fork engines, ALK-US-0132), the pull
+    // service and the background refresh at once.
+    let catalog_set =
+        alkahest_catalog::CatalogSet::new(config.catalogs.clone(), config.catalog_limits);
+    let registry = Arc::new(EngineRegistry::from_config_with_recipes(
+        config,
+        &paths,
+        recipe_source(&paths.data_dir, catalog_set.clone()),
+    ));
     let backend = CatalogBackend::new(
         catalog.clone(),
         registry,
@@ -212,10 +247,6 @@ async fn serve(
         SchedulerOptions::from_config(&config.scheduler),
     )
     .context("starting the scheduler")?;
-    // One live set of catalog sources and limits: catalog edits through the admin API apply
-    // to the engine manager, the pull service and the background refresh at once.
-    let catalog_set =
-        alkahest_catalog::CatalogSet::new(config.catalogs.clone(), config.catalog_limits);
     let pulls = Arc::new(
         PullService::new(config.clone(), paths.clone()).with_catalog_set(catalog_set.clone()),
     );

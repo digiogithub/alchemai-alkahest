@@ -12,6 +12,10 @@ rules, clean shutdown, no orphans). Engines are installed from **recipes**.
 | `whisper-cpp` | speech-to-text (`/v1/audio/transcriptions`) | upstream publishes no binaries, so it builds from source |
 | `stable-diffusion-cpp` | image generation (`/v1/images/generations`) | prebuilt for most platforms |
 
+Next to these, recipes can define [fork engines](#fork-engines): performance forks of llama.cpp
+(or of another engine) that install side by side with mainline and run only for the models
+that ask for them.
+
 ```sh
 alkahest engines ls                  # installed and installable engines
 alkahest engines info llama-cpp      # versions, variants, requirements, what is installed
@@ -29,6 +33,9 @@ Alkahest chooses; you only override. In order:
 3. safetensors snapshots run on vLLM;
 4. `PQ2_0` and `PTQ1_0` quantisations run on the PrismML fork;
 5. every other GGUF runs on mainline llama.cpp.
+
+Rules 2 to 5 only ever pick the built-in engines above. A [fork engine](#fork-engines) runs a
+model only when that model's `engine` setting names it.
 
 If the engine a model needs is missing, the request fails with the exact command that installs
 it (`alkahest engines install prism-llama-cpp`). Set `engines.auto_install = true` to let the
@@ -48,6 +55,8 @@ A recipe has one **variant** per accelerator. Without `--variant`, Alkahest dete
 | `rocm` | AMD, Linux and Windows | ROCm / HIP |
 | `metal` | Apple Silicon | nothing (built into the macOS archive) |
 | `sycl` | Intel oneAPI | installed on request only, never picked automatically |
+| `cpu-native` | this machine's CPU | built from source on request (`--native`); git, cmake, ninja |
+| `cuda-native` | this machine's NVIDIA GPUs | built from source on request (`--native` on a CUDA host); also the CUDA toolkit (`nvcc`) |
 
 Several versions and variants can be installed side by side under
 `<data dir>/engines/<id>/<version>-<variant>/`. Engines in the data directory win over the
@@ -72,6 +81,24 @@ alkahest engines install llama-cpp --from-source    # needs git, cmake and ninja
 Every variant carries the source build steps for its accelerator. A recipe without a prebuilt
 archive for your platform (whisper.cpp today) builds from source automatically; the CUDA build
 needs `nvcc`, the Vulkan build `glslc`.
+
+**Native builds.** The portable builds run on any CPU and any GPU of their backend. A native
+build is compiled for this machine only, which is usually a little faster and never portable:
+
+```sh
+alkahest engines install llama-cpp --native                       # cuda-native on a CUDA host, else cpu-native
+alkahest engines install llama-cpp --variant cuda-native --from-source
+alkahest engines install llama-cpp --variant cuda-native --cuda-arch 89      # an RTX 40xx
+alkahest engines install llama-cpp --variant cuda-native --cuda-arch "86;89" # several GPUs
+alkahest engines install llama-cpp --native --dry-run             # print the recipe and cmake flags only
+```
+
+`cuda-native` uses the flags of the other llama.cpp source builds plus `-DGGML_CUDA=ON
+-DCMAKE_CUDA_ARCHITECTURES=native`, so nvcc compiles for the GPUs it finds. `--cuda-arch`
+replaces `native` with an explicit list (useful when the build machine has no GPU, or to cover
+several cards); it works with any CUDA source build and is refused for other variants. Native
+variants are never picked automatically; once installed, a native build of a backend is
+preferred over the portable build of the same backend.
 
 ## Bonsai and the PrismML fork
 
@@ -146,6 +173,94 @@ tools do the same through the admin API (`/alkahest/v1/catalogs`, see the API re
   downloads an engine or a model; that happens on `engines install` or `pull`, verified against
   the sha256 the catalog pins.
 
+## Fork engines
+
+A fork engine is a build of an engine from another repository (a llama.cpp fork with a
+TurboQuant KV cache, multi-token prediction, new kernels) that runs **next to** the mainline
+engine instead of replacing it. A fork:
+
+- is defined by a recipe whose `id` is new and whose `base` names the built-in engine family it
+  behaves like (`llama-cpp` for anything that is a `llama-server`): same command line, same
+  HTTP API, same Alkahest adapter;
+- installs under its own id, `<data dir>/engines/<id>/<version>-<variant>/`, and shows up in
+  `engines ls`, `engines info`, `engines install`, `engines rm`, the admin API and the desktop
+  Engines view;
+- has its own `engines.overrides.<id>` (it does not inherit the family's);
+- is never found on `PATH` (its `llama-server` would be indistinguishable from mainline's);
+- is **never chosen automatically**. A model runs on it only when its `engine` setting names it.
+
+A recipe skeleton, for `<data dir>/recipes/llama-cpp-myfork.toml` or a catalog's
+`engines/llama-cpp-myfork.toml` (a fork id may not reuse a built-in id or alias):
+
+```toml
+id = "llama-cpp-myfork"
+base = "llama-cpp"                 # the family whose adapter runs it
+version = "f1a2b3c"                # pin a tag or commit
+description = "llama.cpp fork with <feature>"
+license = "MIT"
+homepage = "https://github.com/<owner>/<fork>"
+executable = "llama-server"
+
+[variants."cpu"]
+accelerator = "cpu"
+[variants."cpu".source]
+git = "https://github.com/<owner>/<fork>.git"
+rev = "f1a2b3c"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN"]
+targets = ["llama-server"]
+
+[variants."cuda-native"]
+accelerator = "cuda"
+native = true
+[variants."cuda-native".source]
+git = "https://github.com/<owner>/<fork>.git"
+rev = "f1a2b3c"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"]
+targets = ["llama-server"]
+```
+
+Prebuilt archives (`[[variants.<v>.assets]]` with `sha256`) work exactly as for the built-in
+recipes. A recipe whose `id` is unknown and has no `base`, or whose `base` is not a built-in
+engine, is rejected with the reason (`engines ls` prints it as a warning).
+
+Install it and opt a model in:
+
+```sh
+alkahest engines install llama-cpp-myfork --native            # or --variant cpu --from-source
+alkahest config model qwen3:8b set engine=llama-cpp-myfork    # or engine=llama-cpp-myfork@f1a2b3c
+alkahest config model qwen3:8b set "extra_args=--cache-type-k turbo3 --cache-type-v turbo3"
+alkahest show qwen3:8b                                        # engine and engine args
+```
+
+Fork-only flags (new KV cache types, speculative decoding switches) go in the model's
+`extra_args` or in `engines.overrides.<fork id>.extra_args`. A model that names a fork which is
+not installed fails with `alkahest engines install <fork id>`; with
+`engines.auto_install = true` the server installs it on first use (a source-only fork then
+compiles, which takes minutes). A fork that is installed keeps working when its recipe is
+removed: the install records its family.
+
+### Benchmarking a fork against mainline
+
+Compare like with like: the same GGUF file, the same context length (`num_ctx`), the same
+`gpu_layers`, flash attention setting, batch size and number of slots, `temperature=0` and a
+fixed `seed`, and nothing else using the GPU. Measure:
+
+| Metric | How |
+|---|---|
+| prompt processing (t/s) | `llama-bench -p 512` or `timings.prompt_per_second` of a `/completion` response |
+| decode (t/s) | `llama-bench -n 128` or `timings.predicted_per_second` |
+| time to first token | streaming request, time until the first chunk; same prompt, warm model |
+| peak VRAM | `nvidia-smi --query-gpu=memory.used --format=csv -lms 200` during the run, or `alkahest ps` |
+
+Prebuilt llama.cpp archives include `llama-bench` next to `llama-server`; a source build only
+compiles the recipe's `targets`, so add `"llama-bench"` there (or build it from the same
+checkout). Run it from each install directory (`<data dir>/engines/<id>/<version>-<variant>/`)
+with identical arguments, for example
+`./llama-bench -m model.gguf -p 512 -n 128 -ngl 999 -fa 1 -r 5`. To measure through Alkahest,
+create a copy of the model (`alkahest cp qwen3:8b qwen3-fork`), set `engine=` on the copy only,
+and send the same request several times to each name, discarding the first (load) run. Report
+the median of at least five runs and the build versions (`alkahest engines ls`).
+
 ## Overriding an engine binary
 
 Point a model family at your own build in the configuration file:
@@ -156,7 +271,11 @@ path = "/opt/llama.cpp/build/bin/llama-server"
 extra_args = ["--no-mmap"]
 ```
 
-`extra_args` are appended to the command line whenever that engine starts.
+`extra_args` are appended to the command line whenever that engine starts. A model's own
+`extra_args` (`alkahest config model <m> set "extra_args=..."`) come after them, so for flags
+whose last value wins the model's setting overrides the engine-wide one. The flags Alkahest
+manages (`--host`, `--port`, `-m`, `--model`, `--api-key`, `--api-key-file`) cannot be set per
+model.
 
 ## Engine logs
 

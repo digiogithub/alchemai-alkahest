@@ -52,8 +52,9 @@ pub use meta::{DecisionInfo, GgufFacts, ModelInfo, format_parameters};
 pub use ollama::OllamaStore;
 pub use ops::{CopyReport, DeleteReport, GcReport, STALE_STAGING_AGE};
 pub use overlay::{
-    Effective, Layer, Layers, MAX_NUM_PARALLEL, ModelOverlays, ModelSettings, RecommendedLayer,
-    RecommendedSampling, resolve as resolve_settings,
+    Effective, Layer, Layers, MANAGED_ENGINE_FLAGS, MAX_NUM_PARALLEL, ModelOverlays, ModelSettings,
+    RecommendedLayer, RecommendedSampling, check_extra_args, resolve as resolve_settings,
+    split_args,
 };
 pub use reference::{
     CATALOG_HOST, HfRef, HfSelector, ModelName, ModelRef, Origin, RefError, RefPart, ScopedRef,

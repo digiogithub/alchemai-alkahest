@@ -36,7 +36,7 @@ fn sha(bytes: &[u8]) -> String {
 fn recipe(engine_url: &str, engine: &[u8], runtime_url: &str, runtime: &[u8]) -> Recipe {
     let host = Host::current();
     let text = format!(
-        "id = \"eng\"\nversion = \"b1\"\nexecutable = \"srv\"\n\
+        "id = \"eng\"\nbase = \"llama-cpp\"\nversion = \"b1\"\nexecutable = \"srv\"\n\
          [variants.cuda12]\naccelerator = \"cuda\"\ncuda = \"12.4\"\n\
          [[variants.cuda12.assets]]\nos = \"{os}\"\narch = \"{arch}\"\nurl = \"https://example.org/engine.zip\"\n\
          sha256 = \"{es}\"\nformat = \"zip\"\n\
@@ -209,7 +209,7 @@ async fn a_corrupt_companion_fails_the_install_and_leaves_nothing() {
 
 #[test]
 fn companion_recipes_validate_digests_and_urls() {
-    let base = "id = \"e\"\nversion = \"1\"\nexecutable = \"x\"\n\
+    let base = "id = \"e\"\nbase = \"llama-cpp\"\nversion = \"1\"\nexecutable = \"x\"\n\
                 [variants.cuda12]\naccelerator = \"cuda\"\ncuda = \"12.4\"\n\
                 [variants.cuda12.source]\ngit = \"https://example.org/e.git\"\nrev = \"v1\"\n\
                 [[variants.cuda12.companions]]\nname = \"cuda-runtime\"\nos = \"linux\"\n\
@@ -235,7 +235,7 @@ fn builtin_cuda_recipes_pin_their_runtime_archives() {
     let all = builtin_recipes();
     let llama: Vec<_> = all
         .iter()
-        .filter(|r| r.id == "llama-cpp" && r.variant.starts_with("cuda"))
+        .filter(|r| r.id == "llama-cpp" && r.variant.starts_with("cuda") && !r.native)
         .collect();
     assert!(!llama.is_empty());
     for r in llama {

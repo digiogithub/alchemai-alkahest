@@ -26,6 +26,7 @@ mod archive;
 mod build;
 mod catalog;
 mod error;
+mod family;
 mod install;
 mod recipe;
 mod runtime;
@@ -34,6 +35,7 @@ pub use archive::{extract, strip_components};
 pub use build::BuildTools;
 pub use catalog::{Catalog, DiscoveryIssue, RecipeLayer};
 pub use error::{RecipeError, Result};
+pub use family::{BUILTIN_ENGINE_IDS, builtin_engine_id, check_fork_id, normalize_engine_name};
 pub use install::{
     ENGINE_LICENSE_FILE, InstallOptions, InstalledEngine, MARKER_FILE, bundled_roots,
     engine_license_text, install, list_installed, locate, remove_installed,

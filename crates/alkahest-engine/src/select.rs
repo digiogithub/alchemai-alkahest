@@ -7,6 +7,12 @@
 //! as `<id>@<version>` (`llama-cpp@b6500`), which is how a model keeps an older build while
 //! others move to the newest (ALK-SP-0003.R5).
 //!
+//! Fork engines (ALK-US-0132; recipes with `base`, such as `llama-cpp-turboquant`) are never
+//! chosen by the rule: a model runs on one only when its `engine` setting names it
+//! (`engine=llama-cpp-turboquant` or `engine=llama-cpp-turboquant@<version>`). Names other than
+//! the built-in ids are resolved by the caller ([`select_engine_with`]), which knows the
+//! recipes and the installed forks.
+//!
 //! The rule mirrors `alkahest_store::ModelInfo::default_engine` (shown in `alkahest ls`); a
 //! test keeps the two in agreement.
 
@@ -16,7 +22,7 @@ use alkahest_gguf::{ModelFormat, ModelKind};
 use alkahest_sysinfo::{Accelerator, SystemInfo};
 
 use crate::error::{EngineError, Result};
-use crate::id::EngineId;
+use crate::id::{EngineId, EngineKey};
 use crate::launch::LaunchRequest;
 use crate::locator::LocateQuery;
 
@@ -117,8 +123,11 @@ impl fmt::Display for SelectionReason {
 /// The selected engine and which build of it to use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineChoice {
-    /// Engine to run.
+    /// Engine family to run: the adapter, and the engine itself unless `fork` is set.
     pub engine: EngineId,
+    /// The fork engine named by the model's `engine` setting (ALK-US-0132); its binary comes
+    /// from `<engines_dir>/<fork>/` and it runs through the adapter of `engine`.
+    pub fork: Option<String>,
     /// Version required by the model's setting (`llama-cpp@b6500`).
     pub pin: Option<String>,
     /// Version preferred when installed (the PrismML pin).
@@ -134,8 +143,27 @@ impl EngineChoice {
             pin: self.pin.clone(),
             preferred_version: self.preferred_version.clone(),
             accelerator,
+            fork: self.fork.clone(),
         }
     }
+
+    /// The engine as configuration names it (the fork, or the built-in family).
+    pub fn key(&self) -> EngineKey {
+        match &self.fork {
+            Some(f) => EngineKey::fork(f.clone(), self.engine),
+            None => EngineKey::builtin(self.engine),
+        }
+    }
+}
+
+/// Resolves the engine name of an `engine` setting (without the `@version`) to the engine it
+/// means: built-in ids and aliases, plus whatever fork engines the caller knows.
+pub type EngineResolver<'a> = &'a dyn Fn(&str) -> Result<EngineKey>;
+
+/// The resolver that knows only the built-in engines: any other name is
+/// [`EngineError::UnknownEngine`].
+pub fn builtin_resolver(name: &str) -> Result<EngineKey> {
+    name.parse::<EngineId>().map(EngineKey::builtin)
 }
 
 /// Parses a per-model engine setting: `<id>` or `<id>@<version>`.
@@ -156,25 +184,64 @@ pub fn parse_engine_setting(value: &str) -> Result<(EngineId, Option<String>)> {
     Ok((id.parse()?, version))
 }
 
+/// [`parse_engine_setting`] with fork engines: the name before `@` goes through `resolve`.
+pub fn parse_engine_setting_with(
+    value: &str,
+    resolve: EngineResolver<'_>,
+) -> Result<(EngineKey, Option<String>)> {
+    let (id, version) = match value.split_once('@') {
+        Some((id, v)) => {
+            let v = v.trim();
+            if v.is_empty() {
+                return Err(EngineError::InvalidEngineSetting {
+                    value: value.to_string(),
+                    reason: "the version after `@` is empty".into(),
+                });
+            }
+            (id, Some(v.to_string()))
+        }
+        None => (value, None),
+    };
+    Ok((resolve(id.trim())?, version))
+}
+
 /// Whether a quantisation label names PrismML-only ternary weights.
 pub fn is_prism_quant(q: &str) -> bool {
     let q = q.to_ascii_uppercase();
     q.contains("PQ2_0") || q.contains("PTQ1_0")
 }
 
+/// Applies the selection rule to `req` on `platform`, knowing only the built-in engines; see
+/// [`select_engine_with`].
+pub fn select_engine(req: &LaunchRequest, platform: &Platform) -> Result<EngineChoice> {
+    select_engine_with(req, platform, &builtin_resolver)
+}
+
 /// Applies the selection rule to `req` on `platform`.
 ///
-/// The override in `req.settings.engine` wins. vLLM is refused with
-/// [`EngineError::UnsupportedPlatform`] where it cannot run, whether chosen by rule or by
-/// override. Whether the engine is installed is checked afterwards by the locator
-/// ([`crate::EngineRegistry::plan`]).
-pub fn select_engine(req: &LaunchRequest, platform: &Platform) -> Result<EngineChoice> {
+/// The override in `req.settings.engine` wins; its name is resolved with `resolve`, which is
+/// how a fork engine is chosen. The automatic rule only ever picks built-in engines. vLLM
+/// (and a fork of it) is refused with [`EngineError::UnsupportedPlatform`] where it cannot
+/// run, whether chosen by rule or by override. Whether the engine is installed is checked
+/// afterwards by the locator ([`crate::EngineRegistry::plan`]).
+pub fn select_engine_with(
+    req: &LaunchRequest,
+    platform: &Platform,
+    resolve: EngineResolver<'_>,
+) -> Result<EngineChoice> {
     let choice = match req.settings.engine.as_deref().map(str::trim) {
         Some(setting) if !setting.is_empty() => {
-            let (engine, pin) = parse_engine_setting(setting)?;
+            let (key, pin) = parse_engine_setting_with(setting, resolve)?;
+            let engine = key.family();
+            let fork = key.fork_id().map(str::to_string);
             EngineChoice {
                 engine,
-                preferred_version: default_preferred(engine, pin.as_deref()),
+                preferred_version: if fork.is_none() {
+                    default_preferred(engine, pin.as_deref())
+                } else {
+                    None
+                },
+                fork,
                 pin,
                 reason: SelectionReason::Override,
             }
@@ -183,6 +250,7 @@ pub fn select_engine(req: &LaunchRequest, platform: &Platform) -> Result<EngineC
             let (engine, reason) = automatic(req);
             EngineChoice {
                 engine,
+                fork: None,
                 pin: None,
                 preferred_version: default_preferred(engine, None),
                 reason,

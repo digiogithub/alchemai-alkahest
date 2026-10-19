@@ -503,7 +503,9 @@ Options (besides the global ones):
       --force                     Reinstall even when the engine is already installed
       --with-runtime              Also unpack the CUDA runtime libraries (cudart, cublas; 150 to 600 MB) next to the engine, for a CUDA build on a machine without a system-wide CUDA runtime
       --with <ID>                 Also install the optional dependency with this id (see `engines info`); repeatable
-      --native                    Build the native variant of the engine from source for this machine's CPU (for example llama.cpp with `-DGGML_NATIVE=ON`). Never picked automatically; the build is not portable to other CPUs
+      --native                    Build the native variant of the engine from source for this machine: on a host with an NVIDIA GPU the CUDA one (llama.cpp `cuda-native`, `-DCMAKE_CUDA_ARCHITECTURES=native`), otherwise the CPU one (`cpu-native`, `-DGGML_NATIVE=ON`). Never picked automatically; the build is not portable
+      --cuda-arch <LIST>          CUDA GPU architectures to compile a CUDA source build for, replacing `native` (`89`, or a list such as `86;89`); implies a source build
+      --dry-run                   Print what would be installed (recipe, variant, source build flags) and stop
 ```
 
 ### alkahest engines rm

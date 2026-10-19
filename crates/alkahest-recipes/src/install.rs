@@ -21,6 +21,10 @@ pub const MARKER_FILE: &str = ".alkahest-engine.json";
 #[derive(Debug, Serialize, Deserialize)]
 struct Marker {
     id: String,
+    /// Family of a fork engine (ALK-US-0132), so an installed fork can run even when its
+    /// recipe is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base: Option<String>,
     variant: String,
     tag: String,
     /// Executable path relative to the install directory.
@@ -52,6 +56,8 @@ struct Marker {
 pub struct InstalledEngine {
     /// Engine id.
     pub id: String,
+    /// For a fork engine, the built-in family whose adapter runs it (`llama-cpp`).
+    pub base: Option<String>,
     /// Accelerator variant.
     pub variant: String,
     /// Upstream release tag.
@@ -218,6 +224,7 @@ pub async fn install(
     }
     let marker = Marker {
         id: recipe.id.clone(),
+        base: recipe.base.clone(),
         variant: recipe.variant.clone(),
         tag: recipe.tag.clone(),
         executable: exe_rel,
@@ -397,6 +404,7 @@ async fn install_venv(
     }
     let marker = Marker {
         id: recipe.id.clone(),
+        base: recipe.base.clone(),
         variant: recipe.variant.clone(),
         tag: recipe.tag.clone(),
         executable: exe_rel,
@@ -488,6 +496,7 @@ fn read_installed(dir: &Path) -> Option<InstalledEngine> {
     let executable = dir.join(&m.executable);
     executable.is_file().then(|| InstalledEngine {
         id: m.id,
+        base: m.base,
         variant: m.variant,
         tag: m.tag,
         dir: dir.to_path_buf(),

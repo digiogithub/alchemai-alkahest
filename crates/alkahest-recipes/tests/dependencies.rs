@@ -95,7 +95,7 @@ fn catalog_recipe_equals_a_builtin_recipe() {
 
 fn asset_recipe(extra_asset: &str) -> String {
     format!(
-        "id = \"e\"\nversion = \"1\"\nexecutable = \"srv\"\n[variants.cpu]\naccelerator = \"cpu\"\n\
+        "id = \"e\"\nbase = \"llama-cpp\"\nversion = \"1\"\nexecutable = \"srv\"\n[variants.cpu]\naccelerator = \"cpu\"\n\
          [[variants.cpu.assets]]\nos = \"linux\"\narch = \"x86_64\"\nformat = \"zip\"\n{extra_asset}\n"
     )
 }
@@ -129,7 +129,7 @@ fn plain_http_refused() {
 fn a_branch_source_rev_warns_in_a_git_catalog_only() {
     let text = |rev: &str| {
         format!(
-            "id = \"e\"\nversion = \"1\"\nexecutable = \"srv\"\n[variants.cpu]\naccelerator = \"cpu\"\n\
+            "id = \"e\"\nbase = \"llama-cpp\"\nversion = \"1\"\nexecutable = \"srv\"\n[variants.cpu]\naccelerator = \"cpu\"\n\
              [variants.cpu.source]\ngit = \"https://example.org/e.git\"\nrev = \"{rev}\"\n"
         )
     };
@@ -148,7 +148,7 @@ fn a_branch_source_rev_warns_in_a_git_catalog_only() {
 
 fn dep_recipe(dep_extra: &str) -> String {
     format!(
-        "id = \"e\"\nversion = \"1\"\nexecutable = \"srv\"\n[variants.cpu]\naccelerator = \"cpu\"\n\
+        "id = \"e\"\nbase = \"llama-cpp\"\nversion = \"1\"\nexecutable = \"srv\"\n[variants.cpu]\naccelerator = \"cpu\"\n\
          [variants.cpu.source]\ngit = \"https://example.org/e.git\"\nrev = \"abc1234\"\n\
          [[variants.cpu.dependencies]]\nid = \"dep\"\nos = \"linux\"\narch = \"x86_64\"\n\
          url = \"https://example.org/d.zip\"\nsha256 = \"{DIGEST}\"\nformat = \"zip\"\n{dep_extra}\n"
@@ -230,7 +230,7 @@ async fn fixture() -> Fixture {
             .await;
     }
     let text = format!(
-        "id = \"eng\"\nversion = \"b1\"\nexecutable = \"srv\"\n[variants.cpu]\naccelerator = \"cpu\"\n\
+        "id = \"eng\"\nbase = \"llama-cpp\"\nversion = \"b1\"\nexecutable = \"srv\"\n[variants.cpu]\naccelerator = \"cpu\"\n\
          [[variants.cpu.assets]]\nos = \"{os}\"\narch = \"{arch}\"\nurl = \"https://example.org/engine.zip\"\n\
          sha256 = \"{es}\"\nformat = \"zip\"\n\
          [[variants.cpu.dependencies]]\nid = \"loader\"\nos = \"{os}\"\narch = \"{arch}\"\n\
@@ -382,7 +382,7 @@ async fn a_dependency_with_a_wrong_digest_fails_the_install_and_leaves_nothing()
 fn companions_are_read_as_optional_dependencies() {
     let host = Host::new("linux", "x86_64");
     let text = format!(
-        "id = \"e\"\nversion = \"1\"\nexecutable = \"srv\"\n[variants.cuda12]\naccelerator = \"cuda\"\ncuda = \"12.4\"\n\
+        "id = \"e\"\nbase = \"llama-cpp\"\nversion = \"1\"\nexecutable = \"srv\"\n[variants.cuda12]\naccelerator = \"cuda\"\ncuda = \"12.4\"\n\
          [variants.cuda12.source]\ngit = \"https://example.org/e.git\"\nrev = \"abc1234\"\n\
          [[variants.cuda12.companions]]\nname = \"cuda-runtime\"\nos = \"linux\"\narch = \"x86_64\"\n\
          url = \"https://example.org/c.zip\"\nsha256 = \"{DIGEST}\"\nformat = \"zip\"\n"
@@ -411,7 +411,7 @@ fn built_in_recipes_keep_their_cuda_runtime_as_an_optional_dependency() {
 // ---- ALK-SP-0011.R6 -------------------------------------------------------------------------
 
 fn native_text() -> String {
-    "id = \"eng\"\nversion = \"b5\"\nexecutable = \"srv\"\nlibrary_dirs = [\".\"]\n\
+    "id = \"eng\"\nbase = \"llama-cpp\"\nversion = \"b5\"\nexecutable = \"srv\"\nlibrary_dirs = [\".\"]\n\
      [variants.cpu]\naccelerator = \"cpu\"\n\
      [[variants.cpu.assets]]\nos = \"linux\"\narch = \"x86_64\"\nurl = \"https://example.org/e.zip\"\n\
      sha256 = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\nformat = \"zip\"\n\
@@ -469,6 +469,7 @@ fn native_variant_with_assets_refused() {
 fn native_install_marked_stale_on_another_cpu() {
     let engine = |flags: Option<Vec<String>>| alkahest_recipes::InstalledEngine {
         id: "eng".into(),
+        base: None,
         variant: "cpu-native".into(),
         tag: "b5".into(),
         dir: "/x".into(),

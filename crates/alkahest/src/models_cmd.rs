@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use std::time::SystemTime;
 
 use alkahest_core::config::Loaded;
-use alkahest_store::{Catalog, CatalogEntry, ModelDetail};
+use alkahest_store::{Catalog, CatalogEntry, ModelDetail, ModelSettings};
 use anyhow::{Context, Result};
 use serde_json::json;
 
@@ -63,6 +63,11 @@ pub fn show(args: &ShowArgs, loaded: &Loaded, json: bool) -> Result<ExitCode> {
     let catalog = open_catalog(loaded)?;
     let entry = catalog.resolve(&args.model)?;
     let detail = catalog.detail(&entry)?;
+    // The model's own overlay: its `engine` choice and engine arguments (ALK-US-0132).
+    let overlay = catalog
+        .overlays()
+        .and_then(|o| o.get(&entry.entry.name).ok())
+        .unwrap_or_default();
     let mut out = std::io::stdout().lock();
 
     // Single-section flags print the bare text, so the output pipes into files.
@@ -98,6 +103,8 @@ pub fn show(args: &ShowArgs, loaded: &Loaded, json: bool) -> Result<ExitCode> {
             );
             map.insert("system".into(), json!(detail.system));
             map.insert("license".into(), json!(detail.license));
+            map.insert("engine_setting".into(), json!(overlay.engine));
+            map.insert("extra_args".into(), json!(overlay.extra_args));
             map.insert("parameters".into(), json!(detail.parameters));
             map.insert("projector_path".into(), json!(entry.entry.projector_path()));
             map.insert("source_info".into(), serde_json::to_value(&detail.source)?);
@@ -106,12 +113,27 @@ pub fn show(args: &ShowArgs, loaded: &Loaded, json: bool) -> Result<ExitCode> {
         writeln!(out)?;
         return Ok(ExitCode::SUCCESS);
     }
-    render_show(&entry, &detail, &mut out)?;
+    render_show(&entry, &detail, &overlay, &mut out)?;
     Ok(ExitCode::SUCCESS)
 }
 
+/// Quotes an engine argument for display when it contains whitespace or is empty, so the
+/// line reads back the way `config model <m> set extra_args=...` takes it.
+fn shell_word(a: &str) -> String {
+    if a.is_empty() || a.contains(char::is_whitespace) {
+        format!("\"{a}\"")
+    } else {
+        a.to_string()
+    }
+}
+
 /// The sectioned human view of `show`.
-fn render_show<W: Write>(e: &CatalogEntry, d: &ModelDetail, out: &mut W) -> std::io::Result<()> {
+fn render_show<W: Write>(
+    e: &CatalogEntry,
+    d: &ModelDetail,
+    overlay: &ModelSettings,
+    out: &mut W,
+) -> std::io::Result<()> {
     let i = &e.info;
     let dash = |o: &Option<String>| o.clone().unwrap_or_else(|| "-".into());
     let num = |o: Option<u64>| o.map_or_else(|| "-".into(), |n| n.to_string());
@@ -128,10 +150,20 @@ fn render_show<W: Write>(e: &CatalogEntry, d: &ModelDetail, out: &mut W) -> std:
         ("quantization", dash(&i.quantization)),
         ("size", human_size(e.entry.size)),
         ("id", e.entry.manifest_digest.short()),
-        ("engine", i.default_engine().to_owned()),
+        (
+            "engine",
+            match overlay.engine.as_deref().filter(|s| !s.trim().is_empty()) {
+                Some(s) => format!("{s} (model setting; automatic: {})", i.default_engine()),
+                None => i.default_engine().to_owned(),
+            },
+        ),
     ];
     for (k, v) in rows {
         writeln!(out, "    {k:<18}{v}")?;
+    }
+    if let Some(args) = overlay.extra_args.as_ref().filter(|a| !a.is_empty()) {
+        let line: Vec<String> = args.iter().map(|a| shell_word(a)).collect();
+        writeln!(out, "    {:<18}{}", "engine args", line.join(" "))?;
     }
     if let Some(reason) = e.not_loadable_reason() {
         writeln!(out, "    {:<18}no: {reason}", "loadable")?;

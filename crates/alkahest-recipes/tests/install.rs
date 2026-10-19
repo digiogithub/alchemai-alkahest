@@ -61,6 +61,7 @@ fn test_recipe(url: &str, bytes: &[u8], format: ArchiveFormat, strip: usize) -> 
     let host = Host::current();
     Recipe {
         id: "llama-cpp".into(),
+        base: None,
         variant: "cpu".into(),
         accelerator: AcceleratorKind::Cpu,
         cuda: None,

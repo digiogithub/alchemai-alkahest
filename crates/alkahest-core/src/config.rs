@@ -665,7 +665,8 @@ pub struct EnginesConfig {
     /// Where recipes install engines. Default: `<data_dir>/engines`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dir: Option<PathBuf>,
-    /// Per-engine overrides keyed by engine id (`llama-cpp`, `prism-llama-cpp`, `vllm`, ...).
+    /// Per-engine overrides keyed by engine id (`llama-cpp`, `prism-llama-cpp`, `vllm`, ...,
+    /// or a fork engine id such as `llama-cpp-turboquant`; a fork never inherits its family's).
     pub overrides: BTreeMap<String, EngineOverride>,
     /// Download and install a missing engine the first time a model needs it, instead of
     /// failing with `alkahest engines install <id>`. Off by default: it fetches executables.
@@ -679,7 +680,8 @@ pub struct EngineOverride {
     /// Use this executable instead of the one the recipe installed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
-    /// Extra command-line arguments appended when the engine is started.
+    /// Extra command-line arguments appended when the engine is started, before the
+    /// per-model `extra_args` of the model being loaded.
     pub extra_args: Vec<String>,
 }
 

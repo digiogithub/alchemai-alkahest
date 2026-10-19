@@ -164,4 +164,17 @@ the layer each value came from. Model settings survive `rm` followed by `pull`. 
 file of a model is plain TOML; `config model <model> path` prints where it is.
 
 Pin an engine for one model with the `engine` setting: `engine=llama-cpp` or a version pin
-such as `engine=llama-cpp@b11669`.
+such as `engine=llama-cpp@b11669`. The same setting is the only way a model runs on a
+[fork engine](engines.md#fork-engines) (`engine=llama-cpp-turboquant`).
+
+`extra_args` adds engine arguments for this model only, written as one shell-quoted string;
+they come after the engine-wide `engines.overrides.<id>.extra_args`, so the model's value wins:
+
+```sh
+alkahest config model llama3.2:3b set "extra_args=--no-mmap --override-kv 'a=str:b c'"
+alkahest config model llama3.2:3b unset extra_args
+```
+
+Flags Alkahest manages (`--host`, `--port`, `-m`, `--model`, `--api-key`, `--api-key-file`,
+also as `--flag=value`) are refused. `alkahest show <model>` prints the engine setting and the
+extra arguments.

@@ -397,6 +397,10 @@ fn validate(s: &ModelSettings) -> Result<(), HttpError> {
             )));
         }
     }
+    // Per-model engine arguments may not take over what Alkahest manages (ALK-US-0132).
+    if let Some(args) = &s.extra_args {
+        alkahest_store::check_extra_args(args).map_err(HttpError::bad_request)?;
+    }
     Ok(())
 }
 

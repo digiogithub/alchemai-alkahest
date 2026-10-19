@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 const RECIPE: &str = r#"
 id = "pyeng"
+base = "vllm"
 version = "1.2.3"
 executable = "bin/pyeng"
 [variants.cuda12]
@@ -188,7 +189,7 @@ async fn venv_install_refuses_a_platform_the_recipe_excludes() {
 fn venv_tables_are_validated() {
     let bad = |venv: &str| {
         let text = format!(
-            "id = \"e\"\nversion = \"1\"\nexecutable = \"bin/e\"\n[variants.cpu]\n\
+            "id = \"e\"\nbase = \"llama-cpp\"\nversion = \"1\"\nexecutable = \"bin/e\"\n[variants.cpu]\n\
              accelerator = \"cpu\"\n[variants.cpu.venv]\n{venv}\n"
         );
         parse_recipes(&text).unwrap_err().to_string()

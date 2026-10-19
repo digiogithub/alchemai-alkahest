@@ -94,6 +94,7 @@ const VARIANT: Shape = Shape::Table(&[
 /// `engines/<id>.toml` (ALK-SP-0003.R3 format).
 pub(crate) const RECIPE: Shape = Shape::Table(&[
     ("id", Shape::Leaf),
+    ("base", Shape::Leaf),
     ("version", Shape::Leaf),
     ("description", Shape::Leaf),
     ("license", Shape::Leaf),

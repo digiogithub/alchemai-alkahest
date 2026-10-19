@@ -35,7 +35,7 @@ Sections are TOML tables: `server.port` is `port` under `[server]`. A key shown 
 | `scheduler.max_queue` | u32 | `512` | Requests allowed to wait for a model before new ones get HTTP 503. |
 | `engines.dir` | optional PathBuf | unset | Where recipes install engines. Default: `<data_dir>/engines`. |
 | `engines.overrides.<id>.path` | optional PathBuf | unset | Use this executable instead of the one the recipe installed. |
-| `engines.overrides.<id>.extra_args` | list of String | unset | Extra command-line arguments appended when the engine is started. |
+| `engines.overrides.<id>.extra_args` | list of String | unset | Extra command-line arguments appended when the engine is started, before the per-model `extra_args` of the model being loaded. |
 | `engines.auto_install` | bool | `false` | Download and install a missing engine the first time a model needs it, instead of failing with `alkahest engines install <id>`. Off by default: it fetches executables. |
 | `auth.require_key_for_remote` | bool | `true` | Require an API key for requests that do not come from loopback (`ALK-SP-0006`). Turning it off on a non-loopback bind also needs `serve --allow-unauthenticated`. |
 | `auth.require_on_loopback` | bool | `false` | Require an API key from loopback clients too (ALK-SP-0006.R1), for hosts where other local users or a local reverse proxy must not get free access. |

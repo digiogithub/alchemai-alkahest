@@ -75,3 +75,114 @@ fn installing_an_unknown_engine_fails_with_a_hint() {
         .code(1)
         .stderr(contains("unknown engine `nope`"));
 }
+
+/// A fork engine recipe (ALK-US-0132) in `<data dir>/recipes/`.
+const FORK_RECIPE: &str = r#"
+id = "llama-cpp-turboquant"
+base = "llama-cpp"
+version = "b1"
+description = "llama.cpp with TurboQuant KV cache (test)"
+executable = "llama-server"
+
+[variants.cpu]
+accelerator = "cpu"
+[variants.cpu.source]
+git = "https://example.org/turboquant.git"
+rev = "b1"
+cmake_flags = ["-DGGML_NATIVE=OFF"]
+"#;
+
+#[test]
+fn a_fork_recipe_appears_in_ls_and_info_and_a_bad_one_is_reported() {
+    let home = tempfile::tempdir().unwrap();
+    let engines = tempfile::tempdir().unwrap();
+    let recipes = home.path().join("data").join("recipes");
+    std::fs::create_dir_all(&recipes).unwrap();
+    std::fs::write(recipes.join("llama-cpp-turboquant.toml"), FORK_RECIPE).unwrap();
+    std::fs::write(
+        recipes.join("nobase.toml"),
+        FORK_RECIPE
+            .replace("llama-cpp-turboquant", "nobase")
+            .replace("base = \"llama-cpp\"\n", ""),
+    )
+    .unwrap();
+    alkahest(home.path(), engines.path())
+        .args(["engines", "ls"])
+        .assert()
+        .success()
+        .stdout(contains("llama-cpp-turboquant"))
+        .stderr(contains("nobase.toml").and(contains("no `base`")));
+    alkahest(home.path(), engines.path())
+        .args(["engines", "info", "llama-cpp-turboquant"])
+        .assert()
+        .success()
+        .stdout(contains("fork of llama-cpp").and(contains("set engine=llama-cpp-turboquant")));
+    alkahest(home.path(), engines.path())
+        .args([
+            "engines",
+            "install",
+            "llama-cpp-turboquant",
+            "--from-source",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(contains(
+            "would install llama-cpp-turboquant b1 (cpu), a fork of llama-cpp",
+        ));
+}
+
+#[test]
+fn cuda_native_dry_run_shows_the_architectures() {
+    let home = tempfile::tempdir().unwrap();
+    let engines = tempfile::tempdir().unwrap();
+    let out = alkahest(home.path(), engines.path())
+        .args([
+            "--json",
+            "engines",
+            "install",
+            "llama-cpp",
+            "--variant",
+            "cuda-native",
+            "--cuda-arch",
+            "86;89",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let doc: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(doc["variant"], "cuda-native");
+    assert_eq!(doc["from_source"], true);
+    let flags: Vec<&str> = doc["source"]["cmake_flags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f.as_str().unwrap())
+        .collect();
+    assert!(flags.contains(&"-DGGML_CUDA=ON"), "{flags:?}");
+    assert!(
+        flags.contains(&"-DCMAKE_CUDA_ARCHITECTURES=86;89"),
+        "{flags:?}"
+    );
+    assert!(!flags.iter().any(|f| f.ends_with("=native")), "{flags:?}");
+    // Nothing was installed.
+    assert!(std::fs::read_dir(engines.path()).unwrap().next().is_none());
+    // `--cuda-arch` on a CPU build is refused.
+    alkahest(home.path(), engines.path())
+        .args([
+            "engines",
+            "install",
+            "llama-cpp",
+            "--variant",
+            "cpu",
+            "--cuda-arch",
+            "89",
+            "--dry-run",
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("CUDA source builds only"));
+}

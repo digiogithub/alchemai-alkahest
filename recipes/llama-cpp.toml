@@ -17,6 +17,9 @@
 #   rocm       AMD ROCm/HIP 10.0 (Linux x64, Windows x64).
 #   metal      macOS Apple Silicon: the standard macOS arm64 archive has Metal compiled in.
 #   sycl       Intel oneAPI; installed on request only, never picked automatically.
+#   cpu-native, cuda-native
+#              source-only builds for this machine's CPU / CUDA GPUs (`--native`); never
+#              picked automatically.
 #
 # Every variant also carries `source` build steps (`engines install --from-source`).
 
@@ -97,6 +100,22 @@ notes = "Compiled for this machine's CPU (GGML_NATIVE=ON); needs git, cmake and 
 git = "https://github.com/ggml-org/llama.cpp.git"
 rev = "b11669"
 cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_NATIVE=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+# CUDA native variant (ALK-US-0132, ALK-SP-0011.R6): source-only, never auto-selected; built for
+# the GPUs of this machine by `alkahest engines install llama-cpp --native` on a CUDA host (or
+# `--variant cuda-native --from-source`). `--cuda-arch 86;89` replaces `native` with an explicit
+# architecture list. Needs the CUDA toolkit (nvcc) besides git, cmake and ninja; not portable.
+[variants."cuda-native"]
+accelerator = "cuda"
+native = true
+notes = "Compiled for this machine's CUDA GPUs (CMAKE_CUDA_ARCHITECTURES=native, or --cuda-arch); needs the CUDA toolkit (nvcc), git, cmake and ninja; not portable."
+[variants."cuda-native".source]
+git = "https://github.com/ggml-org/llama.cpp.git"
+rev = "b11669"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"]
 targets = ["llama-server"]
 tools = ["git", "cmake", "ninja"]
 

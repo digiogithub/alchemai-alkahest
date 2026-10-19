@@ -427,6 +427,9 @@ pub struct LibraryModel {
 pub struct EngineVariant {
     /// Engine id.
     pub id: String,
+    /// For a fork engine, the built-in family whose adapter runs it (`llama-cpp`); a fork is
+    /// used only by models whose `engine` setting names it (ALK-US-0132).
+    pub base: Option<String>,
     /// Version.
     pub version: String,
     /// Variant (`cpu`, `cuda12.8`, `vulkan`).
@@ -522,6 +525,10 @@ pub struct EngineInstallOptions {
     /// [`EngineInstall::variant`] empty).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub native: bool,
+    /// CUDA architectures for a CUDA source build (`89`, `86;89`), replacing `native`
+    /// (ALK-US-0132).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cuda_arch: Option<String>,
 }
 
 /// Usage counters of a key.

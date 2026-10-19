@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use alkahest_engine::{
-    EngineError, EngineId, EngineInstaller, EngineRegistry, FsLocator, InstallFuture,
+    EngineError, EngineId, EngineInstaller, EngineKey, EngineRegistry, FsLocator, InstallFuture,
     InstallSource, LaunchRequest, LocateQuery, Os, Platform,
 };
 use alkahest_gguf::{ModelFormat, ModelKind};
@@ -54,9 +54,9 @@ struct FakeInstaller {
 }
 
 impl EngineInstaller for FakeInstaller {
-    fn install(&self, engine: EngineId) -> InstallFuture<'_> {
+    fn install(&self, engine: EngineKey) -> InstallFuture<'_> {
         Box::pin(async move {
-            assert_eq!(engine, EngineId::LlamaCpp);
+            assert_eq!(engine, EngineKey::from(EngineId::LlamaCpp));
             self.calls.fetch_add(1, Ordering::SeqCst);
             fake_install(&self.dir);
             Ok(())
@@ -107,7 +107,7 @@ async fn install_failure_is_reported() {
     #[derive(Debug)]
     struct Failing;
     impl EngineInstaller for Failing {
-        fn install(&self, engine: EngineId) -> InstallFuture<'_> {
+        fn install(&self, engine: EngineKey) -> InstallFuture<'_> {
             Box::pin(async move {
                 Err(EngineError::AutoInstallFailed {
                     engine,

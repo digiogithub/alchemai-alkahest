@@ -110,6 +110,7 @@ impl VariantChip {
         EngineInstallOptions {
             with: Vec::new(),
             native: self.native,
+            cuda_arch: None,
         }
     }
 }
@@ -167,6 +168,7 @@ impl InstalledBuild {
                 EngineInstallOptions {
                     with: Vec::new(),
                     native: true,
+                    cuda_arch: None,
                 },
             )
         })
@@ -331,9 +333,17 @@ pub fn cards(
                 })
             });
             let (dependencies, dependency_hint) = dependency_chips(&rows);
+            // A fork engine (ALK-US-0132) says what it forks and how a model opts in.
+            let serves = match rows.iter().find_map(|r| r.base.as_deref()) {
+                Some(base) => format!(
+                    "fork of {} \u{b7} opt-in per model: engine={id}",
+                    engine_title(base).0
+                ),
+                None => serves.to_string(),
+            };
             EngineCard {
                 name: name.to_string(),
-                serves: serves.to_string(),
+                serves,
                 recipe: newest.map(|v| format!("recipe {v}")),
                 id,
                 installed,
@@ -375,6 +385,7 @@ fn dependency_chips(rows: &[&EngineVariant]) -> (Vec<DependencyChip>, Option<Str
                     EngineInstallOptions {
                         with: vec![d.id.clone()],
                         native: false,
+                        cuda_arch: None,
                     },
                 )
             });
@@ -845,6 +856,25 @@ mod tests {
             path: (state == "installed").then(|| format!("/e/{id}/{variant}/llama-server")),
             ..EngineVariant::default()
         }
+    }
+
+    #[test]
+    fn a_fork_engine_gets_its_own_card_naming_its_family() {
+        let mut fork = v("llama-cpp-turboquant", "b1", "cpu", "source");
+        fork.base = Some("llama-cpp".into());
+        let l = EngineListing {
+            accelerators: vec!["cpu".into()],
+            engines: vec![v("llama-cpp", "b11669", "cpu", "installed"), fork],
+        };
+        let c = cards(&l, &[], &[]);
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[1].id, "llama-cpp-turboquant");
+        assert_eq!(c[1].name, "llama-cpp-turboquant");
+        assert_eq!(
+            c[1].serves,
+            "fork of llama.cpp \u{b7} opt-in per model: engine=llama-cpp-turboquant"
+        );
+        assert!(!c[0].serves.contains("fork of"));
     }
 
     fn listing() -> EngineListing {

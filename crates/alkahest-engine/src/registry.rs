@@ -6,11 +6,11 @@ use std::sync::Arc;
 use crate::builtin::builtin_engines;
 use crate::engine::Engine;
 use crate::error::{EngineError, Result};
-use crate::id::EngineId;
-use crate::install::EngineInstaller;
+use crate::id::{EngineId, EngineKey};
+use crate::install::{BuiltinRecipes, EngineInstaller, RecipeSource};
 use crate::launch::{LaunchRequest, LaunchSpec};
 use crate::locator::{EngineInstall, EngineLocator, LocateQuery};
-use crate::select::{EngineChoice, Platform, select_engine};
+use crate::select::{EngineChoice, Platform, select_engine_with};
 
 /// An engine, the binary it will run and the spec for one launch.
 #[derive(Debug, Clone)]
@@ -49,37 +49,86 @@ pub struct EngineRegistry {
     engines: BTreeMap<EngineId, Arc<dyn Engine>>,
     locator: Arc<dyn EngineLocator>,
     auto_install: Option<Arc<dyn EngineInstaller>>,
+    recipes: Arc<dyn RecipeSource>,
 }
 
 impl EngineRegistry {
-    /// An empty registry over `locator`.
+    /// An empty registry over `locator`, knowing the built-in recipes.
     pub fn new(locator: Arc<dyn EngineLocator>) -> Self {
         Self {
             engines: BTreeMap::new(),
             locator,
             auto_install: None,
+            recipes: Arc::new(BuiltinRecipes),
         }
     }
 
     /// The registry the server uses: built-in engines over [`crate::FsLocator::from_config`],
-    /// with first-use installation when `engines.auto_install` is set (default off).
+    /// with first-use installation when `engines.auto_install` is set (default off), over the
+    /// built-in recipes only; see [`EngineRegistry::from_config_with_recipes`].
     pub fn from_config(
         config: &alkahest_core::config::Config,
         paths: &alkahest_core::config::ResolvedPaths,
     ) -> Self {
+        Self::from_config_with_recipes(config, paths, Arc::new(BuiltinRecipes))
+    }
+
+    /// [`EngineRegistry::from_config`] over `recipes` (the layered recipe catalog): fork
+    /// engines (ALK-US-0132) defined there can be named by models and auto-installed.
+    pub fn from_config_with_recipes(
+        config: &alkahest_core::config::Config,
+        paths: &alkahest_core::config::ResolvedPaths,
+        recipes: Arc<dyn RecipeSource>,
+    ) -> Self {
         let locator = Arc::new(crate::locator::FsLocator::from_config(config, paths));
-        let mut r = Self::with_builtin_engines(locator);
+        let mut r = Self::with_builtin_engines(locator).with_recipes(recipes.clone());
         if config.engines.auto_install {
             let fetch = alkahest_fetch::FetchConfig {
                 max_bytes_per_sec: config.pull.bandwidth_cap(),
                 ..alkahest_fetch::FetchConfig::default()
             };
-            r.auto_install = Some(Arc::new(crate::install::RecipeInstaller::new(
-                paths.engines_dir.clone(),
-                fetch,
-            )));
+            r.auto_install = Some(Arc::new(
+                crate::install::RecipeInstaller::new(paths.engines_dir.clone(), fetch)
+                    .with_recipes(recipes),
+            ));
         }
         r
+    }
+
+    /// Reads recipes (and so the fork engines they define) from `recipes`.
+    pub fn with_recipes(mut self, recipes: Arc<dyn RecipeSource>) -> Self {
+        self.recipes = recipes;
+        self
+    }
+
+    /// The engine an `engine` setting name means (ALK-US-0132): a built-in id or alias, else a
+    /// fork engine defined by a recipe with `base`, else an installed fork (its install marker
+    /// records the family). Anything else is [`EngineError::UnknownEngine`], listing the
+    /// built-in ids and the known forks.
+    pub fn resolve_engine(&self, name: &str) -> Result<EngineKey> {
+        let name = name.trim();
+        if let Ok(id) = name.parse::<EngineId>() {
+            return Ok(EngineKey::builtin(id));
+        }
+        let catalog = self.recipes.catalog();
+        let family = catalog
+            .fork_base(name)
+            .and_then(|b| b.parse::<EngineId>().ok())
+            .or_else(|| self.locator.installed_fork_family(name));
+        match family {
+            Some(f) => Ok(EngineKey::fork(name, f)),
+            None => {
+                let mut known: Vec<String> = EngineId::ALL
+                    .iter()
+                    .map(|e| e.as_str().to_string())
+                    .collect();
+                known.extend(catalog.forks().into_iter().map(|(id, _)| id));
+                Err(EngineError::UnknownEngine {
+                    id: name.to_string(),
+                    known: known.join(", "),
+                })
+            }
+        }
     }
 
     /// Installs missing engines through `installer` in [`EngineRegistry::plan_or_install`].
@@ -126,9 +175,16 @@ impl EngineRegistry {
         &self.locator
     }
 
-    /// The install of `id` matching `query`.
+    /// The install of `id` matching `query` (`query.fork` selects a fork of the family `id`).
     pub fn locate(&self, id: EngineId, query: &LocateQuery) -> Result<EngineInstall> {
         self.locator.locate(id, query)
+    }
+
+    /// The install of the engine `key` (built-in or fork) matching `query`.
+    pub fn locate_key(&self, key: &EngineKey, query: &LocateQuery) -> Result<EngineInstall> {
+        let mut q = query.clone();
+        q.fork = key.fork_id().map(str::to_string);
+        self.locator.locate(key.family(), &q)
     }
 
     /// Every visible install of every registered engine.
@@ -148,6 +204,7 @@ impl EngineRegistry {
     ) -> Result<PreparedLaunch> {
         let engine = self.get(id)?;
         engine.check(req)?;
+        check_model_extra_args(req)?;
         let install = self.locate(id, query)?;
         let spec = engine.prepare(req, &install)?;
         Ok(PreparedLaunch {
@@ -157,9 +214,11 @@ impl EngineRegistry {
         })
     }
 
-    /// Applies the selection rule (ALK-SP-0003.R2) to `req`; see [`select_engine`].
+    /// Applies the selection rule (ALK-SP-0003.R2) to `req`, resolving an `engine` setting
+    /// with [`EngineRegistry::resolve_engine`] (built-in engines and forks); see
+    /// [`select_engine_with`]. The automatic rule never picks a fork.
     pub fn select(&self, req: &LaunchRequest, platform: &Platform) -> Result<EngineChoice> {
-        select_engine(req, platform)
+        select_engine_with(req, platform, &|name| self.resolve_engine(name))
     }
 
     /// [`EngineRegistry::plan`], installing the engine first when it is missing and
@@ -191,6 +250,7 @@ impl EngineRegistry {
         let choice = self.select(req, platform)?;
         let engine = self.get(choice.engine)?;
         engine.check(req)?;
+        check_model_extra_args(req)?;
         let install = match self.locate(choice.engine, &choice.locate_query(req.accelerator)) {
             Ok(i) => i,
             Err(EngineError::NotInstalled {
@@ -209,7 +269,7 @@ impl EngineRegistry {
             Err(e) => return Err(e),
         };
         tracing::debug!(
-            engine = %choice.engine,
+            engine = %choice.key(),
             model = %req.model,
             reason = %choice.reason,
             binary = %install.binary.display(),
@@ -220,5 +280,20 @@ impl EngineRegistry {
             engine,
             install,
         })
+    }
+}
+
+/// Refuses per-model `extra_args` that set a flag Alkahest manages (`--host`, `--port`, `-m`,
+/// `--model`, `--api-key`, `--api-key-file`; ALK-US-0132). Saving such a setting is already
+/// refused; this catches overlays edited by hand.
+pub fn check_model_extra_args(req: &LaunchRequest) -> Result<()> {
+    match &req.settings.extra_args {
+        Some(args) => alkahest_store::check_extra_args(args).map_err(|reason| {
+            EngineError::InvalidEngineSetting {
+                value: args.join(" "),
+                reason,
+            }
+        }),
+        None => Ok(()),
     }
 }

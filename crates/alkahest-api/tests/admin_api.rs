@@ -152,6 +152,7 @@ struct FakeEngines {
 fn variant(id: &str, variant: &str, installed: bool) -> EngineVariant {
     EngineVariant {
         id: id.into(),
+        base: None,
         version: "b1".into(),
         variant: variant.into(),
         accelerator: Some(variant.into()),
@@ -467,6 +468,8 @@ async fn model_settings_round_trip_with_origins() {
         json!({"no_such_key": 1}),
         json!({"temperature": 9.0}),
         json!({"kv_cache_type_k": "q3"}),
+        json!({"extra_args": ["--mlock", "--port", "9"]}),
+        json!({"extra_args": ["--model=/x.gguf"]}),
     ] {
         let (status, _) = send(
             &h,

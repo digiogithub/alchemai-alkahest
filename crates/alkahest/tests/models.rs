@@ -216,6 +216,57 @@ fn config_model_set_show_unset() {
     assert_eq!(bad.status.code(), Some(1));
 }
 
+/// Per-model engine and `extra_args` (ALK-US-0132): quoted arguments, managed flags refused,
+/// shown by `alkahest show`.
+#[test]
+fn config_model_engine_and_extra_args() {
+    let home = tempfile::tempdir().unwrap();
+    let ollama = ollama_store(home.path());
+    stdout(alkahest(home.path(), &ollama).args([
+        "config",
+        "model",
+        "llama3.2",
+        "set",
+        "engine=llama-cpp-turboquant",
+        "extra_args=--cache-type-k turbo3 --override-kv 'a=str:b c'",
+    ]));
+    let shown: Value = serde_json::from_str(&stdout(
+        alkahest(home.path(), &ollama).args(["config", "model", "llama3.2", "--json"]),
+    ))
+    .unwrap();
+    assert_eq!(
+        shown["overlay"]["extra_args"],
+        serde_json::json!(["--cache-type-k", "turbo3", "--override-kv", "a=str:b c"])
+    );
+    let text = stdout(alkahest(home.path(), &ollama).args(["show", "llama3.2"]));
+    assert!(
+        text.contains("llama-cpp-turboquant (model setting; automatic: llama-cpp)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("--cache-type-k turbo3 --override-kv \"a=str:b c\""),
+        "{text}"
+    );
+    let json: Value = serde_json::from_str(&stdout(
+        alkahest(home.path(), &ollama).args(["show", "llama3.2", "--json"]),
+    ))
+    .unwrap();
+    assert_eq!(json["engine_setting"], "llama-cpp-turboquant");
+    assert_eq!(json["extra_args"][1], "turbo3");
+
+    for bad in ["extra_args=--port 9", "extra_args=--model=/x.gguf"] {
+        let out = alkahest(home.path(), &ollama)
+            .args(["config", "model", "llama3.2", "set", bad])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{bad}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("managed by Alkahest"),
+            "{bad}"
+        );
+    }
+}
+
 #[test]
 fn cp_rm_and_gc_round_trip() {
     let home = tempfile::tempdir().unwrap();

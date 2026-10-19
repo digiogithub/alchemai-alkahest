@@ -164,6 +164,27 @@ impl Catalog {
         ids
     }
 
+    /// The built-in engine family whose adapter runs the fork engine `id` (its recipes'
+    /// `base`), or `None` when `id` has no recipe or is a built-in engine (ALK-US-0132).
+    pub fn fork_base(&self, id: &str) -> Option<&str> {
+        self.recipes
+            .iter()
+            .find(|r| r.id == id && r.base.is_some())
+            .and_then(|r| r.base.as_deref())
+    }
+
+    /// Ids of the fork engines with at least one recipe, sorted, with their family.
+    pub fn forks(&self) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = self
+            .recipes
+            .iter()
+            .filter_map(|r| r.base.as_ref().map(|b| (r.id.clone(), b.clone())))
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// Versions of `id`, newest first.
     pub fn versions(&self, id: &str) -> Vec<String> {
         let mut v: Vec<String> = self

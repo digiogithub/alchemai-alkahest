@@ -23,7 +23,7 @@ fn recipe_text(version: &str) -> String {
         )
     };
     format!(
-        "id = \"eng\"\nversion = \"{version}\"\nexecutable = \"srv\"\n\n\
+        "id = \"eng\"\nbase = \"llama-cpp\"\nversion = \"{version}\"\nexecutable = \"srv\"\n\n\
          [variants.cpu]\naccelerator = \"cpu\"\n{}{}\n\
          [variants.\"cuda12.4\"]\naccelerator = \"cuda\"\ncuda = \"12.4\"\n{}\n\
          [variants.\"cuda13.1\"]\naccelerator = \"cuda\"\ncuda = \"13.1\"\n{}\n\
@@ -111,8 +111,7 @@ fn recipe_validation_names_the_broken_rule() {
             .to_string()
             .contains("cuda")
     );
-    let nothing =
-        "id = \"e\"\nversion = \"1\"\nexecutable = \"x\"\n[variants.cpu]\naccelerator = \"cpu\"\n";
+    let nothing = "id = \"e\"\nbase = \"llama-cpp\"\nversion = \"1\"\nexecutable = \"x\"\n[variants.cpu]\naccelerator = \"cpu\"\n";
     assert!(
         parse_recipes(nothing)
             .unwrap_err()
@@ -322,7 +321,9 @@ fn discovery_layers_directories_over_the_builtin_recipes() {
     let first = builtin.recipes().first().unwrap().clone();
     std::fs::write(
         dir.path().join("mine.toml"),
-        recipe_text("b7").replace("\"eng\"", &format!("\"{}\"", first.id)),
+        recipe_text("b7")
+            .replace("\"eng\"", &format!("\"{}\"", first.id))
+            .replace("base = \"llama-cpp\"\n", ""),
     )
     .unwrap();
     std::fs::write(dir.path().join("broken.toml"), "id = ").unwrap();
@@ -373,7 +374,7 @@ fn fake_tools(dir: &Path, fail_build: bool) -> BuildTools {
 }
 
 fn source_recipe() -> alkahest_recipes::Recipe {
-    let text = "id = \"eng\"\nversion = \"b5\"\nexecutable = \"srv\"\nlibrary_dirs = [\".\"]\n\
+    let text = "id = \"eng\"\nbase = \"llama-cpp\"\nversion = \"b5\"\nexecutable = \"srv\"\nlibrary_dirs = [\".\"]\n\
                 [variants.cuda12]\naccelerator = \"cuda\"\ncuda = \"12.4\"\n\
                 [variants.cuda12.source]\ngit = \"https://example.org/eng.git\"\nrev = \"abc123\"\n\
                 cmake_flags = [\"-DGGML_CUDA=ON\"]\ntargets = [\"srv\"]\ntools = [\"git\", \"cmake\"]\n";

@@ -297,6 +297,61 @@ pub struct SourceBuild {
     pub bin_dir: String,
 }
 
+/// The CMake option that names the CUDA GPU architectures to compile for.
+const CUDA_ARCH_FLAG: &str = "-DCMAKE_CUDA_ARCHITECTURES=";
+
+impl SourceBuild {
+    /// Whether the build enables a CUDA backend (`-DGGML_CUDA=ON`).
+    pub fn builds_cuda(&self) -> bool {
+        self.cmake_flags
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case("-DGGML_CUDA=ON"))
+    }
+
+    /// The build with its CUDA architectures set to `archs` (`alkahest engines install
+    /// --cuda-arch 89`): an existing `-DCMAKE_CUDA_ARCHITECTURES=...` (the `native` of the
+    /// `cuda-native` variant) is replaced, otherwise the flag is appended.
+    ///
+    /// `archs` is a list separated by `;` or `,` of CMake architecture values (`89`, `86;89`,
+    /// `90a`, `89-real`, `native`, `all`). Fails when the build does not enable CUDA or a value
+    /// is not an architecture.
+    pub fn with_cuda_architectures(&self, archs: &str) -> std::result::Result<Self, String> {
+        if !self.builds_cuda() {
+            return Err(
+                "--cuda-arch applies to CUDA source builds only (this variant does not set \
+                 -DGGML_CUDA=ON)"
+                    .into(),
+            );
+        }
+        let list: Vec<&str> = archs
+            .split([';', ','])
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+            .collect();
+        let valid = |a: &str| {
+            a.starts_with(|c: char| c.is_ascii_alphanumeric())
+                && a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        };
+        if list.is_empty() || !list.iter().all(|a| valid(a)) {
+            return Err(format!(
+                "--cuda-arch `{archs}` is not a list of CUDA architectures (for example `89` or \
+                 `86;89`)"
+            ));
+        }
+        let flag = format!("{CUDA_ARCH_FLAG}{}", list.join(";"));
+        let mut out = self.clone();
+        match out
+            .cmake_flags
+            .iter_mut()
+            .find(|f| f.starts_with(CUDA_ARCH_FLAG))
+        {
+            Some(existing) => *existing = flag,
+            None => out.cmake_flags.push(flag),
+        }
+        Ok(out)
+    }
+}
+
 fn default_tools() -> Vec<String> {
     vec!["git".into(), "cmake".into(), "ninja".into()]
 }
@@ -370,6 +425,8 @@ struct VariantDef {
 struct RecipeFile {
     id: String,
     #[serde(default)]
+    base: Option<String>,
+    #[serde(default)]
     version: Option<String>,
     #[serde(default)]
     description: String,
@@ -389,6 +446,11 @@ struct RecipeFile {
 pub struct Recipe {
     /// Engine id used on the command line and in configuration (`llama-cpp`).
     pub id: String,
+    /// For a fork engine (ALK-US-0132), the built-in engine family whose adapter runs it
+    /// (`llama-cpp`): the fork speaks that family's command line and HTTP dialect but installs
+    /// under its own id and is used only by models whose `engine` setting names it. `None` for
+    /// the built-in engines themselves.
+    pub base: Option<String>,
     /// Variant name (`cpu`, `cuda12.4`, `vulkan`, ...); part of the install directory name.
     pub variant: String,
     /// Backend the variant is built for.
@@ -418,8 +480,9 @@ pub struct Recipe {
     pub companions: Vec<Companion>,
     /// Downloads the variant needs besides its archive (ALK-SP-0011.R5).
     pub dependencies: Vec<Dependency>,
-    /// Source-only variant compiled for the host CPU; never selected automatically and
-    /// installed only by `engines install <id> --native` (ALK-SP-0011.R6).
+    /// Source-only variant compiled for this machine (the host CPU, or the local CUDA GPU
+    /// architecture for a `cuda` native variant); never selected automatically and installed
+    /// only by `engines install <id> --native` or an explicit `--variant` (ALK-SP-0011.R6).
     pub native: bool,
     /// Source build steps, when the variant can be built locally.
     pub source: Option<SourceBuild>,
@@ -481,6 +544,7 @@ pub fn parse_recipes_with(text: &str, origin: RecipeOrigin) -> Result<ParsedReci
     if file.executable.trim().is_empty() {
         return Err(bad("`executable` is empty".into()));
     }
+    let base = check_base(&file.id, file.base.as_deref()).map_err(bad)?;
     for dir in &file.library_dirs {
         check_relative(dir).map_err(|r| bad(format!("library_dirs: {r}")))?;
     }
@@ -501,6 +565,8 @@ pub fn parse_recipes_with(text: &str, origin: RecipeOrigin) -> Result<ParsedReci
                 parse_cuda_version(s)
                     .ok_or_else(|| vbad(format!("`cuda = \"{s}\"` is not `major.minor`")))?,
             ),
+            // A native CUDA build compiles against whatever toolkit the machine has.
+            (AcceleratorKind::Cuda, None) if v.native => None,
             (AcceleratorKind::Cuda, None) => {
                 return Err(vbad("a cuda variant needs `cuda = \"12.4\"`".into()));
             }
@@ -636,6 +702,7 @@ pub fn parse_recipes_with(text: &str, origin: RecipeOrigin) -> Result<ParsedReci
         }
         out.push(Recipe {
             id: file.id.clone(),
+            base: base.clone(),
             variant: name,
             accelerator: v.accelerator,
             cuda,
@@ -658,6 +725,43 @@ pub fn parse_recipes_with(text: &str, origin: RecipeOrigin) -> Result<ParsedReci
         recipes: out,
         warnings,
     })
+}
+
+/// Checks the `base` of a recipe (ALK-US-0132) and returns it in canonical form.
+///
+/// A built-in id (`llama-cpp`) must not have a `base`; any other id is a fork engine, which
+/// needs a `base` naming a built-in engine family and an id that does not shadow a built-in id
+/// or alias.
+fn check_base(id: &str, base: Option<&str>) -> std::result::Result<Option<String>, String> {
+    let builtin = crate::family::builtin_engine_id(id);
+    match (builtin, base) {
+        (Some(canonical), None) if canonical == id => Ok(None),
+        (Some(canonical), None) => Err(format!(
+            "`{id}` is an alias of the built-in engine `{canonical}`; use the canonical id"
+        )),
+        (Some(canonical), Some(_)) => Err(format!(
+            "`{id}` is the built-in engine `{canonical}` and cannot have a `base`; a fork needs \
+             its own id (for example `{canonical}-myfork`)"
+        )),
+        (None, None) => Err(format!(
+            "unknown engine id `{id}` and no `base`: a fork engine must name the built-in \
+             engine family it runs as, for example `base = \"llama-cpp\"` (known: {})",
+            crate::family::BUILTIN_ENGINE_IDS.join(", ")
+        )),
+        (None, Some(b)) => {
+            crate::family::check_fork_id(id)?;
+            match crate::family::builtin_engine_id(b) {
+                Some(family) if family == b.trim() => Ok(Some(family.to_string())),
+                Some(family) => Err(format!(
+                    "base `{b}` is an alias; write the canonical id `{family}`"
+                )),
+                None => Err(format!(
+                    "base `{b}` is not a built-in engine family (known: {})",
+                    crate::family::BUILTIN_ENGINE_IDS.join(", ")
+                )),
+            }
+        }
+    }
 }
 
 /// Validates a `venv` table: pinned requirements, https indexes, nothing that `pip` would read

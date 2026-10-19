@@ -464,11 +464,19 @@ pub enum EnginesAction {
         /// Also install the optional dependency with this id (see `engines info`); repeatable.
         #[arg(long = "with", value_name = "ID")]
         with: Vec<String>,
-        /// Build the native variant of the engine from source for this machine's CPU
-        /// (for example llama.cpp with `-DGGML_NATIVE=ON`). Never picked automatically; the
-        /// build is not portable to other CPUs.
+        /// Build the native variant of the engine from source for this machine: on a host
+        /// with an NVIDIA GPU the CUDA one (llama.cpp `cuda-native`,
+        /// `-DCMAKE_CUDA_ARCHITECTURES=native`), otherwise the CPU one (`cpu-native`,
+        /// `-DGGML_NATIVE=ON`). Never picked automatically; the build is not portable.
         #[arg(long, conflicts_with = "variant")]
         native: bool,
+        /// CUDA GPU architectures to compile a CUDA source build for, replacing `native`
+        /// (`89`, or a list such as `86;89`); implies a source build.
+        #[arg(long, value_name = "LIST")]
+        cuda_arch: Option<String>,
+        /// Print what would be installed (recipe, variant, source build flags) and stop.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Remove an installed engine version.
     #[command(visible_alias = "remove", disable_version_flag = true)]
@@ -676,6 +684,10 @@ pub enum ModelConfigAction {
     /// Print the overlay, the recommended defaults and the effective settings.
     Show,
     /// Set one or more settings, `key=value` (for example `num_ctx=8192 kv_cache_type_k=q8_0`).
+    /// `stop` takes a comma separated list; `extra_args` one shell-quoted string of engine
+    /// arguments appended after `engines.overrides.<id>.extra_args`
+    /// (`"extra_args=--cache-type-k turbo3 --override-kv 'a=str:b c'"`); `engine` names a
+    /// built-in or fork engine, optionally `@<version>`.
     Set {
         /// Assignments.
         #[arg(required = true, value_name = "KEY=VALUE")]

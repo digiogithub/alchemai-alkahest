@@ -256,6 +256,48 @@ fn remotes_are_collected_for_the_network_check() {
 }
 
 #[test]
+fn a_fork_engine_needs_a_known_base() {
+    // ALK-US-0132: a recipe with an id that is not a built-in engine is a fork and must name
+    // the family it runs as; a fork may not reuse a built-in id.
+    let tmp = copy_fixture();
+    let src = fs::read_to_string(tmp.path().join("engines/llama-cpp.toml")).expect("read");
+    let fork = src.replace(
+        "id = \"llama-cpp\"",
+        "id = \"llama-cpp-turbo\"\nbase = \"llama-cpp\"",
+    );
+    fs::write(tmp.path().join("engines/llama-cpp-turbo.toml"), &fork).expect("write");
+    reindex(tmp.path());
+    let r = check(tmp.path(), None);
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert_eq!(r.engines, 2);
+
+    edit(
+        tmp.path(),
+        "engines/llama-cpp-turbo.toml",
+        "base = \"llama-cpp\"\n",
+        "",
+    );
+    assert!(has_error(&check(tmp.path(), None), "no `base`"));
+    edit(
+        tmp.path(),
+        "engines/llama-cpp-turbo.toml",
+        "id = \"llama-cpp-turbo\"\n",
+        "id = \"llama-cpp-turbo\"\nbase = \"ollama\"\n",
+    );
+    assert!(has_error(
+        &check(tmp.path(), None),
+        "not a built-in engine family"
+    ));
+    edit(
+        tmp.path(),
+        "engines/llama-cpp.toml",
+        "id = \"llama-cpp\"\n",
+        "id = \"llama-cpp\"\nbase = \"llama-cpp\"\n",
+    );
+    assert!(has_error(&check(tmp.path(), None), "cannot have a `base`"));
+}
+
+#[test]
 fn the_repository_catalog_is_valid() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let r = check(&root.join("catalog"), Some(&root.join("recipes")));

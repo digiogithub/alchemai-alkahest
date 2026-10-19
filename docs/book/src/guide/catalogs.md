@@ -23,6 +23,20 @@ ignored and never fetched.
 Write `engines/<id>.toml` in the recipe format described in [Engines and recipes](engines.md).
 In a catalog every download needs a `sha256` and an `https` URL; `tofu = true` is not accepted.
 
+The `id` is either a built-in engine (`llama-cpp`, `prism-llama-cpp`, `vllm`, `whisper-cpp`,
+`stable-diffusion-cpp`), in which case the recipe adds versions or variants to it, or a new
+**fork engine**, which must declare the built-in family whose command line and API it speaks:
+
+```toml
+id = "llama-cpp-turboquant"
+base = "llama-cpp"
+```
+
+A recipe with an unknown `id` and no `base`, a `base` that is not a built-in id, or a fork that
+reuses a built-in id or alias (`llama.cpp`, `prism`, `sd`, ...) is rejected by the catalog
+sync and by `cargo xtask catalog-check`. See [Fork engines](engines.md#fork-engines) for what a
+fork is and how models opt in.
+
 ## Adding a model
 
 ```toml

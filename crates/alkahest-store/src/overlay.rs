@@ -108,7 +108,9 @@ pub struct ModelSettings {
     /// Engine id overriding the automatic choice (`llama-cpp`, `prism-llama-cpp`, `vllm`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub engine: Option<String>,
-    /// Extra command-line arguments for the engine.
+    /// Extra command-line arguments for the engine, appended after the engine-level
+    /// `engines.overrides.<id>.extra_args` (ALK-US-0132). Flags Alkahest manages
+    /// ([`MANAGED_ENGINE_FLAGS`]) are refused by [`check_extra_args`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_args: Option<Vec<String>>,
     /// Chat template keyword arguments (`enable_thinking`...). Merged per key across layers.
@@ -184,8 +186,10 @@ impl ModelSettings {
     }
 
     /// Sets one setting from its CLI spelling. Aliases follow Ollama's option names
-    /// (`num_ctx`, `num_gpu`, `num_predict`). `stop` and `extra_args` take comma separated /
-    /// whitespace separated lists, and `chat_template_kwargs.<name>` takes a JSON value.
+    /// (`num_ctx`, `num_gpu`, `num_predict`). `stop` takes a comma separated list,
+    /// `extra_args` a whitespace separated one with single or double quotes around arguments
+    /// that contain spaces ([`split_args`]; managed flags are refused, see
+    /// [`check_extra_args`]), and `chat_template_kwargs.<name>` takes a JSON value.
     pub fn set_key(&mut self, key: &str, value: &str) -> std::result::Result<(), String> {
         fn num<T: std::str::FromStr>(key: &str, v: &str) -> std::result::Result<T, String> {
             v.trim()
@@ -237,7 +241,9 @@ impl ModelSettings {
             }
             "engine" => self.engine = Some(value.trim().to_owned()),
             "extra_args" => {
-                self.extra_args = Some(value.split_whitespace().map(str::to_owned).collect());
+                let args = split_args(value).map_err(|e| format!("{key}: {e}"))?;
+                check_extra_args(&args)?;
+                self.extra_args = Some(args);
             }
             _ => {
                 return Err(format!(
@@ -283,6 +289,71 @@ impl ModelSettings {
         }
         Ok(())
     }
+}
+
+/// Engine flags Alkahest sets itself on every launch (listen address, model path, API key);
+/// a per-model `extra_args` entry may not set them, in either the `--flag value` or the
+/// `--flag=value` form.
+pub const MANAGED_ENGINE_FLAGS: &[&str] = &[
+    "--host",
+    "--port",
+    "-m",
+    "--model",
+    "--api-key",
+    "--api-key-file",
+];
+
+/// Checks per-model engine arguments: no flag of [`MANAGED_ENGINE_FLAGS`] (`--port 9`,
+/// `--port=9`, `-m x`) and no newline or NUL character. The error names the offending
+/// argument.
+pub fn check_extra_args(args: &[String]) -> std::result::Result<(), String> {
+    for a in args {
+        if a.contains(['\n', '\0']) {
+            return Err("extra_args: arguments must not contain newlines or NUL characters".into());
+        }
+        let flag = a.split_once('=').map_or(a.as_str(), |(f, _)| f);
+        if MANAGED_ENGINE_FLAGS.contains(&flag) {
+            return Err(format!(
+                "extra_args: `{a}` is managed by Alkahest and cannot be set per model \
+                 (managed: {})",
+                MANAGED_ENGINE_FLAGS.join(", ")
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Splits a command line on whitespace, honouring single and double quotes
+/// (`--mlock --override-kv 'a=b c'` is three arguments). An unclosed quote is an error.
+pub fn split_args(s: &str) -> std::result::Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut started = false;
+    for c in s.chars() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), c) => cur.push(c),
+            (None, '"' | '\'') => {
+                quote = Some(c);
+                started = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if started || !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                    started = false;
+                }
+            }
+            (None, c) => cur.push(c),
+        }
+    }
+    if quote.is_some() {
+        return Err("unclosed quote".into());
+    }
+    if started || !cur.is_empty() {
+        out.push(cur);
+    }
+    Ok(out)
 }
 
 /// KV cache types llama.cpp accepts.
@@ -768,6 +839,32 @@ mod tests {
     }
 
     #[test]
+    fn per_model_extra_args_refuse_managed_flags() {
+        let mut m = ModelSettings::default();
+        for bad in [
+            "--host 0.0.0.0",
+            "--port 9",
+            "--port=9",
+            "-m /x.gguf",
+            "--model=/x.gguf",
+            "--mlock --api-key s",
+            "--api-key-file=/k",
+        ] {
+            let err = m.set_key("extra_args", bad).unwrap_err();
+            assert!(err.contains("managed by Alkahest"), "{bad}: {err}");
+        }
+        assert!(m.extra_args.is_none());
+        // Look-alikes are fine: only the exact flags are managed.
+        m.set_key(
+            "extra_args",
+            "--hostname x --model-draft d.gguf -md d -mg 0",
+        )
+        .unwrap();
+        assert_eq!(m.extra_args.as_ref().map(Vec::len), Some(8));
+        assert!(check_extra_args(&["--no-mmap".into(), "a\nb".into()]).is_err());
+    }
+
+    #[test]
     fn set_and_unset_keys_with_aliases() {
         let mut m = ModelSettings::default();
         m.set_key("num_ctx", "8192").unwrap();
@@ -783,6 +880,13 @@ mod tests {
         assert_eq!(m.flash_attention, Some(true));
         assert_eq!(m.stop, Some(vec!["<a>".into(), "<b>".into()]));
         assert_eq!(m.extra_args.as_ref().unwrap().len(), 3);
+        m.set_key("extra_args", "--override-kv 'a=b c' \"\"")
+            .unwrap();
+        assert_eq!(
+            m.extra_args.as_deref().unwrap(),
+            ["--override-kv", "a=b c", ""]
+        );
+        assert!(m.set_key("extra_args", "--mlock 'open").is_err());
         assert_eq!(m.chat_template_kwargs["enable_thinking"], false);
         assert!(m.set_key("num_ctx", "lots").is_err());
         assert!(m.set_key("kv_cache_type_k", "q9").is_err());
