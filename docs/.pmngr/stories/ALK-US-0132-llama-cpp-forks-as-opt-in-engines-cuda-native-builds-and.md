@@ -2,7 +2,7 @@
 id: ALK-US-0132
 type: story
 title: llama.cpp forks as opt-in engines, CUDA native builds and per-model engine arguments
-status: in_progress
+status: in_review
 priority: high
 parent: ALK-EP-0010
 milestone: ALK-M-0004
@@ -10,7 +10,7 @@ author: mcp
 labels: [recipes, engine]
 estimate: 8
 created: 2026-10-19T15:00:30Z
-updated: 2026-10-19T15:00:30Z
+updated: 2026-10-19T15:35:06Z
 started: 2026-10-19T15:00:30Z
 ---
 

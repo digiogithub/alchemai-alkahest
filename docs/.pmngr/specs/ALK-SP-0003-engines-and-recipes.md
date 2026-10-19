@@ -5,7 +5,7 @@ title: Engines and recipes
 status: backlog
 labels: [engine, recipes]
 created: 2026-10-16T22:37:34Z
-updated: 2026-10-17T05:56:44Z
+updated: 2026-10-19T15:33:31Z
 requirements:
   R1:
     status: backlog
@@ -30,6 +30,7 @@ requirements:
         - crates/alkahest-engine/src/select.rs#select_engine
         - crates/alkahest-engine/src/select.rs#Platform
         - crates/alkahest-engine/src/registry.rs#EngineRegistry::plan
+        - crates/alkahest-engine/src/registry.rs#EngineRegistry::resolve_engine
         - crates/alkahest-engine/src/error.rs#EngineError
         - crates/alkahest-engine/src/llama_cpp.rs#LlamaCppEngine
         - crates/alkahest-engine/src/vllm.rs#VllmEngine
@@ -51,6 +52,12 @@ requirements:
         - crates/alkahest-recipes/tests/venv.rs#venv_install_with_uv_creates_the_environment_in_place
         - crates/alkahest-recipes/tests/venv.rs#venv_install_falls_back_to_python_and_pip_without_uv
         - crates/alkahest-recipes/tests/venv.rs#builtin_vllm_recipe_is_pinned_and_follows_the_hardware
+        - crates/alkahest-engine/tests/forks.rs#automatic_selection_never_picks_a_fork
+        - crates/alkahest-engine/tests/forks.rs#an_engine_setting_naming_the_fork_runs_it
+        - crates/alkahest-engine/tests/forks.rs#a_fork_that_is_not_installed_names_its_install_command
+        - crates/alkahest-engine/tests/forks.rs#a_fork_is_never_taken_from_path
+        - crates/alkahest-engine/tests/forks.rs#an_unknown_engine_is_refused_with_the_known_ones
+        - crates/alkahest-engine/tests/forks.rs#an_installed_fork_runs_without_its_recipe
   R3:
     status: backlog
     trace:
@@ -130,11 +137,16 @@ Each engine SHALL declare its capabilities (chat, completion, embeddings, rerank
 
 ### ALK-SP-0003.R2 — Engine selection
 
-The system SHALL select the engine from the model format and quantization: PQ2_0 and PTQ1_0 GGUF to the PrismML llama.cpp engine, other GGUF to mainline llama.cpp, safetensors to vLLM on Linux with NVIDIA and on macOS with Apple Silicon (M1 to M4, aarch64) where vLLM supports it; a per-model `engine` setting SHALL override the rule.
+The system SHALL select the engine from the model format and quantization: PQ2_0 and PTQ1_0 GGUF to the PrismML llama.cpp engine, other GGUF to mainline llama.cpp, safetensors to vLLM on Linux with NVIDIA and on macOS with Apple Silicon (M1 to M4, aarch64) where vLLM supports it; a per-model `engine` setting SHALL override the rule. Fork engines (recipes with `base`, ADR 0007) SHALL never be selected automatically; the per-model `engine` setting MAY name a fork engine (`<id>[@<version>]`), which then runs through its family's adapter.
 
 #### Scenario: bonsai routing
 - **WHEN** a Ternary-Bonsai-2 PQ2_0 model is requested
 - **THEN** the PrismML engine is launched, not mainline llama.cpp
+
+#### Scenario: fork engines are opt-in
+- **GIVEN** an installed fork engine `llama-cpp-turboquant` with `base = "llama-cpp"`
+- **WHEN** a GGUF model without an `engine` setting is requested
+- **THEN** mainline llama.cpp is launched, and only a model with `engine=llama-cpp-turboquant` runs on the fork
 
 ### ALK-SP-0003.R3 — Recipe format
 

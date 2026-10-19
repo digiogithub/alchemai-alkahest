@@ -6,7 +6,7 @@ status: backlog
 author: mcp
 labels: [catalog, recipes, models, security]
 created: 2026-10-17T18:38:01Z
-updated: 2026-10-17T19:49:27Z
+updated: 2026-10-19T15:33:31Z
 links:
   - { kind: relates_to, target: ALK-US-0117 }
 requirements:
@@ -45,6 +45,9 @@ requirements:
         - crates/alkahest-recipes/src/recipe.rs#RecipeOrigin
         - xtask/src/catalog.rs#check_engines
         - xtask/src/catalog.rs#check_drift
+        - catalog/engines/llama-cpp-turboquant.toml
+        - catalog/engines/llama-cpp-mtp.toml
+        - catalog/engines/llama-cpp-kvstream.toml
       tests:
         - crates/alkahest-recipes/tests/dependencies.rs#catalog_recipe_equals_a_builtin_recipe
         - crates/alkahest-recipes/tests/dependencies.rs#tofu_refused_in_a_git_catalog
@@ -52,6 +55,11 @@ requirements:
         - crates/alkahest-recipes/tests/dependencies.rs#a_branch_source_rev_warns_in_a_git_catalog_only
         - xtask/src/catalog_tests.rs#tofu_refused_in_a_git_catalog
         - xtask/src/catalog_tests.rs#drift_between_recipes_and_catalog_engines_detected
+        - crates/alkahest-recipes/tests/forks.rs#a_fork_recipe_declares_its_base_family
+        - crates/alkahest-recipes/tests/forks.rs#an_unknown_id_without_base_is_rejected
+        - crates/alkahest-recipes/tests/forks.rs#base_must_be_a_known_family
+        - crates/alkahest-recipes/tests/forks.rs#a_fork_may_not_reuse_a_builtin_id_or_alias
+        - crates/alkahest-recipes/tests/forks.rs#builtin_recipes_have_no_base
   R5:
     status: backlog
     trace:
@@ -79,6 +87,11 @@ requirements:
         - crates/alkahest-recipes/tests/dependencies.rs#native_install_marked_stale_on_another_cpu
         - crates/alkahest-recipes/tests/dependencies.rs#a_native_build_records_the_cpu_features_it_was_built_for
         - crates/alkahest-recipes/tests/dependencies.rs#real_native_llama_cpp_build
+        - crates/alkahest-recipes/tests/forks.rs#llama_cpp_has_a_source_only_cuda_native_variant
+        - crates/alkahest-recipes/tests/forks.rs#native_picks_cuda_native_on_a_cuda_host_and_cpu_native_elsewhere
+        - crates/alkahest-recipes/tests/forks.rs#cuda_arch_replaces_native_in_source_builds
+        - crates/alkahest-recipes/tests/forks.rs#a_native_cuda_variant_needs_no_cuda_version_but_others_do
+        - crates/alkahest-engine/tests/forks.rs#a_cuda_native_build_wins_over_the_portable_one
   R7:
     status: backlog
     trace:
@@ -294,7 +307,7 @@ Files read from a git catalog SHALL be parsed leniently: unknown keys at any lev
 
 ### ALK-SP-0011.R4 — Engine recipes in catalogs
 
-`engines/<id>.toml` SHALL use the recipe format of [[ALK-SP-0003]] R3 (`id`, pinned `version`, `executable`, `[variants.<name>]` with `assets`, `companions`, `source` or `venv`) plus the extensions of R5 and R6. In a git catalog every asset and dependency SHALL carry a `sha256`; `tofu = true` SHALL be refused there (it stays allowed only in local layers). Every download URL SHALL be `https`. A `source.rev` SHOULD be a commit id or a tag; a branch name SHALL produce a warning.
+`engines/<id>.toml` SHALL use the recipe format of [[ALK-SP-0003]] R3 (`id`, pinned `version`, `executable`, `[variants.<name>]` with `assets`, `companions`, `source` or `venv`) plus the extensions of R5 and R6. In a git catalog every asset and dependency SHALL carry a `sha256`; `tofu = true` SHALL be refused there (it stays allowed only in local layers). Every download URL SHALL be `https`. A `source.rev` SHOULD be a commit id or a tag; a branch name SHALL produce a warning. A recipe whose `id` is not a built-in engine SHALL declare `base = "<built-in id>"` (a fork engine, ADR 0007); a built-in id SHALL NOT declare `base`; a fork id SHALL NOT equal a built-in id or alias in any spelling. These rules apply to local recipe directories, git catalog syncs and `cargo xtask catalog-check` alike.
 
 #### Scenario: catalog recipe equals a built-in recipe
 - **GIVEN** `catalog/engines/llama-cpp.toml` byte-identical to `recipes/llama-cpp.toml`
@@ -310,6 +323,11 @@ Files read from a git catalog SHALL be parsed leniently: unknown keys at any lev
 - **GIVEN** a catalog asset with `url = "http://example.org/x.tar.gz"`
 - **WHEN** the catalog is validated
 - **THEN** it fails naming the asset and the rule "url must be https"
+
+#### Scenario: unknown engine id without base refused
+- **GIVEN** a recipe `id = "my-llama"` without `base`
+- **WHEN** it is parsed
+- **THEN** it is rejected and the error suggests `base = "llama-cpp"`
 
 ### ALK-SP-0011.R5 — Recipe dependency downloads
 
@@ -332,7 +350,7 @@ A variant MAY declare `[[variants.<v>.dependencies]]`, each with `id` (unique wi
 
 ### ALK-SP-0011.R6 — Native per-machine variants
 
-A variant MAY set `native = true`. A native variant SHALL have a `source` table and no `assets`, SHALL never be chosen by automatic variant selection, and SHALL be installed only by an explicit `alkahest engines install <id> --native` (or `--variant <name>` naming it, which implies `--from-source`). Its build SHALL target the host CPU (for llama.cpp `-DGGML_NATIVE=ON` plus the accelerator flags of the variant). The install SHALL record the CPU feature set it was built for (from `alkahest-sysinfo`), and `alkahest engines ls` SHALL mark a native install whose recorded features are not all present on the current host.
+A variant MAY set `native = true`. A native variant SHALL have a `source` table and no `assets`, SHALL never be chosen by automatic variant selection, and SHALL be installed only by an explicit `alkahest engines install <id> --native` (or `--variant <name>` naming it, which implies `--from-source`). Its build SHALL target the host: `cpu-native` the host CPU (for llama.cpp `-DGGML_NATIVE=ON` plus the accelerator flags of the variant), `cuda-native` the host GPU (`-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=native`; a native `cuda` variant needs no `cuda = "x.y"`). `--native` SHALL pick the native variant of the best accelerator present (`cuda-native` on a CUDA host, `cpu-native` otherwise). `--cuda-arch <list>` SHALL replace or add `-DCMAKE_CUDA_ARCHITECTURES` in any CUDA source build and be refused for non-CUDA builds. The install SHALL record the CPU feature set it was built for (from `alkahest-sysinfo`), and `alkahest engines ls` SHALL mark a native install whose recorded features are not all present on the current host.
 
 #### Scenario: native variant never auto-selected
 - **GIVEN** a recipe with variants `cpu` (assets) and `cpu-native` (`native = true`)
@@ -348,6 +366,11 @@ A variant MAY set `native = true`. A native variant SHALL have a `source` table 
 - **GIVEN** a native install recorded with features `avx512f`
 - **WHEN** `alkahest engines ls` runs on a host without `avx512f`
 - **THEN** the install is listed with a "built for another CPU" mark
+
+#### Scenario: native on a CUDA host builds for the GPU
+- **GIVEN** a host with an NVIDIA GPU and the `llama-cpp` recipe
+- **WHEN** `alkahest engines install llama-cpp --native` runs
+- **THEN** the `cuda-native` variant is built with `-DCMAKE_CUDA_ARCHITECTURES=native`
 
 ### ALK-SP-0011.R7 — Model entries
 
