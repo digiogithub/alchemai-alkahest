@@ -2,14 +2,16 @@
 id: ALK-US-0131
 type: story
 title: Desktop saves a network bind address without API keys and the server silently fails to restart
-status: triage
+status: in_review
 priority: high
+parent: ALK-EP-0013
 author: mcp
 labels: [bug, desktop, security]
 created: 2026-10-19T11:31:53Z
-updated: 2026-10-19T11:31:53Z
+updated: 2026-10-19T14:38:30Z
+started: 2026-10-19T14:24:21Z
 inbox:
-  status: pending
+  status: accepted
   source: mcp
   received: 2026-10-19T11:31:53Z
 ---
