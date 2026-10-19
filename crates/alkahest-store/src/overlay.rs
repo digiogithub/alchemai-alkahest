@@ -854,7 +854,7 @@ mod tests {
             assert!(err.contains("managed by Alkahest"), "{bad}: {err}");
         }
         assert!(m.extra_args.is_none());
-        // Look-alikes are fine: only the exact flags are managed.
+        // Similar-looking flags are fine: only the exact flags are managed.
         m.set_key(
             "extra_args",
             "--hostname x --model-draft d.gguf -md d -mg 0",

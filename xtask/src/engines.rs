@@ -500,7 +500,7 @@ mod tests {
     fn recipes_parse_into_pins() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let pins = read_pins(&root).unwrap();
-        assert_eq!(pins.len(), 5);
+        assert_eq!(pins.len(), 8);
         let by = |id: &str| pins.iter().find(|p| p.id == id).unwrap();
         assert_eq!(by("vllm").upstream, Upstream::PyPi("vllm".into()));
         assert_eq!(

@@ -8,6 +8,21 @@ sha256 = "f59b534157ba77f8088a344d7dbc0561b77d85bc6c2c50c333f636269a7a4387"
 size = 504
 
 [[files]]
+path = "engines/llama-cpp-kvstream.toml"
+sha256 = "bb1268807f27dfc83d77b79c8fbe174aca5f3d039d4133641d88567766170414"
+size = 3448
+
+[[files]]
+path = "engines/llama-cpp-mtp.toml"
+sha256 = "afb88c10cd368c2f7af628374386449ef2ef23c4a6b6f4d3c103c4b8e6b71718"
+size = 3363
+
+[[files]]
+path = "engines/llama-cpp-turboquant.toml"
+sha256 = "bda9b5e7f9138e2048bfbbd6ae4f83c21bd9d92ccf0d9067fa4209086f775e69"
+size = 3539
+
+[[files]]
 path = "engines/llama-cpp.toml"
 sha256 = "dbe02809cfea031a8244b3af5a8560b253716cb2ddfbcf7db1a20116a3ac51f4"
 size = 15113

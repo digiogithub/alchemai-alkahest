@@ -1,0 +1,53 @@
+# Engine recipe (opt-in, source build only): AtomicBot-ai/atomic-llama-cpp-turboquant (ALK-US-0132).
+#
+# llama.cpp fork (MIT) on the TurboQuant+ line of TheTom/llama-cpp-turboquant. Pinned to the release
+# b10298-2.0.0, commit cda0f9256665845cd9d6f3a0176880883f653a3d (2026-10-05). The release also carries
+# prebuilt archives (linux-x64-cuda-12.4 / 13.3, ~525-560 MB) but they are NOT used here: source only.
+# The default CMake CUDA architecture list of the fork includes 89-real, so the plain `cuda` variant
+# already runs on Ada (SM 8.9); `cuda-native` narrows the build to the installed GPU.
+#
+# Fork-specific llama-server flags (README of the fork, not yet verified by running the binary here):
+#   -ctk turbo3 -ctv turbo3 -fa on          TurboQuant KV cache (turbo2 ~6.4x, turbo3 ~4.3x, turbo4 ~3.8x vs F16);
+#                                           flash attention is required
+#   --spec-type nextn --spec-draft-n-max 2 --spec-draft-n-min 1 -m X_MTP.gguf -md X_MTP.gguf -ngl 99 -ngld 99
+#                                           Qwen 3.6 NextN (MTP) drafting; needs a combined *_MTP.gguf
+#   --spec-type mtp --mtp-head assistant.gguf   Gemma 4 MTP with the gemma4_assistant head
+#   --kv-stream-arena-mib N                 block KV streaming to host RAM (needs -np 1, -fa on; disables the
+#                                           prompt cache and context shift)
+#   --moe-cache                             MoE expert cache (see docs/backend/MOE-CACHE.md in the fork)
+# llama-quantize also gains TQ3_1S / TQ4_1S weight types.
+
+id = "llama-cpp-turboquant"
+base = "llama-cpp"
+version = "b10298-2.0.0"
+description = "llama.cpp, Atomic TurboQuant fork (turbo2/3/4 KV cache, Qwen 3.6 NextN and Gemma 4 MTP drafting)"
+license = "MIT"
+homepage = "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant"
+executable = "llama-server"
+
+
+[variants."cuda"]
+accelerator = "cuda"
+cuda = "12.4"
+notes = "Opt-in source build; needs git, cmake, ninja and the CUDA toolkit (nvcc 12.4 or newer). Adds the turbo2/turbo3/turbo4 KV cache types and NextN/MTP drafting; mainline GGUF files still load."
+[variants."cuda".source]
+git = "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant.git"
+rev = "cda0f9256665845cd9d6f3a0176880883f653a3d"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+# Native variant (ALK-SP-0011.R6): source-only, never auto-selected; built for the host GPU
+# (SM 8.9 on an RTX 4000 Ada) by `alkahest engines install llama-cpp-turboquant --native`. Not portable to other GPUs.
+[variants."cuda-native"]
+accelerator = "cuda"
+cuda = "12.4"
+native = true
+notes = "Opt-in source build; needs git, cmake, ninja and the CUDA toolkit (nvcc 12.4 or newer). Adds the turbo2/turbo3/turbo4 KV cache types and NextN/MTP drafting; mainline GGUF files still load. Compiled only for the GPU found at build time (CMAKE_CUDA_ARCHITECTURES=native)."
+[variants."cuda-native".source]
+git = "https://github.com/AtomicBot-ai/atomic-llama-cpp-turboquant.git"
+rev = "cda0f9256665845cd9d6f3a0176880883f653a3d"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]

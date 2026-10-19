@@ -1,0 +1,51 @@
+# Engine recipe (opt-in, low priority, source build only): RaymondHuang210129/llama.cpp-adaptive-kv-streaming (ALK-US-0132).
+#
+# CUDA reference implementation of Adaptive KV Streaming V2 (MIT): the full KV history lives in host RAM and a
+# bounded arena in VRAM is refilled through a ring buffer, so a 262144-token Qwen3.8-27B request fits a 16 GB
+# card. Pinned to commit db8fd5d898b0d19be74a4269c126c23d2f62c38d (2026-10-17) of the branch
+# feature/adaptive-kv-stream-v2 (the default branch); there are no tags or releases. The achyudh/llama.cpp fork is
+# a ROCm/RDNA 4 port of this work and is not used. troed/llama.cpp-adaptive-kv-streaming (branch `fuss`) is a
+# derivative that adds ngram+MTP drafting; not used.
+#
+# Fork-specific llama-server flags (README of the fork):
+#   --shared-device-memory-mib N  (alias --kv-stream-arena-mib)   arena size in VRAM; find it with benchmarks/find-max-arena.py
+#   --parallel 1 --flash-attn on --fit off --batch-size 256 --ubatch-size 256 --cache-type-k q8_0 --cache-type-v q4_0
+#   --spec-type draft-mtp --spec-draft-n-max 3   embedded MTP (do not pass --spec-draft-type-k/v)
+#   --spec-type draft-dflash --model-draft sidecar.gguf   DFlash2 sidecar
+# The qualified reference is one request, one CUDA GPU, Qwen3.8-27B (arch qwen35). Streaming is PCIe bound.
+# GGML_CUDA_FA_QUANTS=all compiles every K/V flash-attention pair: expect a long build.
+
+id = "llama-cpp-kvstream"
+base = "llama-cpp"
+version = "adaptive-kv-v2-db8fd5d"
+description = "llama.cpp, adaptive KV streaming V2 (CUDA reference, Qwen3.8-27B long context on small GPUs)"
+license = "MIT"
+homepage = "https://github.com/RaymondHuang210129/llama.cpp-adaptive-kv-streaming"
+executable = "llama-server"
+
+
+[variants."cuda"]
+accelerator = "cuda"
+cuda = "12.4"
+notes = "Experimental opt-in source build; needs git, cmake, ninja and the CUDA toolkit; the build compiles all flash-attention K/V pairs and takes long. Single request, single GPU."
+[variants."cuda".source]
+git = "https://github.com/RaymondHuang210129/llama.cpp-adaptive-kv-streaming.git"
+rev = "db8fd5d898b0d19be74a4269c126c23d2f62c38d"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON", "-DGGML_CUDA_FA_QUANTS=all"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+# Native variant (ALK-SP-0011.R6): source-only, never auto-selected; built for the host GPU
+# (SM 8.9 on an RTX 4000 Ada) by `alkahest engines install llama-cpp-kvstream --native`. Not portable to other GPUs.
+[variants."cuda-native"]
+accelerator = "cuda"
+cuda = "12.4"
+native = true
+notes = "Experimental opt-in source build; needs git, cmake, ninja and the CUDA toolkit; the build compiles all flash-attention K/V pairs and takes long. Single request, single GPU. Compiled only for the GPU found at build time (CMAKE_CUDA_ARCHITECTURES=native)."
+[variants."cuda-native".source]
+git = "https://github.com/RaymondHuang210129/llama.cpp-adaptive-kv-streaming.git"
+rev = "db8fd5d898b0d19be74a4269c126c23d2f62c38d"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native", "-DGGML_CUDA_FA_QUANTS=all"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]

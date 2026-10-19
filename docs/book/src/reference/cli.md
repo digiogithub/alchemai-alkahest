@@ -1024,7 +1024,7 @@ alkahest config model [OPTIONS] <MODEL> [COMMAND]
 | Subcommand | Purpose |
 |---|---|
 | `show` | Print the overlay, the recommended defaults and the effective settings |
-| `set` | Set one or more settings, `key=value` (for example `num_ctx=8192 kv_cache_type_k=q8_0`) |
+| `set` | Set one or more settings, `key=value` (for example `num_ctx=8192 kv_cache_type_k=q8_0`). `stop` takes a comma separated list; `extra_args` one shell-quoted string of engine arguments appended after `engines.overrides.<id>.extra_args` (`"extra_args=--cache-type-k turbo3 --override-kv 'a=str:b c'"`); `engine` names a built-in or fork engine, optionally `@<version>` |
 | `unset` | Remove settings from the overlay |
 | `path` | Print the path of the overlay file (edit it by hand if you prefer) |
 
@@ -1044,7 +1044,7 @@ alkahest config model <MODEL> show [OPTIONS]
 
 #### alkahest config model set
 
-Set one or more settings, `key=value` (for example `num_ctx=8192 kv_cache_type_k=q8_0`)
+Set one or more settings, `key=value` (for example `num_ctx=8192 kv_cache_type_k=q8_0`). `stop` takes a comma separated list; `extra_args` one shell-quoted string of engine arguments appended after `engines.overrides.<id>.extra_args` (`"extra_args=--cache-type-k turbo3 --override-kv 'a=str:b c'"`); `engine` names a built-in or fork engine, optionally `@<version>`
 
 ```text
 alkahest config model <MODEL> set [OPTIONS] <KEY=VALUE>...

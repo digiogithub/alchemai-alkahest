@@ -1,0 +1,53 @@
+# Engine recipe (opt-in, experimental, source build only): Indras-Mirror/llama.cpp-turboq-mtp (ALK-US-0132).
+#
+# Single-maintainer llama.cpp fork (MIT): TBQ3/TBQ4 KV cache with fused flash-attention kernels, custom MTP
+# speculative decoding for Qwen 3.6/3.8 hybrids, sliding-window attention for qwen35/qwen4exp, RotorQuant.
+# Pinned to the tag b10738, commit 8f2b24374e44ed6ea2d62e1292c9e3220d557616 (2026-09-01), the head of the
+# default branch `master` (which equals `qwen4-swa`). The older Qwen35 build is on branch `qwen35`
+# (aaa66a5e06590754bdc279fe8fe2147b0fc8ec7e, tag b10276). No binary releases exist.
+# Sources: README of the fork; the claims in it are NOT verified here.
+#
+# Fork-specific llama-server flags (README of the fork):
+#   -ctk tbq4_0 -ctv tbq4_0 (or tbq3_0)     TBQ KV cache, 4.25 / 3.0625 bits per value; needs --flash-attn on
+#   -ctkd tbq4_0 -ctvd tbq4_0               draft KV cache type
+#   --spec-type mtp                         Qwen 3.6 custom 3-token MTP
+#   --spec-type draft-mtp                   Qwen 3.8 embedded MTP head (target GGUF must contain the MTP tensors)
+#   --override-kv qwen35.attention.sliding_window=int:4096,qwen35.attention.swa_global_layers=int:8   SWA (opt-in)
+#   --no-kv-offload                         KV in system RAM
+# Known issues (README): MTP needs --parallel 1; vision + MTP crashes; 7B models crash with TBQ4 (head size);
+# qwen4exp needs LLAMA_ATTN_ROT_DISABLE=1.
+
+id = "llama-cpp-mtp"
+base = "llama-cpp"
+version = "b10738"
+description = "llama.cpp, Indras-Mirror fork (TBQ4/TBQ3 fused-FA KV cache, MTP for Qwen 3.6/3.8, experimental)"
+license = "MIT"
+homepage = "https://github.com/Indras-Mirror/llama.cpp-turboq-mtp"
+executable = "llama-server"
+
+
+[variants."cuda"]
+accelerator = "cuda"
+cuda = "12.4"
+notes = "Experimental opt-in source build by a single maintainer; needs git, cmake, ninja and the CUDA toolkit. MTP runs with one slot only; check the README known issues before use."
+[variants."cuda".source]
+git = "https://github.com/Indras-Mirror/llama.cpp-turboq-mtp.git"
+rev = "8f2b24374e44ed6ea2d62e1292c9e3220d557616"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
+
+
+# Native variant (ALK-SP-0011.R6): source-only, never auto-selected; built for the host GPU
+# (SM 8.9 on an RTX 4000 Ada) by `alkahest engines install llama-cpp-mtp --native`. Not portable to other GPUs.
+[variants."cuda-native"]
+accelerator = "cuda"
+cuda = "12.4"
+native = true
+notes = "Experimental opt-in source build by a single maintainer; needs git, cmake, ninja and the CUDA toolkit. MTP runs with one slot only; check the README known issues before use. Compiled only for the GPU found at build time (CMAKE_CUDA_ARCHITECTURES=native)."
+[variants."cuda-native".source]
+git = "https://github.com/Indras-Mirror/llama.cpp-turboq-mtp.git"
+rev = "8f2b24374e44ed6ea2d62e1292c9e3220d557616"
+cmake_flags = ["-DBUILD_SHARED_LIBS=ON", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON", "-DCMAKE_INSTALL_RPATH=$ORIGIN", "-DGGML_CUDA=ON", "-DCMAKE_CUDA_ARCHITECTURES=native"]
+targets = ["llama-server"]
+tools = ["git", "cmake", "ninja"]
