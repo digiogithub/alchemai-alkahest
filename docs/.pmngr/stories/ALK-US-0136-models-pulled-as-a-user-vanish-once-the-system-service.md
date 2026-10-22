@@ -2,7 +2,7 @@
 id: ALK-US-0136
 type: story
 title: Models pulled as a user vanish once the system service takes the port
-status: in_progress
+status: in_review
 priority: high
 parent: ALK-EP-0009
 milestone: ALK-M-0003
@@ -10,7 +10,7 @@ author: mcp
 labels: [service, store, cli, bug]
 estimate: 3
 created: 2026-10-22T21:06:27Z
-updated: 2026-10-22T21:06:27Z
+updated: 2026-10-22T21:12:08Z
 started: 2026-10-22T21:06:27Z
 ---
 
