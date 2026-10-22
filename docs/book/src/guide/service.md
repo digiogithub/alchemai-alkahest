@@ -43,6 +43,33 @@ tests) and `--bin <path>` (the binary the unit starts).
 Packages (`.deb`, tar.gz) never install a service on their own; this command is the explicit
 step.
 
+### Models pulled before the system service
+
+The system service has its own model store under `/var/lib/alkahest`. Models you pulled while
+running `alkahest serve` or the desktop app as yourself stay in your store
+(`~/.local/share/alkahest`), so once the service owns port 11435 they no longer show up in
+`alkahest ls` or the desktop. Nothing is deleted. `service install` prints both things to check:
+
+- **The port is in use.** A server you started yourself still holds 11435. Stop it, or the
+  service keeps restarting without ever listening (`journalctl -u alkahest` shows
+  `Address already in use`).
+- **Your models.** It prints the command that copies them into the service store:
+
+```sh
+sudo env ALKAHEST_HOME=/var/lib/alkahest alkahest import --store ~/.local/share/alkahest
+```
+
+`import --store` copies every model with the same digest, plus its per-model settings
+(`model-config/`). It skips models the destination already has, and it leaves the source store
+unchanged. Run as root into the service store, the new files go to the `alkahest` user. Engines
+are not copied: the service installs its own on first use, or with
+`sudo env ALKAHEST_HOME=/var/lib/alkahest alkahest engines install <engine>`. Once the copy is
+done, `alkahest rm` in your own store frees the space, but only while that store is in use.
+
+After upgrading the package, restart the service so it runs the new binary:
+`sudo systemctl restart alkahest`. Packages never run maintainer scripts, so an upgrade does not
+restart it for you.
+
 ## macOS and Windows
 
 The same commands work on every platform; the manager is chosen for you (`--manager

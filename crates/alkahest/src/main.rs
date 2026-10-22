@@ -21,6 +21,7 @@ mod serve_cmd;
 mod service_cmd;
 mod service_launchd;
 mod service_windows;
+mod store_import_cmd;
 mod sysinfo_cmd;
 mod update;
 // The renderer is consumed by the listing commands (`ls`, `ps`, ...) of ALK-US-0012/0031.
@@ -171,6 +172,9 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             destination,
         } => models_cmd::cp(source, destination, &loaded, cli.global.json),
         Command::Create(args) => import_cmd::create(args, &loaded, cli.global.json),
+        Command::Import(args) if args.store => {
+            store_import_cmd::run(&args.path, &loaded, cli.global.json)
+        }
         Command::Import(args) => import_cmd::import(args, &loaded, cli.global.json),
         Command::Gc { dry_run } => models_cmd::gc(*dry_run, &loaded, cli.global.json),
         Command::Show(args) => models_cmd::show(args, &loaded, cli.global.json),

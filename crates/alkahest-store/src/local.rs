@@ -71,7 +71,7 @@ pub struct StoredManifest {
 impl AlkahestStore {
     /// Opens the store at `root`, creating the root and its subdirectories if needed.
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
-        let store = Self { root: root.into() };
+        let store = Self::at(root.into());
         for dir in [
             store.blobs_dir(),
             store.manifests_dir(),
@@ -88,6 +88,11 @@ impl AlkahestStore {
             Err(e) => tracing::debug!(error = %e, "stale temp file cleanup skipped"),
         }
         Ok(store)
+    }
+
+    /// A handle on `root` that touches nothing on disk.
+    pub(crate) fn at(root: PathBuf) -> Self {
+        Self { root }
     }
 
     /// Opens the store at the configured `models_dir`.

@@ -51,6 +51,12 @@ pub struct Host<'a> {
     pub has_user: &'a dyn Fn(&str) -> bool,
     /// `$XDG_CONFIG_HOME` or `$HOME/.config`, used for the user unit without `--root`.
     pub user_config_dir: PathBuf,
+    /// The Alkahest data folder of the account that ran `sudo`, when it holds models: the
+    /// service starts with its own empty store, so those models need copying (ALK-US-0136).
+    pub invoking_user_store: Option<PathBuf>,
+    /// The default port, when something already listens on it: a server the user started
+    /// keeps the service from starting (ALK-US-0136).
+    pub port_in_use: Option<u16>,
 }
 
 /// Whether `name` is a group in `<root>/etc/group`.
@@ -61,6 +67,36 @@ fn group_exists(root: &Path, name: &str) -> bool {
 /// Whether `name` is a user in `<root>/etc/passwd`.
 fn user_exists(root: &Path, name: &str) -> bool {
     first_field_exists(&root.join("etc/passwd"), name)
+}
+
+/// Home directory of `name` in `<root>/etc/passwd`.
+fn home_of(root: &Path, name: &str) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(root.join("etc/passwd")).ok()?;
+    text.lines()
+        .map(|l| l.split(':').collect::<Vec<_>>())
+        .find(|f| f.first() == Some(&name) && f.len() > 5)
+        .map(|f| PathBuf::from(f[5]))
+}
+
+/// The data folder of the account that ran `sudo` when it holds at least one model.
+fn invoking_user_store(root: &Path) -> Option<PathBuf> {
+    let user = std::env::var("SUDO_USER").ok().filter(|u| u != "root")?;
+    let data = home_of(root, &user)?.join(".local/share/alkahest");
+    let location = alkahest_store::StoreLocation::find(&data)?;
+    let has_models = std::fs::read_dir(location.models_dir.join("manifests"))
+        .ok()?
+        .next()
+        .is_some();
+    has_models.then_some(data)
+}
+
+/// The default port when it cannot be bound on loopback because something holds it.
+fn default_port_in_use() -> Option<u16> {
+    let port = alkahest_core::config::DEFAULT_PORT;
+    match std::net::TcpListener::bind(("127.0.0.1", port)) {
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => Some(port),
+        _ => None,
+    }
 }
 
 fn first_field_exists(file: &Path, name: &str) -> bool {
@@ -218,6 +254,22 @@ pub fn plan_install(args: &ServiceArgs, bin: &Path, host: &Host<'_>) -> Plan {
             .to_vec(),
         );
         plan.files.push((unit, render_system_unit(bin, &groups)));
+        if let Some(port) = host.port_in_use {
+            plan.notes.push(format!(
+                "port {port} is already in use. If that is a server you started yourself \
+                 (`alkahest serve` or the desktop app), stop it: the service cannot start while \
+                 it holds the port. `alkahest service status` shows whether it runs"
+            ));
+        }
+        if let Some(data) = &host.invoking_user_store {
+            plan.notes.push(format!(
+                "the service has its own model store in {STATE_DIR}; the models in {} are not \
+                 in it. Copy them with: sudo env ALKAHEST_HOME={STATE_DIR} {} import --store {}",
+                data.display(),
+                bin.display(),
+                data.display()
+            ));
+        }
     }
     plan.commands.push(systemctl(args.user, &["daemon-reload"]));
     plan.commands
@@ -353,10 +405,14 @@ fn with_host<T>(args: &ServiceArgs, f: impl FnOnce(&Host<'_>) -> T) -> T {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .unwrap_or_else(|| PathBuf::from(".config"));
+    // Only the real system install looks at the machine's users and ports.
+    let real_system = !args.user && args.root.is_none();
     f(&Host {
         has_group: &has_group,
         has_user: &has_user,
         user_config_dir,
+        invoking_user_store: real_system.then(|| invoking_user_store(&root)).flatten(),
+        port_in_use: real_system.then(default_port_in_use).flatten(),
     })
 }
 
@@ -522,7 +578,46 @@ mod tests {
             has_group: groups,
             has_user: users,
             user_config_dir: PathBuf::from("/home/u/.config"),
+            invoking_user_store: None,
+            port_in_use: None,
         }
+    }
+
+    #[test]
+    fn system_install_points_at_the_users_models_and_a_busy_port() {
+        let no = |_: &str| false;
+        let mut h = host(&no, &no);
+        let quiet = plan_install(&args(false, None), Path::new("/usr/bin/alkahest"), &h);
+        assert!(quiet.notes.is_empty(), "{:?}", quiet.notes);
+
+        h.invoking_user_store = Some(PathBuf::from("/home/u/.local/share/alkahest"));
+        h.port_in_use = Some(11435);
+        let plan = plan_install(&args(false, None), Path::new("/usr/bin/alkahest"), &h);
+        let notes = plan.notes.join("\n");
+        assert!(notes.contains("port 11435 is already in use"), "{notes}");
+        assert!(
+            notes.contains(
+                "sudo env ALKAHEST_HOME=/var/lib/alkahest /usr/bin/alkahest import --store \
+                 /home/u/.local/share/alkahest"
+            ),
+            "{notes}"
+        );
+        // A user service shares the user's own store: nothing to copy.
+        let user = plan_install(&args(true, None), Path::new("/usr/bin/alkahest"), &h);
+        assert!(!user.notes.iter().any(|n| n.contains("import --store")));
+    }
+
+    #[test]
+    fn home_comes_from_passwd() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("etc")).unwrap();
+        std::fs::write(
+            root.path().join("etc/passwd"),
+            "root:x:0:0:root:/root:/bin/bash\nu:x:1000:1000:U,,,:/home/u:/bin/bash\n",
+        )
+        .unwrap();
+        assert_eq!(home_of(root.path(), "u"), Some(PathBuf::from("/home/u")));
+        assert_eq!(home_of(root.path(), "nobody"), None);
     }
 
     #[test]

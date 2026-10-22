@@ -93,3 +93,59 @@ fn create_from_a_modelfile_with_the_cli() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--from"));
 }
+
+/// ALK-US-0136: models pulled into a user's store move to another store (the system service's)
+/// with `import --store`, settings included, and a second run skips them.
+#[test]
+fn import_every_model_of_another_store() {
+    let user = tempfile::tempdir().unwrap();
+    let file = user.path().join("Ternary-Bonsai.gguf");
+    fs::write(&file, tiny_gguf("qwen3")).unwrap();
+    stdout(alkahest(user.path()).arg("import").arg(&file));
+    stdout(alkahest(user.path()).args([
+        "config",
+        "model",
+        "Ternary-Bonsai",
+        "set",
+        "context_length=4096",
+    ]));
+    let user_data = user.path().join("alk/data");
+
+    let service = tempfile::tempdir().unwrap();
+    let text = stdout(
+        alkahest(service.path())
+            .args(["--json", "import", "--store"])
+            .arg(&user_data),
+    );
+    let report: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(report["models"][0]["name"], "Ternary-Bonsai:latest");
+    assert_eq!(report["models"][0]["status"], "imported");
+    assert_eq!(report["models"][0]["settings_files"], 1);
+    let ls = stdout(alkahest(service.path()).arg("ls"));
+    assert!(ls.contains("Ternary-Bonsai"), "{ls}");
+    let show = stdout(alkahest(service.path()).args(["config", "model", "Ternary-Bonsai", "show"]));
+    assert!(show.contains("4096"), "{show}");
+
+    // The models folder works too, and nothing is copied twice.
+    let again = stdout(
+        alkahest(service.path())
+            .args(["import", "--store"])
+            .arg(user_data.join("models")),
+    );
+    assert!(
+        again.contains("already present Ternary-Bonsai:latest"),
+        "{again}"
+    );
+
+    let out = alkahest(service.path())
+        .args(["import", "--store"])
+        .arg(user.path())
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("is not an Alkahest store"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

@@ -35,6 +35,7 @@ pub mod overlay;
 pub mod reference;
 pub mod snapshot;
 pub mod source;
+pub mod transfer;
 
 pub use catalog::{Catalog, CatalogEntry, ModelDetail, ModelSummary, destination_name};
 pub use create::{CreateBase, CreateLayers, CreateReport};
@@ -60,3 +61,4 @@ pub use reference::{
     CATALOG_HOST, HfRef, HfSelector, ModelName, ModelRef, Origin, RefError, RefPart, ScopedRef,
 };
 pub use source::{LayerInfo, ModelEntry, ModelSource};
+pub use transfer::{StoreLocation, TransferOutcome, transfer_overlays};

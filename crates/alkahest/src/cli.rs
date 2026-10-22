@@ -162,14 +162,21 @@ pub struct CreateArgs {
 /// Arguments of `alkahest import`.
 #[derive(Debug, Args)]
 pub struct ImportArgs {
-    /// A `.gguf` file or a model folder.
+    /// A `.gguf` file or a model folder; with `--store`, another Alkahest store.
     pub path: PathBuf,
     /// Model name; defaults to the file stem or folder name.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "store")]
     pub name: Option<String>,
     /// Register the files where they are instead of copying them (see `create --link`).
-    #[arg(long)]
+    #[arg(long, conflicts_with = "store")]
     pub link: bool,
+    /// PATH is another Alkahest store (a data folder such as `~/.local/share/alkahest`, or its
+    /// `models` folder): copy every model in it, with its settings, into this store. Models
+    /// already here are skipped; the source is not changed. For example, to give the system
+    /// service the models pulled as a user:
+    /// `sudo env ALKAHEST_HOME=/var/lib/alkahest alkahest import --store ~/.local/share/alkahest`.
+    #[arg(long)]
+    pub store: bool,
 }
 
 /// Arguments of `alkahest show`.
