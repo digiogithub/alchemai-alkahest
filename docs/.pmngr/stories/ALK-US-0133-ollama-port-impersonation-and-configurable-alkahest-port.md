@@ -2,7 +2,7 @@
 id: ALK-US-0133
 type: story
 title: Ollama port impersonation and configurable Alkahest port
-status: in_progress
+status: in_review
 priority: high
 parent: ALK-EP-0007
 milestone: ALK-M-0003
@@ -10,7 +10,7 @@ author: mcp
 labels: [api, ollama, cli, desktop]
 estimate: 5
 created: 2026-10-22T17:48:46Z
-updated: 2026-10-22T17:48:46Z
+updated: 2026-10-22T17:56:40Z
 started: 2026-10-22T17:48:46Z
 ---
 
