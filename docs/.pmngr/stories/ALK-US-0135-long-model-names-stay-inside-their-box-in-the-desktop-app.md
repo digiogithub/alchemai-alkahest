@@ -2,7 +2,7 @@
 id: ALK-US-0135
 type: story
 title: Long model names stay inside their box in the desktop app
-status: in_progress
+status: in_review
 priority: medium
 parent: ALK-EP-0013
 milestone: ALK-M-0005
@@ -10,7 +10,7 @@ author: mcp
 labels: [desktop, bug]
 estimate: 2
 created: 2026-10-22T18:05:32Z
-updated: 2026-10-22T18:05:32Z
+updated: 2026-10-22T18:05:50Z
 started: 2026-10-22T18:05:32Z
 ---
 
