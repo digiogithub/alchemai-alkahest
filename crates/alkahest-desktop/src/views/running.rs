@@ -29,7 +29,7 @@ use crate::views::library::LibraryView;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
     ButtonKind, button, column_label, dialog, dismissable, dot, empty_block, kind_badge, meter,
-    pill,
+    model_name, pill,
 };
 
 /// How often countdowns re-render.
@@ -49,6 +49,19 @@ const REQ_ROUTE: f32 = 230.0;
 const REQ_MODEL: f32 = 190.0;
 const REQ_TOKENS: f32 = 120.0;
 const REQ_LATENCY: f32 = 110.0;
+/// Narrowest a shrinking live-request column gets.
+const REQ_MIN: f32 = 64.0;
+
+/// A live-request column `w` wide. Client, endpoint and model shrink down to [`REQ_MIN`];
+/// the short ones (time, tokens, latency, status) keep their width.
+fn column(w: f32) -> Div {
+    let d = div().w(px(w));
+    if [REQ_CLIENT, REQ_ROUTE, REQ_MODEL].contains(&w) {
+        d.flex_shrink(1.0).min_w(px(REQ_MIN))
+    } else {
+        d.flex_shrink_0()
+    }
+}
 /// Thin meters inside cards (the token meter is for tiles).
 const THIN_METER: f32 = 4.0;
 
@@ -398,13 +411,17 @@ impl RunningView {
 
     fn card(&self, card: &ModelCard, p: &Palette, cx: &mut Context<Self>) -> Div {
         let unloading = self.state.is_unloading(&card.name);
-        let mut title = h_flex().gap(px(space::S2)).items_center().child(
-            div()
-                .type_style(text::H2)
-                .child(SharedString::from(card.name.clone())),
+        // The badge keeps its size; a long name wraps onto two lines, then ends in an ellipsis.
+        let mut title = h_flex().min_w_0().gap(px(space::S2)).items_center().child(
+            model_name(
+                SharedString::from(format!("running-name-{}", card.name)),
+                card.name.clone(),
+                2,
+            )
+            .type_style(text::H2),
         );
         if let Some(kind) = card.kind {
-            title = title.child(kind_badge(kind));
+            title = title.child(div().flex_shrink_0().child(kind_badge(kind)));
         }
         let name_col = v_flex()
             .w(px(COL_NAME))
@@ -570,10 +587,11 @@ impl RunningView {
             )
     }
 
-    /// The live requests table (screen 13): newest first, no content, only metadata.
+    /// The live requests table (screen 13): newest first, no content, only metadata. Client,
+    /// endpoint and model give way when the window is narrow (their text ends in an
+    /// ellipsis) so the row never runs past the card.
     fn requests_table(&self, p: &Palette) -> Div {
-        let head =
-            |label: &str, w: f32| div().w(px(w)).flex_shrink_0().child(column_label(label, p));
+        let head = |label: &str, w: f32| column(w).child(column_label(label, p));
         let mut table = v_flex().gap(px(space::S1)).child(
             h_flex()
                 .gap(px(space::S3))
@@ -600,11 +618,8 @@ impl RunningView {
         }
         for r in rows {
             let cell = |s: String, w: f32, color: Hsla| {
-                div()
-                    .w(px(w))
-                    .flex_shrink_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
+                column(w)
+                    .truncate()
                     .type_style(text::MONO)
                     .text_size(px(text::CAPTION.size))
                     .text_color(color)

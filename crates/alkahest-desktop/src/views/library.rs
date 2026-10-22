@@ -33,7 +33,7 @@ use crate::views::model_settings::{ModelSettingsView, SettingsEvent};
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
     ButtonKind, button, column_label, dialog, dismissable, empty_block, format_tag, icon_button,
-    kind_badge, overlay_shadow, pill,
+    kind_badge, model_name, overlay_shadow, pill,
 };
 
 /// Fixed column widths (px); the Model column takes the rest. The table scrolls sideways
@@ -711,9 +711,12 @@ impl LibraryView {
                     .min_w(px(200.0))
                     .gap(px(3.0))
                     .child(
-                        div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(SharedString::from(row.name.clone())),
+                        model_name(
+                            SharedString::from(format!("library-name-{}", row.name)),
+                            row.name.clone(),
+                            2,
+                        )
+                        .font_weight(FontWeight::SEMIBOLD),
                     )
                     .child(
                         div()

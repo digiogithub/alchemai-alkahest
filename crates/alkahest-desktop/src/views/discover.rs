@@ -40,8 +40,8 @@ use crate::views::icons;
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
     ButtonKind, button, card, choice_chip, column_label, dismissable, dot, empty_block,
-    field_frame, format_tag, kind_badge, meter, notice_line, overlay_shadow, segment, segmented,
-    tag,
+    field_frame, format_tag, kind_badge, meter, model_name, notice_line, overlay_shadow, segment,
+    segmented, tag,
 };
 
 /// Typing pause before a search runs.
@@ -54,6 +54,10 @@ const ESTIMATE_PARALLEL: usize = 3;
 const FEED_RETRY: Duration = Duration::from_secs(2);
 /// Width of the results column (design: 490 px of 1144).
 const RESULTS_WIDTH: f32 = 470.0;
+/// The results column shrinks down to this so the detail panel keeps [`DETAIL_MIN_WIDTH`].
+const RESULTS_MIN_WIDTH: f32 = 300.0;
+/// Narrowest detail panel: room for a two-line repository name next to its task chip.
+const DETAIL_MIN_WIDTH: f32 = 340.0;
 
 /// What Discover asks of the shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1034,7 +1038,7 @@ impl DiscoverView {
         let mut col = v_flex()
             .id("discover-results")
             .w(px(RESULTS_WIDTH))
-            .flex_shrink_0()
+            .min_w(px(RESULTS_MIN_WIDTH))
             .h_full()
             .gap(px(space::S2))
             .overflow_y_scroll();
@@ -1195,10 +1199,11 @@ impl DiscoverView {
 
     /// The detail card: scrolls as a whole; its content never shrinks.
     fn detail_panel(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        // Wide enough for a readable title; the results column gives way first.
         card(p)
             .id("discover-detail")
             .flex_1()
-            .min_w_0()
+            .min_w(px(DETAIL_MIN_WIDTH))
             .h_full()
             .overflow_y_scroll()
             .child(self.detail_body(p, cx))
@@ -1242,11 +1247,9 @@ impl DiscoverView {
                 .flex_1()
                 .min_w_0()
                 .gap(px(space::S1))
-                .child(mono_caption(header.breadcrumb.clone(), p))
+                .child(mono_caption(header.breadcrumb.clone(), p).truncate())
                 .child(
-                    div()
-                        .type_style(text::H1)
-                        .child(SharedString::from(header.name.clone())),
+                    model_name("discover-detail-name", header.name.clone(), 2).type_style(text::H1),
                 )
                 .child(
                     div()
@@ -1260,6 +1263,8 @@ impl DiscoverView {
         } else if let Some(task) = caps {
             top = top.child(
                 div()
+                    .flex_shrink_0()
+                    .whitespace_nowrap()
                     .px(px(space::S2))
                     .py(px(3.0))
                     .rounded(px(radius::SM))
@@ -2340,11 +2345,7 @@ impl DiscoverView {
         }
         let mut panel = panel
             .child(mono_caption("ollama.com / library".to_string(), p))
-            .child(
-                div()
-                    .type_style(text::H1)
-                    .child(SharedString::from(row.name.clone())),
-            )
+            .child(model_name("ollama-detail-name", row.name.clone(), 2).type_style(text::H1))
             .child(
                 div()
                     .type_style(text::SMALL)

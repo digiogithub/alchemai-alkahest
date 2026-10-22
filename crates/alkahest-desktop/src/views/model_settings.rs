@@ -31,7 +31,7 @@ use crate::ui::{
 use crate::views::style::{TextStyleExt, Theme, c};
 use crate::views::widgets::{
     ButtonKind, button, card, choice_chip, column_label, field_frame, field_label,
-    format_tag as format_tag_widget, kind_badge, notice_line, segment, segmented,
+    format_tag as format_tag_widget, kind_badge, model_name, notice_line, segment, segmented,
 };
 
 /// Width of the side column (memory estimate, model card, launch line).
@@ -580,11 +580,13 @@ impl ModelSettingsView {
                     .gap(px(space::S1))
                     .child(
                         h_flex()
+                            .min_w_0()
                             .gap(px(space::S2))
                             .type_style(text::SMALL)
                             .text_color(c(p.text_muted))
                             .child(
                                 div()
+                                    .flex_shrink_0()
                                     .id("settings-breadcrumb-library")
                                     .cursor_pointer()
                                     .text_color(c(p.accent_text))
@@ -593,24 +595,23 @@ impl ModelSettingsView {
                                         cx.emit(SettingsEvent::Close);
                                     })),
                             )
-                            .child("/")
+                            .child(div().flex_shrink_0().child("/"))
                             .child(
-                                div()
+                                model_name("settings-breadcrumb-name", self.model.name.clone(), 1)
                                     .type_style(text::MONO)
-                                    .text_size(px(text::SMALL.size))
-                                    .child(SharedString::from(self.model.name.clone())),
+                                    .text_size(px(text::SMALL.size)),
                             ),
                     )
                     .child(
                         h_flex()
+                            .min_w_0()
                             .gap(px(space::S3))
                             .items_center()
                             .child(
-                                div()
-                                    .type_style(text::H1)
-                                    .child(SharedString::from(self.model.name.clone())),
+                                model_name("settings-title-name", self.model.name.clone(), 2)
+                                    .type_style(text::H1),
                             )
-                            .child(tags),
+                            .child(tags.flex_shrink_0()),
                     ),
             )
             .child(status)

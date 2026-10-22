@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use crate::ui::{
     AnyElement, App, BoxShadow, Div, ElementId, FontWeight, Hsla, InteractiveElement, KeyDownEvent,
-    MouseButton, ParentElement, SharedString, Stateful, Styled, Window, div, h_flex, point, px,
-    svg_icon, v_flex,
+    MouseButton, ParentElement, SharedString, Stateful, StatefulInteractiveElement, Styled, Window,
+    div, h_flex, point, px, svg_icon, text_tooltip, v_flex,
 };
 use crate::views::style::{TextStyleExt, c};
 
@@ -620,6 +620,30 @@ pub fn card_title(title: impl Into<SharedString>, note: Option<SharedString>, p:
         );
     }
     row
+}
+
+/// A model name that stays inside its box. Names such as
+/// `hf.co/limcheekin/CodeRankEmbed-GGUF:Q4_K_M` have no spaces, so without this they push the
+/// layout wider than the window. The text wraps (at `/`, `-`, `:`, or anywhere inside one
+/// word longer than the line) onto at most `lines` lines and ends in an ellipsis beyond that;
+/// `lines == 1` keeps it on one line. Hovering shows the whole name. `id` must be unique in
+/// the view. The caller sets the type style; the parent must let it shrink (`min_w_0`).
+pub fn model_name(
+    id: impl Into<ElementId>,
+    name: impl Into<SharedString>,
+    lines: usize,
+) -> Stateful<Div> {
+    let name: SharedString = name.into();
+    let el = div().min_w_0().max_w_full();
+    let el = if lines <= 1 {
+        el.truncate()
+    } else {
+        el.line_clamp(lines).text_ellipsis()
+    };
+    let tip = name.clone();
+    el.id(id)
+        .tooltip(move |window, cx| text_tooltip(tip.clone(), window, cx))
+        .child(name)
 }
 
 /// Mono caption text (paths, ids, versions).
