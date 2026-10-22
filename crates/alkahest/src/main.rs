@@ -6,6 +6,7 @@
 mod catalog_cmd;
 mod certs_cmd;
 mod cli;
+mod config_set_cmd;
 mod engines_cmd;
 mod hf_cmd;
 mod import_cmd;
@@ -116,6 +117,26 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             .apply_host_spec(host)
             .context("--host")?;
     }
+    if let Some(port) = cli.global.port {
+        loaded.config.server.port = port;
+    }
+    if let Command::Serve {
+        ollama_compat,
+        no_ollama_compat,
+        ollama_port,
+        ..
+    } = &cli.command
+    {
+        if *ollama_compat {
+            loaded.config.server.ollama_compat = true;
+        }
+        if *no_ollama_compat {
+            loaded.config.server.ollama_compat = false;
+        }
+        if let Some(p) = ollama_port {
+            loaded.config.server.ollama_port = *p;
+        }
+    }
 
     // Only the long-running server writes log files; short commands stay on stderr.
     let is_serve = matches!(cli.command, Command::Serve { .. });
@@ -176,6 +197,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Command::Serve {
             allow_unauthenticated,
             service,
+            ..
         } => serve_cmd::run(&loaded, *allow_unauthenticated, *service),
         Command::Keys { action } => keys_cmd::run(action, &loaded, cli.global.json),
         Command::Service { action } => service_cmd::run(action, &loaded, cli.global.json),
@@ -287,6 +309,12 @@ fn config_command(action: &ConfigAction, global: &GlobalArgs, loaded: &Loaded) -
                 println!("# engines_dir  = {}", resolved.engines_dir.display());
                 println!("# log_dir      = {}", resolved.log_dir.display());
             }
+        }
+        ConfigAction::Set { assignments } => {
+            return config_set_cmd::set(assignments, loaded, global.json);
+        }
+        ConfigAction::Unset { keys } => {
+            return config_set_cmd::unset(keys, loaded, global.json);
         }
         ConfigAction::Model { model, action } => {
             return model_config_cmd::run(model, action.as_ref(), loaded, global.json);

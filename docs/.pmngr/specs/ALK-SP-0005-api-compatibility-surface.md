@@ -5,7 +5,7 @@ title: API compatibility surface
 status: backlog
 labels: [api]
 created: 2026-10-16T22:37:35Z
-updated: 2026-10-17T07:49:05Z
+updated: 2026-10-22T17:56:28Z
 requirements:
   R1:
     status: backlog
@@ -185,6 +185,23 @@ requirements:
         - crates/alkahest-api/tests/admin.rs#request_feed_records_inference_calls_without_content
         - crates/alkahest-api/tests/admin.rs#utilization_and_forced_kill
         - crates/alkahest-client/tests/client.rs#monitor_feed_utilization_and_kill
+  R7:
+    status: backlog
+    trace:
+      code:
+        - crates/alkahest-core/src/config.rs#ServerConfig::ollama_bind
+        - crates/alkahest-api/src/server.rs#bind_ollama_port
+        - crates/alkahest-api/src/server.rs#Server::also_listen
+        - crates/alkahest/src/serve_cmd.rs#serve
+        - crates/alkahest/src/config_set_cmd.rs#set
+        - crates/alkahest-desktop/src/keys.rs#ollama_port_line
+      tests:
+        - crates/alkahest/tests/serve.rs#free_ollama_port_is_served_too
+        - crates/alkahest/tests/serve.rs#busy_ollama_port_is_skipped_without_error
+        - crates/alkahest/tests/serve.rs#port_saved_with_config_set_is_bound_next_start
+        - crates/alkahest-core/src/config.rs#ollama_bind_only_when_enabled_and_on_another_port
+        - crates/alkahest-api/src/admin/settings.rs#ollama_compat_is_patched_and_written
+        - crates/alkahest-desktop/src/keys.rs#ollama_compat_toggle_saves_and_explains_the_port
 ---
 
 ## Purpose
@@ -246,3 +263,21 @@ The server SHALL expose `/alkahest/v1/*` for catalog, downloads, model configura
 #### Scenario: openapi
 - **WHEN** the server starts
 - **THEN** `/alkahest/v1/openapi.json` describes every admin route
+
+### ALK-SP-0005.R7 — Ollama port impersonation
+
+WHERE `server.ollama_compat` is enabled, the system SHALL additionally serve the same API on the same host at `server.ollama_port` (default 11434), so Ollama clients work without reconfiguration; WHEN that port cannot be bound (Ollama or another program holds it), the system SHALL start normally on its own port only, log that the Ollama port was skipped, and report it in the network settings. The Alkahest port (`server.port`, default 11435) SHALL be changeable from the CLI and the desktop app.
+
+#### Scenario: free Ollama port is served too
+- GIVEN `ollama_compat = true` and port 11434 free
+- WHEN the server starts
+- THEN it answers on both the Alkahest port and 11434
+
+#### Scenario: busy Ollama port is skipped without error
+- GIVEN `ollama_compat = true` and port 11434 held by another process
+- WHEN the server starts
+- THEN it starts successfully on the Alkahest port only and reports the Ollama port as not acquired
+
+#### Scenario: port changed from the CLI
+- WHEN the user runs `alkahest config set server.port=11500`
+- THEN the user configuration file holds the port and the next `alkahest serve` binds it

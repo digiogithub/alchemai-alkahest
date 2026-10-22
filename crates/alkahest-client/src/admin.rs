@@ -652,6 +652,31 @@ pub struct NetworkSettings {
     pub endpoints: Endpoints,
     /// HTTPS enabled (`server.tls.enabled`).
     pub tls: bool,
+    /// Also answer on the Ollama port when it is free (`server.ollama_compat`).
+    pub ollama_compat: bool,
+    /// `server.ollama_port` (11434 by default).
+    pub ollama_port: u16,
+}
+
+/// What became of the Ollama-compatible port when the server started (ALK-SP-0005.R7).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum OllamaPortStatus {
+    /// Not enabled (or the same port as the server's own).
+    #[default]
+    Disabled,
+    /// The server answers on `address` too.
+    Listening {
+        /// `host:port`.
+        address: String,
+    },
+    /// Another program (Ollama, usually) holds the port; the server stays on its own.
+    Skipped {
+        /// `host:port` tried.
+        address: String,
+        /// The bind error.
+        reason: String,
+    },
 }
 
 /// `GET|PUT /alkahest/v1/settings/network`.
@@ -664,6 +689,8 @@ pub struct NetworkSettingsDoc {
     pub saved: NetworkSettings,
     /// The saved values differ from the running ones.
     pub restart_required: bool,
+    /// Whether the running server acquired the Ollama port.
+    pub ollama_port_status: OllamaPortStatus,
     /// File the settings are saved to.
     pub file: String,
     /// Active API keys.
@@ -696,6 +723,12 @@ pub struct NetworkPatch {
     /// Serve HTTPS (applies on the next start).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tls: Option<bool>,
+    /// Also answer on the Ollama port when free (applies on the next start).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ollama_compat: Option<bool>,
+    /// The Ollama-compatible port.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ollama_port: Option<u16>,
     /// Needed to save a network bind without key checks.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub confirm_unauthenticated: bool,

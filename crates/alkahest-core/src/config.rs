@@ -29,8 +29,20 @@ use crate::pull::PullConfig;
 
 /// Default API port (Ollama uses 11434; Alkahest sits next to it).
 pub const DEFAULT_PORT: u16 = 11435;
+/// Ollama's port, which Alkahest also answers on when `server.ollama_compat` is set and the
+/// port is free (ALK-SP-0005.R7).
+pub const DEFAULT_OLLAMA_PORT: u16 = 11434;
 /// Default bind host: loopback only.
 pub const DEFAULT_HOST: &str = "127.0.0.1";
+
+/// Environment-style boolean: `1/true/yes/on` or `0/false/no/off`, any case.
+fn parse_bool(v: &str) -> Option<bool> {
+    match v.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
 
 /// The whole configuration. Every section has defaults, so an empty file is valid.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -408,6 +420,11 @@ pub struct ServerConfig {
     pub host: String,
     /// TCP port.
     pub port: u16,
+    /// Also serve the API on `ollama_port` (same host, auth and TLS) so Ollama clients work
+    /// unchanged (ALK-SP-0005.R7). A port another program holds is skipped, not an error.
+    pub ollama_compat: bool,
+    /// The port served when `ollama_compat` is set; Ollama's own port by default.
+    pub ollama_port: u16,
     /// Largest accepted request body in bytes. Generous by default because Ollama and OpenAI
     /// requests may carry base64 images; it still stops a client from exhausting memory.
     pub max_body_bytes: u64,
@@ -520,6 +537,8 @@ impl Default for ServerConfig {
         Self {
             host: DEFAULT_HOST.to_string(),
             port: DEFAULT_PORT,
+            ollama_compat: false,
+            ollama_port: DEFAULT_OLLAMA_PORT,
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             request_timeout_secs: 0,
             shutdown_timeout_secs: DEFAULT_SHUTDOWN_TIMEOUT_SECS,
@@ -533,11 +552,23 @@ impl Default for ServerConfig {
 impl ServerConfig {
     /// `host:port`, with IPv6 literals bracketed. Suitable for `TcpListener::bind`.
     pub fn bind(&self) -> String {
+        self.bind_port(self.port)
+    }
+
+    /// `host:<port>` for another port on the same host (IPv6 literals bracketed).
+    pub fn bind_port(&self, port: u16) -> String {
         if self.host.contains(':') {
-            format!("[{}]:{}", self.host, self.port)
+            format!("[{}]:{}", self.host, port)
         } else {
-            format!("{}:{}", self.host, self.port)
+            format!("{}:{}", self.host, port)
         }
+    }
+
+    /// The Ollama-compatible address to serve besides [`Self::bind`], when enabled and on a
+    /// different port (ALK-SP-0005.R7).
+    pub fn ollama_bind(&self) -> Option<String> {
+        (self.ollama_compat && self.ollama_port != 0 && self.ollama_port != self.port)
+            .then(|| self.bind_port(self.ollama_port))
     }
 
     /// URL scheme clients use: `https` when TLS is enabled, else `http`.
@@ -915,7 +946,7 @@ impl Config {
     /// Applies `ALKAHEST_*` overrides in place and returns the variables that took effect.
     ///
     /// Recognised: `ALKAHEST_HOST`, `ALKAHEST_MODELS`, `ALKAHEST_OLLAMA_MODELS`,
-    /// `ALKAHEST_OLLAMA_ENABLED`, `ALKAHEST_KEEP_ALIVE`, `ALKAHEST_MAX_LOADED_MODELS`,
+    /// `ALKAHEST_OLLAMA_ENABLED`, `ALKAHEST_OLLAMA_COMPAT`, `ALKAHEST_KEEP_ALIVE`, `ALKAHEST_MAX_LOADED_MODELS`,
     /// `ALKAHEST_NUM_PARALLEL`, `ALKAHEST_MAX_QUEUE`, `ALKAHEST_ENGINES_DIR`,
     /// `ALKAHEST_HF_ENDPOINT`, `ALKAHEST_PULL_MAX_BPS`, `ALKAHEST_LOG`, `ALKAHEST_LOG_FORMAT`, `ALKAHEST_LOG_DIR`.
     /// (`ALKAHEST_HOME` and `ALKAHEST_CONFIG` are consumed earlier, by path discovery and
@@ -956,6 +987,10 @@ impl Config {
                 "0" | "false" | "no" | "off" => false,
                 _ => return Err(invalid("ALKAHEST_OLLAMA_ENABLED", &v, "expected a boolean")),
             };
+        }
+        if let Some(v) = get("ALKAHEST_OLLAMA_COMPAT") {
+            self.server.ollama_compat = parse_bool(&v)
+                .ok_or_else(|| invalid("ALKAHEST_OLLAMA_COMPAT", &v, "expected a boolean"))?;
         }
         if let Some(v) = get("ALKAHEST_KEEP_ALIVE") {
             self.scheduler.keep_alive = KeepAlive::parse(&v)
@@ -1227,6 +1262,27 @@ mod tests {
         assert!(c.store.ollama.enabled);
         assert!(c.auth.require_key_for_remote);
         c.validate().unwrap();
+    }
+
+    #[test]
+    fn ollama_bind_only_when_enabled_and_on_another_port() {
+        let mut s = ServerConfig::default();
+        assert_eq!(s.ollama_bind(), None);
+        s.ollama_compat = true;
+        assert_eq!(s.ollama_bind().as_deref(), Some("127.0.0.1:11434"));
+        s.host = "::1".into();
+        assert_eq!(s.ollama_bind().as_deref(), Some("[::1]:11434"));
+        s.port = 11434;
+        assert_eq!(s.ollama_bind(), None, "same port: one listener");
+        let mut c = Config::default();
+        c.apply_env(&|k: &str| (k == "ALKAHEST_OLLAMA_COMPAT").then(|| "on".to_string()))
+            .unwrap();
+        assert!(c.server.ollama_compat);
+        assert!(
+            Config::default()
+                .apply_env(&|k: &str| (k == "ALKAHEST_OLLAMA_COMPAT").then(|| "x".to_string()))
+                .is_err()
+        );
     }
 
     #[test]

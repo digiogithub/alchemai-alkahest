@@ -289,7 +289,7 @@ async fn serve(
         .service(scheduler.clone())
         .service(catalog)
         .service(pulls)
-        .service(admin)
+        .service(admin.clone())
         .service(usage.clone())
         .service(UpstreamClient::new());
     if config.auth.audit_log {
@@ -330,6 +330,10 @@ async fn serve(
     let addr = listener
         .local_addr()
         .context("reading the listening address")?;
+    // Ollama's port too when asked for and free (ALK-SP-0005.R7); a taken port (Ollama
+    // itself, usually) is not an error: Alkahest stays on its own port.
+    let (ollama_listener, ollama_status) = alkahest_api::bind_ollama_port(&config.server).await;
+    admin.set_ollama_port(ollama_status.clone());
     // stderr, not just the log: a person who typed `alkahest serve` wants to see where it is.
     let note = match exposure {
         Exposure::LoopbackOnly => "loopback only",
@@ -345,9 +349,23 @@ async fn serve(
         );
         tracing::warn!("plain HTTP on a network address");
     }
+    match &ollama_status {
+        alkahest_api::OllamaPortStatus::Disabled => {}
+        alkahest_api::OllamaPortStatus::Listening { address } => {
+            eprintln!("alkahest serve: also listening on {scheme}://{address} (Ollama port)");
+        }
+        alkahest_api::OllamaPortStatus::Skipped { address, reason } => {
+            eprintln!("alkahest serve: Ollama port {address} is in use, not taken over ({reason})");
+            tracing::info!(%address, %reason, "Ollama port skipped");
+        }
+    }
     tracing::info!(%addr, ?exposure, tls = tls.is_some(), "server started");
     on_listening(&format!("{scheme}://{addr}"));
-    let report = Server::new(listener, app)
+    let mut server = Server::new(listener, app);
+    if let Some(l) = ollama_listener {
+        server = server.also_listen(l);
+    }
+    let report = server
         .tls(tls)
         .options(options)
         .hooks(hooks)

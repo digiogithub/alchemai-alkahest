@@ -14,6 +14,8 @@ Sections are TOML tables: `server.port` is `port` under `[server]`. A key shown 
 |---|---|---|---|
 | `server.host` | String | `127.0.0.1` | Host or IP to bind. Anything but loopback requires API keys (`ALK-SP-0006`). |
 | `server.port` | u16 | `11435` | TCP port. |
+| `server.ollama_compat` | bool | `false` | Also serve the API on `ollama_port` (same host, auth and TLS) so Ollama clients work unchanged (ALK-SP-0005.R7). A port another program holds is skipped, not an error. |
+| `server.ollama_port` | u16 | `11434` | The port served when `ollama_compat` is set; Ollama's own port by default. |
 | `server.max_body_bytes` | u64 | `67108864` | Largest accepted request body in bytes. Generous by default because Ollama and OpenAI requests may carry base64 images; it still stops a client from exhausting memory. |
 | `server.request_timeout_secs` | u64 | `0` | Whole-request timeout in seconds; `0` disables it. Off by default because a streamed generation legitimately runs for minutes. |
 | `server.shutdown_timeout_secs` | u64 | `30` | Seconds in-flight requests may keep running after a stop signal before the server stops waiting for them and tears engines down (ALK-SP-0009.R4). |
@@ -73,6 +75,7 @@ These win over every file.
 | `ALKAHEST_MODELS` | `store.models_dir` |
 | `ALKAHEST_OLLAMA_MODELS` | `store.ollama.path` |
 | `ALKAHEST_OLLAMA_ENABLED` | `store.ollama.enabled` |
+| `ALKAHEST_OLLAMA_COMPAT` | `server.ollama_compat` |
 | `ALKAHEST_KEEP_ALIVE` | `scheduler.keep_alive` |
 | `ALKAHEST_MAX_LOADED_MODELS` | `scheduler.max_loaded` |
 | `ALKAHEST_NUM_PARALLEL` | `scheduler.num_parallel` |

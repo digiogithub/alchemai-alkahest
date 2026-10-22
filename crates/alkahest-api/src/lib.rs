@@ -71,7 +71,10 @@ pub use auth::{AuthPolicy, Caller, Exposure, ExposureError, RequestContext, chec
 pub use dialect::{DefaultErrorRenderer, ErrorKind, ErrorRenderer, Family};
 pub use error::{ApiError, Result};
 pub use router::{ApiRouter, ApiSettings};
-pub use server::{ServeOptions, Server, ShutdownReport, bind, serve, serve_with};
+pub use server::{
+    OllamaPortStatus, ServeOptions, Server, ShutdownReport, bind, bind_ollama_port, serve,
+    serve_with,
+};
 pub use shutdown::{HookOutcome, ShutdownHooks, StopSignals, stop_signal};
 pub use state::{AppState, AppStateBuilder, ServerInfo};
 pub use tls::{TlsAcceptor, TlsError};

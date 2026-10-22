@@ -29,6 +29,11 @@ pub struct GlobalArgs {
     /// `:port` or a URL. Overrides `ALKAHEST_HOST` and the configuration file.
     #[arg(long, global = true, value_name = "HOST[:PORT]")]
     pub host: Option<String>,
+    /// Server port: binds `serve`, targets client commands. Beats the port of `--host`,
+    /// `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves
+    /// a new default).
+    #[arg(long, global = true, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
+    pub port: Option<u16>,
     /// Configuration file to use on top of the system and user files.
     #[arg(long, global = true, value_name = "FILE")]
     pub config: Option<PathBuf>,
@@ -297,6 +302,17 @@ pub enum Command {
         /// (`auth.require_key_for_remote = false`) or no API key exists yet.
         #[arg(long)]
         allow_unauthenticated: bool,
+        /// Also answer on Ollama's port (`server.ollama_port`, 11434) when it is free, so
+        /// Ollama clients work unchanged; a port Ollama already holds is skipped silently.
+        /// Overrides `server.ollama_compat` for this run.
+        #[arg(long, overrides_with = "no_ollama_compat")]
+        ollama_compat: bool,
+        /// Do not take over the Ollama port this run, whatever the configuration says.
+        #[arg(long)]
+        no_ollama_compat: bool,
+        /// The Ollama-compatible port to try instead of `server.ollama_port`.
+        #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
+        ollama_port: Option<u16>,
         /// Run under the Windows service control manager (what `alkahest service install`
         /// registers); not for interactive use.
         #[arg(long, hide = true)]
@@ -668,6 +684,20 @@ pub enum ConfigAction {
     Show,
     /// Print the configuration file locations and whether they exist.
     Path,
+    /// Save settings to the configuration file (`--config`, else the user file), dotted
+    /// `KEY=VALUE`: `server.port=11500`, `server.ollama_compat=true`,
+    /// `server.host=0.0.0.0`. Applies on the next server start.
+    Set {
+        /// Assignments.
+        #[arg(required = true, value_name = "KEY=VALUE")]
+        assignments: Vec<String>,
+    },
+    /// Remove settings from the configuration file so their defaults apply again.
+    Unset {
+        /// Dotted keys (`server.port`).
+        #[arg(required = true, value_name = "KEY")]
+        keys: Vec<String>,
+    },
     /// Show or edit the configuration overlay of one model.
     Model {
         /// Model reference (an installed model, or a name to configure ahead of its pull).

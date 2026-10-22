@@ -243,3 +243,89 @@ fn startup_refusal_when_remote_keys_are_disabled() {
     ));
     assert!(stderr.contains("--allow-unauthenticated"), "{stderr}");
 }
+
+#[tokio::test]
+async fn free_ollama_port_is_served_too() {
+    // Scenario ALK-SP-0005.R7 "free Ollama port is served too".
+    let home = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let ollama = free_port();
+    let mut child = spawn_serve(
+        home.path(),
+        &[
+            "--port",
+            &port.to_string(),
+            "--ollama-compat",
+            "--ollama-port",
+            &ollama.to_string(),
+        ],
+    );
+    for p in [port, ollama] {
+        let resp = wait_ready(&format!("http://127.0.0.1:{p}/api/version")).await;
+        assert_eq!(resp.status(), 200, "port {p}");
+    }
+    let doc: serde_json::Value = reqwest::get(format!(
+        "http://127.0.0.1:{port}/alkahest/v1/settings/network"
+    ))
+    .await
+    .unwrap()
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(doc["ollama_port_status"]["state"], "listening", "{doc}");
+    assert_eq!(doc["running"]["ollama_compat"], true);
+    stop_server(&mut child);
+}
+
+#[tokio::test]
+async fn busy_ollama_port_is_skipped_without_error() {
+    // Scenario ALK-SP-0005.R7 "busy Ollama port is skipped without error".
+    let home = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let ollama = held.local_addr().unwrap().port();
+    let mut child = spawn_serve(
+        home.path(),
+        &[
+            "--port",
+            &port.to_string(),
+            "--ollama-compat",
+            "--ollama-port",
+            &ollama.to_string(),
+        ],
+    );
+    let resp = wait_ready(&format!("http://127.0.0.1:{port}/api/version")).await;
+    assert_eq!(resp.status(), 200);
+    let doc: serde_json::Value = reqwest::get(format!(
+        "http://127.0.0.1:{port}/alkahest/v1/settings/network"
+    ))
+    .await
+    .unwrap()
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(doc["ollama_port_status"]["state"], "skipped", "{doc}");
+    stop_server(&mut child);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "{status:?}");
+    let mut err = String::new();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut err).unwrap();
+    assert!(err.contains("is in use, not taken over"), "{err}");
+    drop(held);
+}
+
+#[tokio::test]
+async fn port_saved_with_config_set_is_bound_next_start() {
+    // Scenario ALK-SP-0005.R7 "port changed from the CLI".
+    let home = tempfile::tempdir().unwrap();
+    let port = free_port();
+    let out = alkahest_out(
+        home.path(),
+        &["config", "set", &format!("server.port={port}")],
+    );
+    assert!(out.contains("saved to"), "{out}");
+    let mut child = spawn_serve(home.path(), &[]);
+    let resp = wait_ready(&format!("http://127.0.0.1:{port}/api/version")).await;
+    assert_eq!(resp.status(), 200);
+    stop_server(&mut child);
+}

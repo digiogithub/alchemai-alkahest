@@ -25,6 +25,7 @@ use super::pulls::PullRunner;
 use super::server_settings::ServerSettings;
 use super::settings::NetworkSettings;
 use crate::dialect::ErrorKind;
+use crate::server::OllamaPortStatus;
 use crate::service::{HttpError, now_rfc3339};
 use crate::state::AppState;
 
@@ -56,6 +57,8 @@ pub struct AdminContext {
     pub(crate) system: RwLock<Option<SystemInfo>>,
     pub(crate) saved_network: Mutex<NetworkSettings>,
     pub(crate) saved_server: Mutex<ServerSettings>,
+    /// Whether the Ollama-compatible port was acquired (set once the listeners are bound).
+    pub(crate) ollama_port: Mutex<OllamaPortStatus>,
     /// Engine overrides as saved in the configuration file (applied on restart).
     pub(crate) saved_overrides:
         Mutex<std::collections::BTreeMap<String, alkahest_core::config::EngineOverride>>,
@@ -83,6 +86,11 @@ impl std::fmt::Debug for AdminContext {
 }
 
 impl AdminContext {
+    /// Records what became of the Ollama-compatible port; the network settings report it.
+    pub fn set_ollama_port(&self, status: OllamaPortStatus) {
+        *self.ollama_port.lock() = status;
+    }
+
     /// Starts a context for the running `config`, its resolved `paths` and the configuration
     /// file network settings are saved to (the `--config` file when the server was started
     /// with one, else the user configuration file).
@@ -264,6 +272,7 @@ impl AdminContextBuilder {
             system: RwLock::new(self.system),
             saved_network: Mutex::new(saved),
             saved_server: Mutex::new(saved_server),
+            ollama_port: Mutex::new(OllamaPortStatus::Disabled),
             saved_overrides: Mutex::new(saved_overrides),
             sources: self.sources,
             catalogs,

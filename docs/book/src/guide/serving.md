@@ -13,6 +13,34 @@ ALKAHEST_HOST=10.0.0.5:11435 alkahest serve
 `--host` accepts `host`, `host:port`, `:port` or a URL. The same flag on the other commands says
 which server they talk to, so `alkahest --host 10.0.0.5:11435 ps` inspects a remote server.
 
+### Changing the port
+
+`--port` (or `--host :PORT`) changes the port for one run. To change the default, save it to
+the configuration file; the next start uses it, and client commands follow:
+
+```sh
+alkahest config set server.port=11500   # writes ~/.config/alkahest/config.toml (or --config)
+alkahest config unset server.port       # back to 11435
+```
+
+The desktop app edits the same setting under **API keys & network → Port**.
+
+### Answering on Ollama's port
+
+With `server.ollama_compat = true` Alkahest also listens on Ollama's port (`server.ollama_port`,
+11434) when it is free, with the same API, keys and TLS, so Ollama clients and tools that
+hard-code `localhost:11434` work without changes. If Ollama (or anything else) already holds the
+port, Alkahest starts normally on its own port only and says so in the log; it is not an error.
+
+```sh
+alkahest config set server.ollama_compat=true   # every start
+alkahest serve --ollama-compat                  # this run only (--no-ollama-compat to skip)
+ALKAHEST_OLLAMA_COMPAT=1 alkahest serve
+```
+
+In the desktop app: **API keys & network → Also answer on Ollama's port**, which also shows
+whether the running server got the port.
+
 Stop the server with Ctrl+C or SIGTERM. It stops accepting requests, lets running requests
 finish for up to `server.shutdown_timeout_secs` (30 s), then stops every engine process. No
 engine outlives the server.

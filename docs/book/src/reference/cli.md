@@ -14,6 +14,7 @@ Every command accepts these (`serve` binds `--host`, the client commands target 
 
 ```text
       --host <HOST[:PORT]>  Server address: binds `serve`, targets client commands. Accepts `host`, `host:port`, `:port` or a URL. Overrides `ALKAHEST_HOST` and the configuration file
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --config <FILE>       Configuration file to use on top of the system and user files
   -v, --verbose...          More log output: `-v` debug, `-vv` trace
       --log-level <LEVEL>   Log level or filter directive; beats `-v` and the configuration file
@@ -65,6 +66,12 @@ Arguments:
   <SHELL>  Target shell [possible values: bash, elvish, fish, powershell, zsh]
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ## alkahest pull
 
 Download a model from the Ollama registry, Hugging Face or a git catalog
@@ -84,6 +91,7 @@ Options (besides the global ones):
 ```text
       --insecure            Talk to the registry over plain HTTP (private registries without TLS)
       --force               Download into the Alkahest store even when the Ollama store already has the model [alias: --copy]
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --safetensors         Download the safetensors snapshot of a Hugging Face repository for vLLM instead of GGUF (chosen automatically when the repository has no GGUF files)
       --catalog <NAME>      Catalog models: take the entry from this configured catalog instead of the highest layer that has it
 ```
@@ -118,6 +126,8 @@ Options (besides the global ones):
           [default: all]
       --gguf
           Hugging Face: only GGUF repositories (the default)
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --safetensors
           Hugging Face: only safetensors repositories
       --all
@@ -151,12 +161,24 @@ List local models
 alkahest ls [OPTIONS]
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ## alkahest ps
 
 Show the models currently loaded by the server
 
 ```text
 alkahest ps [OPTIONS]
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ## alkahest rm
@@ -173,6 +195,12 @@ Arguments:
   <MODELS>...  Models to delete
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ## alkahest gc
 
 Delete blobs no model references and abandoned temporary files
@@ -185,6 +213,7 @@ Options (besides the global ones):
 
 ```text
       --dry-run             Report what would be deleted without deleting it
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ## alkahest show
@@ -205,6 +234,7 @@ Options (besides the global ones):
 
 ```text
       --modelfile           Print a Modelfile that recreates the model
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --template            Print only the prompt template
       --parameters          Print only the default parameters
       --license             Print only the licence
@@ -235,6 +265,8 @@ Options (besides the global ones):
           A `.gguf` file or a model folder to import (split shards, `mmproj` projector, `Modelfile`, or a Hugging Face safetensors folder)
   -f, --file <MODELFILE>
           Modelfile to build from, as `ollama create -f`: `FROM ./file.gguf`, `FROM ./folder` (relative to the Modelfile) or `FROM <model>`, plus `TEMPLATE`, `PARAMETER`, `SYSTEM`, `LICENSE`. `--from` replaces its `FROM`
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --link
           Register the files where they are instead of copying them: a hard link on the same filesystem, otherwise a symbolic link checked before every load. The files must stay unchanged
   -h, --help
@@ -260,6 +292,7 @@ Options (besides the global ones):
 ```text
       --name <NAME>         Model name; defaults to the file stem or folder name
       --link                Register the files where they are instead of copying them (see `create --link`)
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ## alkahest cp
@@ -275,6 +308,12 @@ Arguments:
 ```text
   <SOURCE>       Existing model
   <DESTINATION>  New name
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ## alkahest run
@@ -301,6 +340,8 @@ Options (besides the global ones):
 ```text
       --format <FORMAT>
           Response format: `json`, or a JSON schema
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --think [<WHEN>]
           Thinking for models that support it: `true`/`false`, or `high`/`medium`/`low`. `--think` alone means `true`
       --hidethinking
@@ -327,6 +368,12 @@ Arguments:
   <MODEL>  Model reference
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ## alkahest serve
 
 Start the API server
@@ -339,6 +386,10 @@ Options (besides the global ones):
 
 ```text
       --allow-unauthenticated  Start on a non-loopback address even though remote clients would not need a key (`auth.require_key_for_remote = false`) or no API key exists yet
+      --ollama-compat          Also answer on Ollama's port (`server.ollama_port`, 11434) when it is free, so Ollama clients work unchanged; a port Ollama already holds is skipped silently. Overrides `server.ollama_compat` for this run
+      --port <PORT>            Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+      --no-ollama-compat       Do not take over the Ollama port this run, whatever the configuration says
+      --ollama-port <PORT>     The Ollama-compatible port to try instead of `server.ollama_port`
 ```
 
 ## alkahest desktop
@@ -353,6 +404,7 @@ Options (besides the global ones):
 
 ```text
       --smoke-test          Open the window, wait for the first frame to be rendered, then exit with status 0 (used by CI; fails with status 3 when no frame arrives within 30 s)
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ## alkahest hf
@@ -369,6 +421,12 @@ alkahest hf [OPTIONS] <COMMAND>
 | `logout` | Remove the stored token from the OS keyring |
 | `whoami` | Show the account the current token belongs to |
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ### alkahest hf login
 
 Store a Hugging Face token in the OS keyring. The token is read from stdin (a prompt without echo on a terminal, one line when piped) and never printed
@@ -381,6 +439,7 @@ Options (besides the global ones):
 
 ```text
       --no-verify           Store the token without checking it against the Hub first
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ### alkahest hf logout
@@ -391,12 +450,24 @@ Remove the stored token from the OS keyring
 alkahest hf logout [OPTIONS]
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ### alkahest hf whoami
 
 Show the account the current token belongs to
 
 ```text
 alkahest hf whoami [OPTIONS]
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ## alkahest keys
@@ -413,12 +484,24 @@ alkahest keys [OPTIONS] <COMMAND>
 | `create` | Create a key and print it once; only a salted hash is stored |
 | `revoke` | Revoke a key; the next request with it is refused |
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ### alkahest keys ls
 
 List keys
 
 ```text
 alkahest keys ls [OPTIONS]
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ### alkahest keys create
@@ -440,6 +523,7 @@ Options (besides the global ones):
 ```text
       --scope <SCOPE>       Scope to grant: `inference` (default) or `admin` (includes inference). Repeatable
       --model <MODEL>       Restrict the key to this model. Repeatable; default: every model
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --expires <WHEN>      Expiry: a duration such as `12h`, `30d`, `8w`, or an RFC 3339 time
 ```
 
@@ -457,6 +541,12 @@ Arguments:
   <ID>  Key id (`abcd1234` or `alk_abcd1234`) or active key name
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ## alkahest engines
 
 Manage inference engines
@@ -472,12 +562,24 @@ alkahest engines [OPTIONS] <COMMAND>
 | `rm` | Remove an installed engine version [alias: remove] |
 | `info` | Show an engine's versions, variants, requirements and what is installed |
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ### alkahest engines ls
 
 List installed and available engines
 
 ```text
 alkahest engines ls [OPTIONS]
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ### alkahest engines install
@@ -498,6 +600,7 @@ Options (besides the global ones):
 
 ```text
       --variant <VARIANT>         Accelerator build (`cpu`, `cuda12.8`, `cuda12`, `vulkan`, ...); the best one for this machine when omitted
+      --port <PORT>               Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --version <ENGINE_VERSION>  Engine version to install; the newest one when omitted. Several versions can be installed side by side
       --from-source               Build from the recipe's source steps (needs git, cmake and ninja) instead of downloading the prebuilt archive
       --force                     Reinstall even when the engine is already installed
@@ -526,6 +629,7 @@ Options (besides the global ones):
 
 ```text
       --version <ENGINE_VERSION>  Version to remove; every installed version when omitted
+      --port <PORT>               Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --variant <VARIANT>         Variant to remove; every installed variant when omitted
 ```
 
@@ -541,6 +645,12 @@ Arguments:
 
 ```text
   <ENGINE>  Engine id
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ## alkahest catalog
@@ -568,6 +678,8 @@ alkahest catalog [OPTIONS] <COMMAND>
 Options (besides the global ones):
 
 ```text
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
   -h, --help
           Print help (see a summary with '-h')
 ```
@@ -578,6 +690,12 @@ List the configured catalogs: ref, commit, last sync, entry counts and issues
 
 ```text
 alkahest catalog ls [OPTIONS]
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ### alkahest catalog sync
@@ -592,6 +710,12 @@ Arguments:
 
 ```text
   [NAME]  Catalog name
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ### alkahest catalog add
@@ -613,6 +737,7 @@ Options (besides the global ones):
 
 ```text
       --ref <GIT_REF>       Branch or tag to follow [default: main]
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --subdir <SUBDIR>     Folder of the catalog inside the repository [default: .]
       --pin <PIN>           Freeze the catalog at this commit id (never refreshed)
 ```
@@ -635,6 +760,7 @@ Options (besides the global ones):
 
 ```text
       --delete-token        Also delete the catalog's token from the OS keyring
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ### alkahest catalog enable
@@ -651,6 +777,12 @@ Arguments:
   <NAME>  Catalog name
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ### alkahest catalog disable
 
 Turn a catalog off without removing it (its snapshot is kept)
@@ -663,6 +795,12 @@ Arguments:
 
 ```text
   <NAME>  Catalog name
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ### alkahest catalog edit
@@ -684,6 +822,8 @@ Options (besides the global ones):
 ```text
       --ref <GIT_REF>
           Branch or tag to follow
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --subdir <SUBDIR>
           Folder of the catalog inside the repository
       --pin <PIN>
@@ -707,6 +847,12 @@ alkahest catalog token [OPTIONS] <COMMAND>
 | `set` | Store the token of a private catalog in the OS keyring. The token is read from stdin (a prompt without echo on a terminal, one line when piped), never from the command line, and never printed |
 | `clear` | Remove the token of a catalog from the OS keyring [alias: rm] |
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 #### alkahest catalog token set
 
 Store the token of a private catalog in the OS keyring. The token is read from stdin (a prompt without echo on a terminal, one line when piped), never from the command line, and never printed
@@ -719,6 +865,12 @@ Arguments:
 
 ```text
   <NAME>  Catalog name
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 #### alkahest catalog token clear
@@ -735,6 +887,12 @@ Arguments:
   <NAME>  Catalog name
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ### alkahest catalog index
 
 Write `index.toml` for a catalog directory (catalog authors)
@@ -749,6 +907,12 @@ Arguments:
   <DIR>  Catalog directory (holding `catalog.toml`)
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ## alkahest certs
 
 Manage TLS certificates for HTTPS (`[server.tls]`)
@@ -760,6 +924,12 @@ alkahest certs [OPTIONS] <COMMAND>
 | Subcommand | Purpose |
 |---|---|
 | `generate` | Write a self-signed server certificate, its key (owner only) and the CA clients trust to the `[server.tls]` paths (default `<data_dir>/tls/`) |
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
 
 ### alkahest certs generate
 
@@ -774,6 +944,7 @@ Options (besides the global ones):
 ```text
       --name <NAME>         Extra DNS name or IP address the certificate must cover (localhost, the loopback addresses and this host's name are always included). Repeatable
       --days <DAYS>         Validity in days (at most 825, the limit Apple platforms accept) [default: 397]
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --force               Replace existing files
 ```
 
@@ -793,6 +964,12 @@ alkahest service [OPTIONS] <COMMAND>
 | `stop` | Stop the installed service |
 | `status` | Show whether the service is running and where it listens |
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ### alkahest service install
 
 Install the service unit and start it
@@ -808,6 +985,8 @@ Options (besides the global ones):
           Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the system service
       --dry-run
           Print the unit and the commands without writing or running anything
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --root <DIR>
           Write below this directory and run no command (packaging, tests)
       --bin <PATH>
@@ -838,6 +1017,8 @@ Options (besides the global ones):
           Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the system service
       --dry-run
           Print the unit and the commands without writing or running anything
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --root <DIR>
           Write below this directory and run no command (packaging, tests)
       --bin <PATH>
@@ -868,6 +1049,8 @@ Options (besides the global ones):
           Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the system service
       --dry-run
           Print the unit and the commands without writing or running anything
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --root <DIR>
           Write below this directory and run no command (packaging, tests)
       --bin <PATH>
@@ -898,6 +1081,8 @@ Options (besides the global ones):
           Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the system service
       --dry-run
           Print the unit and the commands without writing or running anything
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --root <DIR>
           Write below this directory and run no command (packaging, tests)
       --bin <PATH>
@@ -928,6 +1113,8 @@ Options (besides the global ones):
           Manage a per-user service (systemd `--user` unit, launchd LaunchAgent) instead of the system service
       --dry-run
           Print the unit and the commands without writing or running anything
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --root <DIR>
           Write below this directory and run no command (packaging, tests)
       --bin <PATH>
@@ -949,6 +1136,12 @@ Report CPU, memory and accelerators
 
 ```text
 alkahest sysinfo [OPTIONS]
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ## alkahest update
@@ -973,6 +1166,8 @@ Options (besides the global ones):
 ```text
       --check
           Only report what would change; exit 10 when another release would be installed
+      --port <PORT>
+          Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --prerelease
           Consider pre-releases (GitHub pre-release flag or a `-rc.N` style tag) when looking for the newest release
       --force
@@ -995,7 +1190,15 @@ alkahest config [OPTIONS] <COMMAND>
 |---|---|
 | `show` | Print the effective configuration and where each layer came from |
 | `path` | Print the configuration file locations and whether they exist |
+| `set` | Save settings to the configuration file (`--config`, else the user file), dotted `KEY=VALUE`: `server.port=11500`, `server.ollama_compat=true`, `server.host=0.0.0.0`. Applies on the next server start |
+| `unset` | Remove settings from the configuration file so their defaults apply again |
 | `model` | Show or edit the configuration overlay of one model |
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
 
 ### alkahest config show
 
@@ -1005,12 +1208,64 @@ Print the effective configuration and where each layer came from
 alkahest config show [OPTIONS]
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 ### alkahest config path
 
 Print the configuration file locations and whether they exist
 
 ```text
 alkahest config path [OPTIONS]
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
+### alkahest config set
+
+Save settings to the configuration file (`--config`, else the user file), dotted `KEY=VALUE`: `server.port=11500`, `server.ollama_compat=true`, `server.host=0.0.0.0`. Applies on the next server start
+
+```text
+alkahest config set [OPTIONS] <KEY=VALUE>...
+```
+
+Arguments:
+
+```text
+  <KEY=VALUE>...  Assignments
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
+### alkahest config unset
+
+Remove settings from the configuration file so their defaults apply again
+
+```text
+alkahest config unset [OPTIONS] <KEY>...
+```
+
+Arguments:
+
+```text
+  <KEY>...  Dotted keys (`server.port`)
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 ### alkahest config model
@@ -1034,12 +1289,24 @@ Arguments:
   <MODEL>  Model reference (an installed model, or a name to configure ahead of its pull)
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 #### alkahest config model show
 
 Print the overlay, the recommended defaults and the effective settings
 
 ```text
 alkahest config model <MODEL> show [OPTIONS]
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 
 #### alkahest config model set
@@ -1056,6 +1323,12 @@ Arguments:
   <KEY=VALUE>...  Assignments
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 #### alkahest config model unset
 
 Remove settings from the overlay
@@ -1070,11 +1343,23 @@ Arguments:
   <KEYS>...  Setting names
 ```
 
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+```
+
 #### alkahest config model path
 
 Print the path of the overlay file (edit it by hand if you prefer)
 
 ```text
 alkahest config model <MODEL> path [OPTIONS]
+```
+
+Options (besides the global ones):
+
+```text
+      --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
 ```
 

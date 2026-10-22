@@ -15,7 +15,9 @@
 //!   refuses to start that way (ALK-SP-0006), so saving it would only break the next restart.
 //!   The screen explains why and offers to create a key first.
 
-use alkahest_client::admin::{ApiKey, NetworkPatch, NetworkSettings, NetworkSettingsDoc};
+use alkahest_client::admin::{
+    ApiKey, NetworkPatch, NetworkSettings, NetworkSettingsDoc, OllamaPortStatus,
+};
 use serde_json::{Map, Value};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -195,6 +197,8 @@ pub struct NetworkDraft {
     pub anthropic: bool,
     /// Decisions.
     pub decisions: bool,
+    /// "Also answer on Ollama's port" (`server.ollama_compat`, ALK-SP-0005.R7).
+    pub ollama_compat: bool,
 }
 
 impl NetworkDraft {
@@ -208,6 +212,7 @@ impl NetworkDraft {
             openai: s.endpoints.openai,
             anthropic: s.endpoints.anthropic,
             decisions: s.endpoints.decisions,
+            ollama_compat: s.ollama_compat,
         }
     }
 
@@ -251,6 +256,9 @@ impl NetworkDraft {
         }
         if cors != saved.cors_origins {
             p.cors_origins = Some(cors);
+        }
+        if self.ollama_compat != saved.ollama_compat {
+            p.ollama_compat = Some(self.ollama_compat);
         }
         let mut ep = Map::new();
         for (key, now, was) in [
@@ -305,6 +313,31 @@ pub fn network_warnings(doc: &NetworkSettingsDoc) -> Vec<String> {
             .cloned(),
     );
     out
+}
+
+/// The line under the Ollama-port switch: what the running server did with the port, or
+/// what happens on the next start when the switch was just changed.
+pub fn ollama_port_line(doc: &NetworkSettingsDoc) -> String {
+    let port = doc.saved.ollama_port;
+    if doc.saved.ollama_compat != doc.running.ollama_compat {
+        return if doc.saved.ollama_compat {
+            format!("Takes port {port} on the next start, if Ollama is not using it.")
+        } else {
+            format!("Releases port {port} on the next start.")
+        };
+    }
+    match &doc.ollama_port_status {
+        OllamaPortStatus::Listening { address } => {
+            format!("Ollama clients reach Alkahest at {address}.")
+        }
+        OllamaPortStatus::Skipped { address, .. } => {
+            format!("{address} is in use (Ollama is running?), so Alkahest stays on its own port.")
+        }
+        OllamaPortStatus::Disabled => format!(
+            "Off. Ollama clients need the Alkahest port, or turn this on to also serve {port} \
+             when it is free."
+        ),
+    }
 }
 
 /// A curl line for the endpoints card (`curl http://host:port/v1/models -H "Authorization: …"`).
@@ -375,6 +408,16 @@ impl KeysState {
         }
         draft.allow_remote = turning_on;
         self.bind_refused = false;
+        true
+    }
+
+    /// "Also answer on Ollama's port" was clicked: flips the draft and returns `true` (the
+    /// caller saves); `false` before the settings are loaded.
+    pub fn toggle_ollama_compat(&mut self) -> bool {
+        let Some(draft) = &mut self.draft else {
+            return false;
+        };
+        draft.ollama_compat = !draft.ollama_compat;
         true
     }
 
@@ -587,6 +630,33 @@ mod tests {
             saved: s,
             ..NetworkSettingsDoc::default()
         }
+    }
+
+    #[test]
+    fn ollama_compat_toggle_saves_and_explains_the_port() {
+        let mut d = doc("127.0.0.1");
+        d.saved.ollama_port = 11434;
+        d.running.ollama_port = 11434;
+        let mut s = KeysState::default();
+        s.set_network(d.clone());
+        assert!(s.toggle_ollama_compat());
+        let draft = s.draft.clone().unwrap();
+        let p = draft.patch(&d.saved, 0).unwrap().unwrap();
+        assert_eq!(p.ollama_compat, Some(true));
+        assert_eq!(p.host, None, "the bind host is untouched");
+        assert!(ollama_port_line(&d).starts_with("Off."));
+        d.saved.ollama_compat = true;
+        assert!(ollama_port_line(&d).contains("next start"));
+        d.running.ollama_compat = true;
+        d.ollama_port_status = OllamaPortStatus::Skipped {
+            address: "127.0.0.1:11434".into(),
+            reason: "in use".into(),
+        };
+        assert!(ollama_port_line(&d).contains("is in use"));
+        d.ollama_port_status = OllamaPortStatus::Listening {
+            address: "127.0.0.1:11434".into(),
+        };
+        assert!(ollama_port_line(&d).contains("reach Alkahest at 127.0.0.1:11434"));
     }
 
     #[test]

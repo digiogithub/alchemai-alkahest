@@ -16,7 +16,9 @@ use alkahest_client::{Client, ClientError};
 use time::OffsetDateTime;
 
 use crate::connection::{ConnectionState, Snapshot};
-use crate::keys::{BIND_NEEDS_KEY, KeyRow, KeysState, curl_example, key_rows, network_warnings};
+use crate::keys::{
+    BIND_NEEDS_KEY, KeyRow, KeysState, curl_example, key_rows, network_warnings, ollama_port_line,
+};
 use crate::theme::tokens::{Palette, radius, size, space, text};
 use crate::tokio_bridge;
 use crate::ui::input::{Input, InputEvent, InputState};
@@ -461,6 +463,22 @@ impl KeysView {
                     cx.notify();
                 }
             }));
+        let ollama_toggle = h_flex()
+            .id("keys-ollama-compat")
+            .gap(px(space::S2))
+            .items_center()
+            .cursor_pointer()
+            .child(checkbox("keys-ollama-compat-box", draft.ollama_compat, p))
+            .child(div().type_style(text::SMALL).child(if draft.ollama_compat {
+                "On"
+            } else {
+                "Off"
+            }))
+            .on_click(cx.listener(|this, _, window, cx| {
+                if this.state.toggle_ollama_compat() {
+                    this.save_network(window, cx);
+                }
+            }));
         let field = |label: &str, child: AnyElement| {
             v_flex()
                 .flex_1()
@@ -533,6 +551,27 @@ impl KeysView {
                             )
                             .into_any_element(),
                     )),
+            )
+            .child(
+                h_flex()
+                    .items_start()
+                    .gap(px(space::S3))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .gap(px(space::S1))
+                            .child(div().type_style(text::TITLE).child(format!(
+                                "Also answer on Ollama\u{2019}s port ({})",
+                                doc.saved.ollama_port
+                            )))
+                            .child(
+                                div()
+                                    .type_style(text::SMALL)
+                                    .text_color(c(p.text_muted))
+                                    .child(ollama_port_line(&doc)),
+                            ),
+                    )
+                    .child(ollama_toggle),
             );
         let dirty = draft
             .patch(&doc.saved, self.state.active_keys())

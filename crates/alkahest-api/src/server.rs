@@ -16,6 +16,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use alkahest_core::Config;
+use alkahest_core::config::ServerConfig;
 use axum::Router;
 use axum::extract::ConnectInfo;
 use axum::http::Request;
@@ -39,6 +40,47 @@ pub async fn bind(addr: &str) -> Result<TcpListener> {
             addr: addr.to_string(),
             source,
         })
+}
+
+/// What became of the Ollama-compatible port at start-up (ALK-SP-0005.R7).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum OllamaPortStatus {
+    /// `server.ollama_compat` is off, or the Ollama port is the Alkahest port itself.
+    #[default]
+    Disabled,
+    /// The server answers on this address too.
+    Listening {
+        /// `host:port` bound.
+        address: String,
+    },
+    /// The port could not be bound (Ollama or another program holds it); the server runs on
+    /// its own port only.
+    Skipped {
+        /// `host:port` that was tried.
+        address: String,
+        /// Why binding failed.
+        reason: String,
+    },
+}
+
+/// Binds the Ollama-compatible port of `server` when it is enabled. A failure is not an
+/// error: the port is most likely Ollama's own, and Alkahest then simply stays on its port
+/// (ALK-SP-0005.R7).
+pub async fn bind_ollama_port(server: &ServerConfig) -> (Option<TcpListener>, OllamaPortStatus) {
+    let Some(address) = server.ollama_bind() else {
+        return (None, OllamaPortStatus::Disabled);
+    };
+    match TcpListener::bind(&address).await {
+        Ok(l) => (Some(l), OllamaPortStatus::Listening { address }),
+        Err(e) => (
+            None,
+            OllamaPortStatus::Skipped {
+                address,
+                reason: e.to_string(),
+            },
+        ),
+    }
 }
 
 /// Shutdown timing.
@@ -140,6 +182,8 @@ pub const FORCED_HOOK_TIMEOUT: Duration = Duration::from_secs(3);
 /// tracking for graceful drain and abort, and shutdown hooks.
 pub struct Server {
     listener: TcpListener,
+    /// More listeners serving the same app (the Ollama port, ALK-SP-0005.R7).
+    extra: Vec<TcpListener>,
     app: Router,
     tls: Option<TlsAcceptor>,
     options: ServeOptions,
@@ -151,6 +195,14 @@ impl fmt::Debug for Server {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Server")
             .field("listener", &self.listener.local_addr().ok())
+            .field(
+                "extra",
+                &self
+                    .extra
+                    .iter()
+                    .map(|l| l.local_addr().ok())
+                    .collect::<Vec<_>>(),
+            )
             .field("tls", &self.tls)
             .field("options", &self.options)
             .field("hooks", &self.hooks)
@@ -163,6 +215,7 @@ impl Server {
     pub fn new(listener: TcpListener, app: Router) -> Self {
         Self {
             listener,
+            extra: Vec::new(),
             app,
             tls: None,
             options: ServeOptions::default(),
@@ -176,6 +229,14 @@ impl Server {
     #[must_use]
     pub fn tls(mut self, acceptor: Option<TlsAcceptor>) -> Self {
         self.tls = acceptor;
+        self
+    }
+
+    /// Also accepts connections on `listener`, served exactly like the main one (same app,
+    /// TLS, drain and abort). Used for the Ollama-compatible port (ALK-SP-0005.R7).
+    #[must_use]
+    pub fn also_listen(mut self, listener: TcpListener) -> Self {
+        self.extra.push(listener);
         self
     }
 
@@ -223,14 +284,18 @@ impl Server {
     {
         let Self {
             listener,
+            extra,
             app,
             tls,
             options,
             hooks,
             force,
         } = self;
-        if let Ok(addr) = listener.local_addr() {
-            tracing::info!(%addr, tls = tls.is_some(), "listening");
+        let listeners: Vec<TcpListener> = std::iter::once(listener).chain(extra).collect();
+        for l in &listeners {
+            if let Ok(addr) = l.local_addr() {
+                tracing::info!(%addr, tls = tls.is_some(), "listening");
+            }
         }
         let mut force = force.unwrap_or_else(|| Box::pin(std::future::pending()));
         let reloader = match &tls {
@@ -246,7 +311,7 @@ impl Server {
                 biased;
                 () = &mut shutdown => break,
                 Some(_) = conns.join_next(), if !conns.is_empty() => {}
-                accepted = listener.accept() => {
+                accepted = accept_any(&listeners) => {
                     let (stream, peer) = match accepted {
                         Ok(pair) => pair,
                         Err(e) => {
@@ -267,7 +332,7 @@ impl Server {
                 }
             }
         }
-        drop(listener);
+        drop(listeners);
         tracing::info!("stop requested; draining in-flight requests");
         let (drained, mut forced) = tokio::select! {
             () = graceful.shutdown() => (true, false),
@@ -314,6 +379,13 @@ impl Server {
             hooks,
         })
     }
+}
+
+/// The next connection accepted by any of `listeners` (never empty). `accept` is cancel safe,
+/// so dropping the losers of the race loses no connection.
+async fn accept_any(listeners: &[TcpListener]) -> io::Result<(tokio::net::TcpStream, SocketAddr)> {
+    let accepts = listeners.iter().map(|l| Box::pin(l.accept()));
+    futures::future::select_all(accepts).await.0
 }
 
 /// One accepted connection: optional TLS handshake (bounded), then HTTP.

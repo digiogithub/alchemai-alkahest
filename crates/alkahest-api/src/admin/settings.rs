@@ -47,6 +47,17 @@ pub struct NetworkSettings {
     /// HTTPS (`server.tls.enabled`, ALK-SP-0006.R6).
     #[serde(default)]
     pub tls: bool,
+    /// Also answer on the Ollama port when it is free (`server.ollama_compat`,
+    /// ALK-SP-0005.R7).
+    #[serde(default)]
+    pub ollama_compat: bool,
+    /// `server.ollama_port`.
+    #[serde(default = "default_ollama_port")]
+    pub ollama_port: u16,
+}
+
+fn default_ollama_port() -> u16 {
+    alkahest_core::config::DEFAULT_OLLAMA_PORT
 }
 
 impl NetworkSettings {
@@ -60,6 +71,8 @@ impl NetworkSettings {
             cors_origins: config.server.cors_origins.clone(),
             endpoints: config.server.endpoints,
             tls: config.server.tls.enabled,
+            ollama_compat: config.server.ollama_compat,
+            ollama_port: config.server.ollama_port,
         }
     }
 
@@ -96,6 +109,8 @@ struct NetworkPatch {
     endpoints: Option<EndpointsPatch>,
     /// Serve HTTPS with the configured (or generated) certificate.
     tls: Option<bool>,
+    ollama_compat: Option<bool>,
+    ollama_port: Option<u16>,
     /// Required to save a network bind without key checks.
     #[serde(default)]
     confirm_unauthenticated: bool,
@@ -162,6 +177,17 @@ fn apply(base: &NetworkSettings, patch: &NetworkPatch) -> Result<NetworkSettings
     if let Some(v) = patch.tls {
         s.tls = v;
     }
+    if let Some(v) = patch.ollama_compat {
+        s.ollama_compat = v;
+    }
+    if let Some(p) = patch.ollama_port {
+        if p == 0 {
+            return Err(HttpError::bad_request(
+                "ollama_port must be between 1 and 65535",
+            ));
+        }
+        s.ollama_port = p;
+    }
     if !s.is_loopback() && !s.require_key_for_remote && !patch.confirm_unauthenticated {
         return Err(HttpError::bad_request(
             "a network bind without API keys lets anyone on the network use and administer this \
@@ -191,6 +217,8 @@ pub(crate) fn write_settings(path: &Path, s: &NetworkSettings) -> Result<(), Htt
             let server = ensure_table(doc.as_item_mut(), "server");
             server["host"] = toml_edit::value(s.host.as_str());
             server["port"] = toml_edit::value(i64::from(s.port));
+            server["ollama_compat"] = toml_edit::value(s.ollama_compat);
+            server["ollama_port"] = toml_edit::value(i64::from(s.ollama_port));
             server["cors_origins"] = toml_edit::value(
                 s.cors_origins
                     .iter()
@@ -304,7 +332,13 @@ fn document(ctx: &AdminContext) -> Value {
             }
         }
     }
-    for var in ["ALKAHEST_HOST", "ALKAHEST_PORT"] {
+    if saved.ollama_compat && saved.ollama_port == saved.port {
+        warnings.push(format!(
+            "the Ollama port and the Alkahest port are both {}; only one listener is opened",
+            saved.port
+        ));
+    }
+    for var in ["ALKAHEST_HOST", "ALKAHEST_PORT", "ALKAHEST_OLLAMA_COMPAT"] {
         if (ctx.env)(var).is_some() {
             warnings.push(format!(
                 "{var} is set in the server's environment and overrides the file"
@@ -315,6 +349,7 @@ fn document(ctx: &AdminContext) -> Value {
         "running": running,
         "saved": saved,
         "restart_required": running != saved,
+        "ollama_port_status": ctx.ollama_port.lock().clone(),
         "file": ctx.config_file,
         "active_keys": keys,
         "warnings": warnings,
@@ -426,6 +461,29 @@ mod tests {
         assert_eq!(c.server.port, 11500);
         assert!(!c.server.endpoints.anthropic);
         assert_eq!(c.scheduler.max_loaded, 2);
+    }
+
+    #[test]
+    fn ollama_compat_is_patched_and_written() {
+        let p = NetworkPatch {
+            ollama_compat: Some(true),
+            ollama_port: Some(11500),
+            ..NetworkPatch::default()
+        };
+        let s = apply(&base(), &p).unwrap();
+        assert!(s.ollama_compat);
+        assert_eq!(s.ollama_port, 11500);
+        let bad = NetworkPatch {
+            ollama_port: Some(0),
+            ..NetworkPatch::default()
+        };
+        assert!(apply(&base(), &bad).is_err());
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        write_settings(&path, &s).unwrap();
+        let c = Config::from_toml_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(c.server.ollama_compat);
+        assert_eq!(c.server.ollama_port, 11500);
     }
 
     #[test]
