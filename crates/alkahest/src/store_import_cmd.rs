@@ -1,5 +1,5 @@
 //! `alkahest import --store <dir>` (ALK-US-0136): copies every model of another Alkahest store,
-//! with its per-model settings, into this one.
+//! with its per-model settings, and the engines installed next to it, into this one.
 //!
 //! Made for the move from a user's own server to the system service: `sudo env
 //! ALKAHEST_HOME=/var/lib/alkahest alkahest import --store ~me/.local/share/alkahest`. Run as
@@ -10,13 +10,14 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use alkahest_core::config::Loaded;
+use alkahest_recipes::EngineCopy;
 use alkahest_store::overlay::OVERLAY_DIR;
 use alkahest_store::{AlkahestStore, StoreLocation, TransferOutcome, transfer_overlays};
 use anyhow::{Context, Result, bail};
 use serde_json::json;
 
 /// `alkahest import --store <dir>`.
-pub fn run(dir: &Path, loaded: &Loaded, json_out: bool) -> Result<ExitCode> {
+pub fn run(dir: &Path, engines: bool, loaded: &Loaded, json_out: bool) -> Result<ExitCode> {
     let Some(location) = StoreLocation::find(dir) else {
         bail!(
             "{} is not an Alkahest store: expected a data folder with `models/manifests` \
@@ -60,7 +61,30 @@ pub fn run(dir: &Path, loaded: &Loaded, json_out: bool) -> Result<ExitCode> {
         }
         rows.push(row);
     }
-    give_to_store_owner(&paths.data_dir, &[&paths.models_dir, &overlay_dst])?;
+    let mut engine_rows = Vec::new();
+    let engines_src = location.data_dir.as_ref().map(|d| d.join("engines"));
+    if let Some(from) = engines_src.filter(|d| engines && d.is_dir()) {
+        for engine in alkahest_recipes::list_installed(&from) {
+            let row = match alkahest_recipes::copy_installed(&engine, &paths.engines_dir) {
+                Ok(c) => engine_row(&engine, &c),
+                Err(e) => {
+                    failed += 1;
+                    json!({
+                        "engine": engine.id, "dir": engine.dir,
+                        "status": "failed", "error": e.to_string(),
+                    })
+                }
+            };
+            if !json_out {
+                print_engine_row(&row);
+            }
+            engine_rows.push(row);
+        }
+    }
+    give_to_store_owner(
+        &paths.data_dir,
+        &[&paths.models_dir, &overlay_dst, &paths.engines_dir],
+    )?;
 
     if json_out {
         println!(
@@ -69,15 +93,13 @@ pub fn run(dir: &Path, loaded: &Loaded, json_out: bool) -> Result<ExitCode> {
                 "from": location.models_dir,
                 "to": paths.models_dir,
                 "models": rows,
+                "engines": engine_rows,
             }))?
         );
-    } else if models.is_empty() {
-        println!("no models in {}", location.models_dir.display());
+    } else if models.is_empty() && engine_rows.is_empty() {
+        println!("no models or engines in {}", dir.display());
     } else {
-        println!(
-            "a running server lists the new models on its next request; engines are not copied \
-             (`alkahest engines install <engine>` if a model needs one)"
-        );
+        println!("a running server uses the new models and engines on its next request");
     }
     Ok(if failed == 0 {
         ExitCode::SUCCESS
@@ -127,6 +149,43 @@ fn print_row(row: &serde_json::Value) {
         }
         _ => eprintln!(
             "failed {name}: {}",
+            row["error"].as_str().unwrap_or_default()
+        ),
+    }
+}
+
+fn engine_row(engine: &alkahest_recipes::InstalledEngine, c: &EngineCopy) -> serde_json::Value {
+    let label = format!("{} {} ({})", engine.id, engine.tag, engine.variant);
+    match c {
+        EngineCopy::Copied { dir, bytes } => json!({
+            "engine": engine.id, "label": label, "status": "imported", "dir": dir,
+            "bytes_copied": bytes,
+        }),
+        EngineCopy::AlreadyPresent => {
+            json!({ "engine": engine.id, "label": label, "status": "already_present" })
+        }
+        EngineCopy::NotRelocatable => {
+            json!({ "engine": engine.id, "label": label, "status": "not_relocatable" })
+        }
+    }
+}
+
+fn print_engine_row(row: &serde_json::Value) {
+    let id = row["engine"].as_str().unwrap_or_default();
+    let label = row["label"].as_str().unwrap_or(id);
+    match row["status"].as_str() {
+        Some("imported") => println!(
+            "imported engine {label} ({} copied)",
+            indicatif::HumanBytes(row["bytes_copied"].as_u64().unwrap_or(0))
+        ),
+        Some("already_present") => println!("already present engine {label}"),
+        Some("not_relocatable") => println!(
+            "skipped engine {label}: a Python venv only works where it was created; install it \
+             again with `alkahest engines install {id}`"
+        ),
+        _ => eprintln!(
+            "failed engine {}: {}",
+            row["dir"].as_str().unwrap_or(id),
             row["error"].as_str().unwrap_or_default()
         ),
     }

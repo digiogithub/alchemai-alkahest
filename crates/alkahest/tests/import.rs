@@ -110,6 +110,24 @@ fn import_every_model_of_another_store() {
         "context_length=4096",
     ]));
     let user_data = user.path().join("alk/data");
+    // An engine installed as the user, and a venv one that cannot move.
+    for (id, dir, source) in [
+        (
+            "prism-llama-cpp",
+            "prism-b10777-e3de715-cuda12.8",
+            "https://example.invalid/p.tgz",
+        ),
+        ("vllm", "0.11.0-cuda", "pip vllm==0.11.0"),
+    ] {
+        let d = user_data.join("engines").join(id).join(dir);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("llama-server"), b"bin").unwrap();
+        let marker = serde_json::json!({
+            "id": id, "variant": "cuda12.8", "tag": "prism-b10777-e3de715",
+            "executable": "llama-server", "source": source, "sha256": "",
+        });
+        fs::write(d.join(".alkahest-engine.json"), marker.to_string()).unwrap();
+    }
 
     let service = tempfile::tempdir().unwrap();
     let text = stdout(
@@ -121,6 +139,29 @@ fn import_every_model_of_another_store() {
     assert_eq!(report["models"][0]["name"], "Ternary-Bonsai:latest");
     assert_eq!(report["models"][0]["status"], "imported");
     assert_eq!(report["models"][0]["settings_files"], 1);
+    let engines = report["engines"].as_array().unwrap();
+    let status = |id: &str| {
+        engines
+            .iter()
+            .find(|e| e["engine"] == id)
+            .map(|e| e["status"].clone())
+    };
+    assert_eq!(
+        status("prism-llama-cpp"),
+        Some("imported".into()),
+        "{engines:?}"
+    );
+    assert_eq!(
+        status("vllm"),
+        Some("not_relocatable".into()),
+        "{engines:?}"
+    );
+    assert!(
+        service
+            .path()
+            .join("alk/data/engines/prism-llama-cpp/prism-b10777-e3de715-cuda12.8/llama-server")
+            .is_file()
+    );
     let ls = stdout(alkahest(service.path()).arg("ls"));
     assert!(ls.contains("Ternary-Bonsai"), "{ls}");
     let show = stdout(alkahest(service.path()).args(["config", "model", "Ternary-Bonsai", "show"]));
@@ -134,6 +175,10 @@ fn import_every_model_of_another_store() {
     );
     assert!(
         again.contains("already present Ternary-Bonsai:latest"),
+        "{again}"
+    );
+    assert!(
+        again.contains("already present engine prism-llama-cpp"),
         "{again}"
     );
 

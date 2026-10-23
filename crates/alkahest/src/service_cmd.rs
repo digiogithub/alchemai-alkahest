@@ -263,8 +263,9 @@ pub fn plan_install(args: &ServiceArgs, bin: &Path, host: &Host<'_>) -> Plan {
         }
         if let Some(data) = &host.invoking_user_store {
             plan.notes.push(format!(
-                "the service has its own model store in {STATE_DIR}; the models in {} are not \
-                 in it. Copy them with: sudo env ALKAHEST_HOME={STATE_DIR} {} import --store {}",
+                "the service has its own model store in {STATE_DIR}; the models and engines in \
+                 {} are not in it. Copy them with: sudo env ALKAHEST_HOME={STATE_DIR} {} import \
+                 --store {}",
                 data.display(),
                 bin.display(),
                 data.display()

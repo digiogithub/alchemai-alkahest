@@ -43,12 +43,26 @@ were not. They are still in the user store (`~/.local/share/alkahest`, 6.1 GB).
     restart the service after a package upgrade.
   - `reference/cli.md` regenerated.
 
+### Engines too (follow-up, 2026-10-23)
+
+- `crates/alkahest-recipes/src/relocate.rs` (new): `copy_installed(engine, engines_dir)` returns
+  `EngineCopy`:
+  - `Copied { dir, bytes }`. The tree goes to a hidden `.<dir>.partial-<pid>` folder and is then
+    renamed into place, so a half copy never carries the marker. Symbolic links are kept as
+    links and file modes are kept.
+  - `AlreadyPresent`.
+  - `NotRelocatable`, for a venv install (marker source `pip …` or a `pyvenv.cfg`).
+- `alkahest import --store` copies every engine under `<data dir>/engines` into the configured
+  `engines_dir`. The JSON summary gains an `engines` array, `--no-engines` opts out, and the
+  engines folder is included in the owner hand-over.
+- The `service install` note now says "models and engines".
+
 ## Why
 
 The service store being separate is by design (ALK-SP-0009.R2: a dedicated account and state
 directory). What was missing was a way to move the models, and a warning at install time.
-Engines (`~/.local/share/alkahest/engines`) are not copied. The service installs its own, built
-for its account.
+Engines are copied too, from the source's `engines/` folder; only Python venv installs (vLLM) are not,
+because a venv only works at the path it was created at.
 
 ## Verification
 
@@ -62,6 +76,9 @@ for its account.
     "already present", error on a folder that is not a store.
   - `crates/alkahest/src/service_cmd.rs#system_install_points_at_the_users_models_and_a_busy_port`,
     `#home_comes_from_passwd`.
+- Follow-up tests: `crates/alkahest-recipes/src/relocate.rs#tests` (links, modes, no staging
+  left, idempotent, venv refused); `import_every_model_of_another_store` also checks an engine
+  copied and a venv engine reported `not_relocatable`.
 - `cargo xtask check-deps`, headless build: OK.
 - `cargo deny check bans licenses sources`: OK. Advisories are still RUSTSEC-2026-0382/0383; see
   [[ALK-US-0134]].

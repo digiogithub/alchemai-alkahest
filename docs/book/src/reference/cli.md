@@ -293,7 +293,8 @@ Options (besides the global ones):
       --name <NAME>         Model name; defaults to the file stem or folder name
       --link                Register the files where they are instead of copying them (see `create --link`)
       --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
-      --store               PATH is another Alkahest store (a data folder such as `~/.local/share/alkahest`, or its `models` folder): copy every model in it, with its settings, into this store. Models already here are skipped; the source is not changed. For example, to give the system service the models pulled as a user: `sudo env ALKAHEST_HOME=/var/lib/alkahest alkahest import --store ~/.local/share/alkahest`
+      --store               PATH is another Alkahest store (a data folder such as `~/.local/share/alkahest`, or its `models` folder): copy every model in it, with its settings, and the engines installed in its `engines` folder into this store. What is already here is skipped; the source is not changed. For example, to give the system service the models pulled as a user: `sudo env ALKAHEST_HOME=/var/lib/alkahest alkahest import --store ~/.local/share/alkahest`
+      --no-engines          With `--store`: copy only the models, not the engines
 ```
 
 ## alkahest cp

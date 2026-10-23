@@ -171,12 +171,16 @@ pub struct ImportArgs {
     #[arg(long, conflicts_with = "store")]
     pub link: bool,
     /// PATH is another Alkahest store (a data folder such as `~/.local/share/alkahest`, or its
-    /// `models` folder): copy every model in it, with its settings, into this store. Models
-    /// already here are skipped; the source is not changed. For example, to give the system
+    /// `models` folder): copy every model in it, with its settings, and the engines installed
+    /// in its `engines` folder into this store. What is already here is skipped; the source is
+    /// not changed. For example, to give the system
     /// service the models pulled as a user:
     /// `sudo env ALKAHEST_HOME=/var/lib/alkahest alkahest import --store ~/.local/share/alkahest`.
     #[arg(long)]
     pub store: bool,
+    /// With `--store`: copy only the models, not the engines.
+    #[arg(long, requires = "store")]
+    pub no_engines: bool,
 }
 
 /// Arguments of `alkahest show`.

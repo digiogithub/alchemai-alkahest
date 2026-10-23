@@ -49,6 +49,8 @@ pub struct StoreLocation {
     pub models_dir: PathBuf,
     /// The per-model settings folder (`model-config/`) next to it, when there is one.
     pub overlay_dir: Option<PathBuf>,
+    /// The data folder that holds the models folder (and `engines/`), when it has a parent.
+    pub data_dir: Option<PathBuf>,
 }
 
 impl StoreLocation {
@@ -62,10 +64,14 @@ impl StoreLocation {
         } else {
             return None;
         };
-        let overlay_dir = data_dir.map(|d| d.join(OVERLAY_DIR)).filter(|d| d.is_dir());
+        let overlay_dir = data_dir
+            .as_ref()
+            .map(|d| d.join(OVERLAY_DIR))
+            .filter(|d| d.is_dir());
         Some(Self {
             models_dir,
             overlay_dir,
+            data_dir,
         })
     }
 }

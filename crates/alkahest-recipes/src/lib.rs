@@ -29,6 +29,7 @@ mod error;
 mod family;
 mod install;
 mod recipe;
+mod relocate;
 mod runtime;
 
 pub use archive::{extract, strip_components};
@@ -45,6 +46,7 @@ pub use recipe::{
     RecipeOrigin, SourceBuild, VenvBuild, parse_recipes, parse_recipes_with, select_native,
     select_variant,
 };
+pub use relocate::{EngineCopy, copy_installed};
 pub use runtime::{
     check_cuda_runtime, cuda_major_of_variant, cuda_runtime_libraries, missing_libraries,
     system_cuda_dirs,

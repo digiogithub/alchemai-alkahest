@@ -173,7 +173,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         } => models_cmd::cp(source, destination, &loaded, cli.global.json),
         Command::Create(args) => import_cmd::create(args, &loaded, cli.global.json),
         Command::Import(args) if args.store => {
-            store_import_cmd::run(&args.path, &loaded, cli.global.json)
+            store_import_cmd::run(&args.path, !args.no_engines, &loaded, cli.global.json)
         }
         Command::Import(args) => import_cmd::import(args, &loaded, cli.global.json),
         Command::Gc { dry_run } => models_cmd::gc(*dry_run, &loaded, cli.global.json),
