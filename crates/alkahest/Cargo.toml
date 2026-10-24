@@ -128,8 +128,8 @@ depends = [
 
 # macOS (ALK-US-0075): `cargo xtask bundle` on a macOS host builds `Alkahest.app` and the dmg.
 # The icon set, product name and signing identity are set by xtask (`platform_config`); signing
-# and notarisation read APPLE_SIGNING_IDENTITY / APPLE_CERTIFICATE / APPLE_ID ... from the
-# environment and are skipped without them. Engines land in Contents/Resources/engines
+# reads APPLE_SIGNING_IDENTITY from the environment and is skipped without it. The release
+# workflow puts the identity in an ephemeral keychain and notarises outside the packager. Engines land in Contents/Resources/engines
 # (`alkahest_recipes::bundled_roots`). `background-app` stays false: the app keeps its Dock icon
 # next to the menu bar tray icon, so a closed window can be reopened from either (LSUIElement
 # would hide the Dock icon and the application menu).

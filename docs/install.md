@@ -86,8 +86,9 @@ Open the `.dmg` and drag `Alkahest.app` to Applications. Opening the app starts 
 `Alkahest.app/Contents/Resources/engines`. The command line is inside the bundle:
 `/Applications/Alkahest.app/Contents/MacOS/alkahest`, or link it with
 `ln -s /Applications/Alkahest.app/Contents/MacOS/alkahest /usr/local/bin/alkahest`. Releases are
-signed with a Developer ID and notarised when the maintainers' Apple secrets are configured; an
-unsigned build (a fork, a release candidate) needs right-click, Open the first time.
+signed with Digio's Developer ID and notarised (the dmg is stapled), so Gatekeeper opens them
+without a prompt. A build of your own (a fork, a local `cargo xtask bundle`) is unsigned and
+needs right-click, Open the first time.
 
 For the CLI alone, `brew install digiogithub/tap/alkahest` (the formula `alkahest.rb` attached to
 the release) installs the headless archive; `brew services start alkahest` runs the server at

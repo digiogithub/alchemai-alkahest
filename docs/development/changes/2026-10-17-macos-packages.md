@@ -53,3 +53,10 @@ bundled engine (entitlement `disable-library-validation` is a review item), nota
 Homebrew formula (`brew audit`/`brew test`), launching the app from Finder (the
 `effective_args` path is only unit-tested), x86_64 on `macos-15-intel`. The first tag is the first
 real run.
+
+## Update 2026-10-24
+
+Release signing moved to the Digio scheme (Developer ID from `MACOS_SIGNING_BUNDLE`, Windows
+Authenticode with Azure Artifact Signing over OIDC) and is mandatory; the `APPLE_*` /
+`WINDOWS_CERTIFICATE*` secrets above are no longer read. See
+[[development/changes/2026-10-24-digio-release-signing]].

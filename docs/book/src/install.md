@@ -35,8 +35,9 @@ The command line is inside the bundle:
 ln -s /Applications/Alkahest.app/Contents/MacOS/alkahest /usr/local/bin/alkahest
 ```
 
-Releases are signed and notarised when the maintainers' Apple credentials are configured; an
-unsigned build (a fork, a release candidate) needs right-click, Open the first time.
+Releases are signed with Digio's Developer ID and notarised, so Gatekeeper opens them without a
+prompt. A build of your own (a fork, a local `cargo xtask bundle`) is unsigned and needs
+right-click, Open the first time.
 
 For the CLI alone, use Homebrew with the formula attached to the release:
 `brew install digiogithub/tap/alkahest`, then `brew services start alkahest` to run the server at

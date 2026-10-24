@@ -4,27 +4,35 @@
 #            binary, the bundled CPU llama.cpp in engines/, systemd unit templates, licences; the
 #            archive scripts/setup/install.sh downloads) and its rpm; on x86_64 also the desktop
 #            .deb, .AppImage and rpm (cargo-packager, and `cargo xtask bundle` for the rpm).
-#   macOS    aarch64 and x86_64: Alkahest.app in a .dmg (signed and notarised when the Apple
-#            secrets are set) and the headless tar.gz.
-#   Windows  x86_64: NSIS installer `alkahest_<version>_x64-setup.exe` (signed when a
-#            certificate is configured) and the headless .zip that install.ps1 downloads.
+#   macOS    aarch64 and x86_64: Alkahest.app in a signed, notarised and stapled .dmg, and the
+#            headless tar.gz whose binaries (alkahest, the bundled llama.cpp) are signed and
+#            notarised (submit-only: a bare Mach-O cannot carry a ticket).
+#   Windows  x86_64: Authenticode-signed NSIS installer `alkahest_<version>_x64-setup.exe` and
+#            the headless .zip that install.ps1 downloads, both with signed executables inside.
 #   SHA256SUMS over every artefact, in the `<hash>  <file>` format install.sh checks, and the
 #            Homebrew formula `alkahest.rb` rendered from it (a maintainer copies it to the tap).
 #
-# The final job creates a DRAFT release; a maintainer reviews and publishes it. Signing is
-# opt-in: without the secrets below the macOS and Windows artefacts are built unsigned
-# (Gatekeeper and SmartScreen will warn), which is how a fork or a release candidate runs.
+# The final job creates a DRAFT release; a maintainer reviews and publishes it.
 #
-#   macOS    APPLE_CERTIFICATE (base64 .p12 of a Developer ID Application certificate),
-#            APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY ("Developer ID Application: ..."),
-#            and for notarisation either APPLE_ID + APPLE_PASSWORD (app-specific) + APPLE_TEAM_ID
-#            or APPLE_API_KEY + APPLE_API_ISSUER + APPLE_API_KEY_P8 (base64 .p8).
-#   Windows  WINDOWS_CERTIFICATE (base64 .pfx of a code signing certificate) and
-#            WINDOWS_CERTIFICATE_PASSWORD.
+# Signing is mandatory: there is no unsigned fallback, so a run without the signing material
+# fails instead of publishing unsigned macOS or Windows artefacts. It follows the Digio scheme
+# shared with digiogithub/pando and digiogithub/bitacora:
 #
-# Not run yet: the first real run is the first tag. The macOS and Windows jobs were written
-# without access to such machines; the change records 2026-10-17-macos-packages and
-# 2026-10-17-windows-installer list what was and was not verified.
+#   macOS    one secret, MACOS_SIGNING_BUNDLE (base64 .tar.gz with both Developer ID .p12 files
+#            and the `kvagerc` env file with their passwords and the notary credentials), unpacked
+#            into an ephemeral keychain by digiogithub/ci-actions/macos-signing-keychain.
+#            cargo-packager signs the .app and the .dmg with that identity (APPLE_ID stays unset,
+#            so it does not notarise); macos-codesign signs the loose headless binaries and
+#            macos-notarize notarises and staples.
+#   Windows  no secret: Azure Artifact Signing over OIDC. The job runs in the `release`
+#            environment, whose federated credential lets the shared Entra app in
+#            vars.AZURE_CLIENT_ID sign; AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
+#            AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT and AZURE_SIGNING_CERT_PROFILE are
+#            repository variables. Executables are signed before they are packaged, then the
+#            installer; Get-AuthenticodeSignature fails the job unless every file is Valid.
+#
+# Only artefacts named `dist-*` reach the release job, and they are only uploaded after the
+# signature checks, so an unsigned binary cannot be published.
 name: release
 
 on:
@@ -134,9 +142,11 @@ jobs:
           if-no-files-found: error
 
   macos:
-    name: macos (${{ matrix.target }})
+    name: macos (${{ matrix.target }}, signed + notarised)
     needs: meta
     runs-on: ${{ matrix.os }}
+    # Notarisation submits the dmg and the headless binaries with --wait.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -144,17 +154,16 @@ jobs:
           - { os: macos-14, target: aarch64-apple-darwin }
           - { os: macos-15-intel, target: x86_64-apple-darwin }
     env:
-      # Empty without the secrets; xtask and cargo-packager then skip signing and notarising.
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      VERSION: ${{ needs.meta.outputs.version }}
       MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
+      - name: Signing material is configured
+        env:
+          HAS_BUNDLE: ${{ secrets.MACOS_SIGNING_BUNDLE != '' }}
+        run: |
+          if [ "$HAS_BUNDLE" != "true" ]; then
+            echo "::error::secret MACOS_SIGNING_BUNDLE is not set: releases are never built unsigned"; exit 1
+          fi
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
@@ -167,36 +176,70 @@ jobs:
         with:
           tool: cargo-packager@0.11.8
 
-      - name: Notarisation key file
-        if: env.APPLE_API_KEY != ''
-        env:
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      # Exports SIGNING_IDENTITY, NOTARY_PROFILE and MACOS_SIGN_KEYCHAIN_PATH/PASSWORD for the
+      # steps below; the keychain joins the user search list, so codesign and cargo-packager
+      # find the identity there.
+      - name: Set up the signing keychain
+        uses: digiogithub/ci-actions/macos-signing-keychain@v1
+        with:
+          signing-bundle: ${{ secrets.MACOS_SIGNING_BUNDLE }}
+          env-file: kvagerc
+          keychain-name: alkahest-build
+          notary-profile: alkahest-notary
+
+      # The headless pass builds the headless binary (target/bundle/alkahest-headless) and stages
+      # the bundled engine (target/bundle/engines); its tar.gz holds unsigned binaries and is
+      # dropped. The desktop binary is built here too, so the bundle step below only packages.
+      - name: Build (headless binary, bundled engine, desktop binary)
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/private_keys"
-          echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/private_keys/AuthKey_${APPLE_API_KEY}.p8"
-          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/private_keys/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
+          cargo xtask bundle --flavour headless
+          cargo build --release --locked -p alkahest --features desktop
+          rm -f target/packager/*.tar.gz
 
-      # Headless tar.gz, then Alkahest.app and the dmg. cargo-packager signs every Mach-O file in
-      # the bundle (including the bundled llama-server) with the hardened runtime and
-      # packaging/macos/entitlements.plist, notarises and staples the .app, and signs the dmg.
+      - id: loose
+        name: List the loose Mach-O files
+        run: |
+          set -euo pipefail
+          {
+            echo 'paths<<EOF_PATHS'
+            find target/bundle/alkahest-headless target/bundle/engines -type f | sort | while IFS= read -r f; do
+              if file -b "$f" | grep -q 'Mach-O'; then echo "$f"; fi
+            done
+            echo 'EOF_PATHS'
+          } >> "$GITHUB_OUTPUT"
+
+      # Signed in place before archiving: the tar.gz and the .app both copy these files.
+      - name: Codesign the headless binary and the bundled engine
+        uses: digiogithub/ci-actions/macos-codesign@v1
+        with:
+          paths: ${{ steps.loose.outputs.paths }}
+          entitlements: packaging/macos/entitlements.plist
+
+      # Headless tar.gz (from the signed files), then Alkahest.app and the dmg. cargo-packager
+      # signs every Mach-O file in the bundle with the hardened runtime and
+      # packaging/macos/entitlements.plist, and signs the dmg. APPLE_ID and the API key stay
+      # unset, so it does not notarise: the dmg is notarised and stapled below.
       # hdiutil on hosted runners intermittently fails to eject the scratch image ("Resource
       # busy") while Spotlight or XProtect scan it: turn indexing off and retry once (the
       # second attempt reuses the built binaries, so it only repeats the packaging).
-      - name: Bundle (tar.gz, .app, .dmg)
+      - name: Bundle and sign (tar.gz, .app, .dmg)
         run: |
+          set -euo pipefail
+          unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH
+          export APPLE_SIGNING_IDENTITY="$SIGNING_IDENTITY"
           sudo mdutil -a -i off || true
-          if ! cargo xtask bundle; then
+          if ! cargo xtask bundle --no-build; then
             echo "::warning::bundling failed, retrying once (hdiutil eject is flaky on hosted runners)"
             hdiutil info | grep -E '^/dev/disk[0-9]+' | awk '{print $1}' | sort -u | while read -r d; do
               hdiutil detach -force "$d" || true
             done
             # The failed attempt leaves a half-built Alkahest.app that cargo-packager would
-            # reuse without its resources; start packaging from scratch (engines stay staged
-            # in target/bundle).
+            # reuse without its resources; start packaging from scratch (the signed binaries and
+            # engines stay staged in target/bundle).
             rm -rf target/packager
             sleep 10
-            cargo xtask bundle
+            cargo xtask bundle --no-build
           fi
           ls -la target/packager
 
@@ -209,30 +252,47 @@ jobs:
           ls "$app/Contents/Resources/engines/llama-cpp"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" | grep -qx es.digio.alkahest
 
-      # The .app is stapled by the packager; the dmg is notarised and stapled here.
-      - name: Notarise and staple the dmg
-        if: env.APPLE_SIGNING_IDENTITY != '' && (env.APPLE_ID != '' || env.APPLE_API_KEY != '')
-        run: |
-          set -euo pipefail
-          dmg="$(ls target/packager/*.dmg)"
-          if [ -n "${APPLE_API_KEY:-}" ]; then
-            xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" \
-              --issuer "$APPLE_API_ISSUER" --wait
-          else
-            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
-              --team-id "$APPLE_TEAM_ID" --wait
-          fi
-          xcrun stapler staple "$dmg"
-
       - name: Verify the signatures
-        if: env.APPLE_SIGNING_IDENTITY != ''
         run: |
           set -euo pipefail
           app="target/packager/Alkahest.app"
           codesign --verify --deep --strict --verbose=2 "$app"
-          spctl --assess --type execute --verbose=2 "$app"
-          xcrun stapler validate "$app"
-          xcrun stapler validate target/packager/*.dmg || echo "::warning::the dmg is not stapled (no notarisation credentials)"
+          codesign -dv --verbose=2 "$app" 2>&1 | tee sig.txt
+          grep -q 'flags=.*runtime' sig.txt || { echo "::error::hardened runtime missing"; exit 1; }
+          codesign --verify --verbose=2 target/packager/*.dmg
+          # The headless archive is built from this staged tree.
+          stage="target/bundle/alkahest-${VERSION}-${{ matrix.target }}"
+          find "$stage" -type f | while IFS= read -r f; do
+            if file -b "$f" | grep -q 'Mach-O'; then
+              codesign --verify --strict --verbose=2 "$f" || { echo "::error::unsigned: $f"; exit 1; }
+            fi
+          done
+
+      # notarytool takes an archive: the staged headless tree goes in as a zip (submit-only).
+      - name: Archive the headless tree for notarisation
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent "target/bundle/alkahest-${VERSION}-${{ matrix.target }}" \
+            "$RUNNER_TEMP/alkahest-headless-${{ matrix.target }}.zip"
+
+      # The dmg ticket is stapled; the headless binaries pass Gatekeeper's online check.
+      - name: Notarise
+        uses: digiogithub/ci-actions/macos-notarize@v1
+        with:
+          paths: |
+            target/packager/*.dmg
+            ${{ runner.temp }}/alkahest-headless-${{ matrix.target }}.zip
+          staple: auto
+
+      - name: Verify the staple and Gatekeeper
+        run: |
+          set -euo pipefail
+          xcrun stapler validate target/packager/*.dmg
+          spctl --assess --type execute --verbose=2 target/packager/Alkahest.app
+
+      - name: Clean up the signing keychain
+        if: always()
+        uses: digiogithub/ci-actions/macos-keychain-cleanup@v1
 
       - uses: actions/upload-artifact@v4
         with:
@@ -243,12 +303,16 @@ jobs:
           if-no-files-found: error
 
   windows:
-    name: windows (x86_64-pc-windows-msvc)
+    name: windows (x86_64-pc-windows-msvc, Authenticode)
     needs: meta
     runs-on: windows-latest
-    env:
-      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    # The federated credential on the shared Entra app is scoped to
+    # repo:digiogithub/alchemai-alkahest:environment:release: the OIDC token only validates
+    # from a job in that environment.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -264,31 +328,86 @@ jobs:
         with:
           tool: cargo-packager@0.11.8
 
-      # The certificate goes into the user store; cargo-packager then runs signtool with its
-      # thumbprint (xtask reads ALKAHEST_WINDOWS_CERT_THUMBPRINT), SHA-256 and an RFC 3161
-      # timestamp, on alkahest.exe, the uninstaller and the installer.
-      - name: Import the code signing certificate
-        if: env.WINDOWS_CERTIFICATE != ''
+      # The headless pass builds target/bundle/alkahest-headless.exe and stages the bundled
+      # engine in target/bundle/engines; its zip holds unsigned executables and is dropped. The
+      # desktop build writes target/release/alkahest.exe, which the installer packages.
+      - name: Build (headless binary, bundled engine, desktop binary)
+        shell: bash
         run: |
-          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          Remove-Item $pfx
-          "ALKAHEST_WINDOWS_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          set -euo pipefail
+          cargo xtask bundle --flavour headless
+          cargo build --release --locked -p alkahest --features desktop
+          rm -f target/packager/*.zip
 
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # No credential inputs: the action falls back to the Azure CLI session above, which is the
+      # federated GitHub identity. Signed before packaging: both alkahest.exe builds and the
+      # bundled llama.cpp executables and DLLs (Smart App Control blocks unsigned code).
+      - name: Sign the executables
+        uses: azure/trusted-signing-action@v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          files: |
+            ${{ github.workspace }}\target\release\alkahest.exe
+            ${{ github.workspace }}\target\bundle\alkahest-headless.exe
+          files-folder: ${{ github.workspace }}\target\bundle\engines
+          files-folder-filter: exe,dll
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # --no-build keeps the signed binaries: the zip is staged from target/bundle and the
+      # installer packages target/release/alkahest.exe and target/bundle/engines.
       - name: Bundle (zip, NSIS installer)
+        shell: bash
         run: |
-          cargo xtask bundle
-          Get-ChildItem target/packager | Format-Table Name, Length
+          set -euo pipefail
+          cargo xtask bundle --no-build
+          ls -la target/packager
 
-      - name: Check the signatures
-        if: env.WINDOWS_CERTIFICATE != ''
+      - name: Sign the installer
+        uses: azure/trusted-signing-action@v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\target\packager
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # Every shipped executable: the loose binaries, the installer, and what the zip contains.
+      - name: Verify the signatures
+        shell: pwsh
         run: |
-          Get-ChildItem target/packager/*-setup.exe | ForEach-Object {
-            $sig = Get-AuthenticodeSignature $_.FullName
-            if ($sig.Status -ne 'Valid') { throw "$($_.Name): $($sig.Status)" }
+          $ErrorActionPreference = 'Stop'
+          $zip = (Get-ChildItem target/packager/*.zip).FullName
+          $unzipped = Join-Path $env:RUNNER_TEMP 'alkahest-zip'
+          Expand-Archive -Path $zip -DestinationPath $unzipped -Force
+          $files = @(Get-Item target/release/alkahest.exe, target/bundle/alkahest-headless.exe) +
+            @(Get-ChildItem target/packager/*-setup.exe) +
+            @(Get-ChildItem target/bundle/engines -Recurse -Include *.exe, *.dll) +
+            @(Get-ChildItem $unzipped -Recurse -Include *.exe, *.dll)
+          $bad = 0
+          foreach ($f in $files) {
+            $sig = Get-AuthenticodeSignature $f.FullName
+            "-- $($f.FullName): $($sig.Status) / $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') {
+              Write-Output "::error::Unsigned or invalid: $($f.FullName) ($($sig.Status))"
+              $bad = 1
+            }
           }
+          exit $bad
 
       # Install silently into a scratch directory with the components the runner can exercise
       # (PATH and the service; the CUDA download is skipped), look at the result, then uninstall

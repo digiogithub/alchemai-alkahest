@@ -49,3 +49,10 @@ Running the installer and uninstaller, `path.ps1` (no PowerShell here), the serv
 CI, signing, the desktop (GPUI) build on `windows-latest`, console detaching, Windows on ARM (not
 packaged), the exe icon (the shortcuts use the shipped `.ico`; embedding it in the exe needs a
 resource compiler step, left open). MSI/WiX is not provided.
+
+## Update 2026-10-24
+
+Release signing moved to the Digio scheme (Developer ID from `MACOS_SIGNING_BUNDLE`, Windows
+Authenticode with Azure Artifact Signing over OIDC) and is mandatory; the `APPLE_*` /
+`WINDOWS_CERTIFICATE*` secrets above are no longer read. See
+[[development/changes/2026-10-24-digio-release-signing]].

@@ -210,8 +210,9 @@ fn kebab_to_camel(s: &str) -> String {
 /// Signing inputs read from the environment (empty locally; set by the release workflow).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct Signing {
-    /// `Developer ID Application: ...`; cargo-packager reads the certificate and the
-    /// notarisation credentials (`APPLE_CERTIFICATE`, `APPLE_ID`, ...) from the environment itself.
+    /// `Developer ID Application: ...` or its SHA-1, found in the keychain search list;
+    /// cargo-packager notarises only when `APPLE_ID` (or an API key) is also set, which the
+    /// release workflow leaves unset because it notarises with digiogithub/ci-actions.
     apple_identity: Option<String>,
     /// Command that signs `%1` (for example `osslsigncode` or `signtool` with its arguments).
     /// Wins over the thumbprint.
