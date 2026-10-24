@@ -22,6 +22,17 @@ lto = "fat"
 codegen-units = 1
 strip = "symbols"
 
+# Fast dev builds: line tables are enough for backtraces and keep link time and target/ small;
+# dependencies get no debug info and a light optimisation, so tests and the desktop app run
+# usably while workspace crates stay fully debuggable.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = false
+opt-level = 1
+
 [workspace.lints.rust]
 # Denied, not forbidden: the NVML loader (alkahest-sysinfo) and memory-mapped GGUF reads
 # (alkahest-gguf) may `#[allow(unsafe_code)]` locally with a `// SAFETY:` comment.
