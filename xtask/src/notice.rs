@@ -558,9 +558,12 @@ fn read_engines(root: &Path) -> Result<Vec<EngineLicense>> {
 fn check_engines(root: &Path, engines: &[EngineLicense]) -> Vec<String> {
     let mut problems = Vec::new();
     for e in engines {
-        if !matches!(e.license.as_str(), "MIT" | "Apache-2.0") {
+        if !matches!(
+            e.license.as_str(),
+            "MIT" | "Apache-2.0" | "MIT OR Apache-2.0" | "Apache-2.0 OR MIT"
+        ) {
             problems.push(format!(
-                "recipe {} declares licence `{}` (expected MIT or Apache-2.0)",
+                "recipe {} declares licence `{}` (expected MIT, Apache-2.0 or an OR of both)",
                 e.id, e.license
             ));
         }
@@ -647,5 +650,34 @@ mod tests {
             homepage: String::new(),
         };
         assert_eq!(check_engines(dir.path(), &[e]).len(), 2);
+    }
+
+    #[test]
+    fn engines_accept_dual_licences_of_permissive_terms_only() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("packaging/licenses")).unwrap();
+        std::fs::write(dir.path().join("packaging/licenses/eng.txt"), "text").unwrap();
+        let engine = |license: &str| EngineLicense {
+            id: "eng".into(),
+            version: "1".into(),
+            license: license.into(),
+            homepage: String::new(),
+        };
+        for ok in [
+            "MIT",
+            "Apache-2.0",
+            "MIT OR Apache-2.0",
+            "Apache-2.0 OR MIT",
+        ] {
+            assert!(check_engines(dir.path(), &[engine(ok)]).is_empty(), "{ok}");
+        }
+        for bad in [
+            "GPL-3.0",
+            "MIT OR GPL-3.0",
+            "MIT AND Apache-2.0",
+            "LGPL-2.1",
+        ] {
+            assert_eq!(check_engines(dir.path(), &[engine(bad)]).len(), 1, "{bad}");
+        }
     }
 }

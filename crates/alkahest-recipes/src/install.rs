@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use sha2::{Digest, Sha256};
 
 use crate::archive::extract;
-use crate::build::{BuildTools, build_from_source, build_venv};
+use crate::build::{BuildTools, build_cargo, build_from_source, build_venv};
 use crate::error::{RecipeError, Result};
 use crate::recipe::{Host, Recipe, tag_number};
 
@@ -178,24 +178,34 @@ pub async fn install(
     }
 
     let (source, sha256, tofu) = if from_source {
-        let src = recipe
-            .source
-            .as_ref()
-            .ok_or_else(|| RecipeError::NoSource {
-                id: recipe.id.clone(),
-                variant: recipe.variant.clone(),
-            })?;
+        let no_source = || RecipeError::NoSource {
+            id: recipe.id.clone(),
+            variant: recipe.variant.clone(),
+        };
         fs::create_dir_all(&partial).map_err(|e| RecipeError::io(&partial, e))?;
         let log_dir = opts
             .log_dir
             .clone()
             .unwrap_or_else(|| engines_dir.join(".logs"));
         let log = log_dir.join(format!("{}-{}.log", recipe.id, recipe.dir_name()));
-        if let Err(e) = build_from_source(src, &opts.build_tools, &partial, &log, cancel).await {
-            let _ = fs::remove_dir_all(&partial);
-            return Err(e);
+        let built = if let Some(c) = &recipe.cargo {
+            build_cargo(c, &opts.build_tools, &partial, &log, cancel)
+                .await
+                .map(|()| format!("git {}@{}", c.git, c.rev))
+        } else if let Some(src) = &recipe.source {
+            build_from_source(src, &opts.build_tools, &partial, &log, cancel)
+                .await
+                .map(|()| format!("git {}@{}", src.git, src.rev))
+        } else {
+            Err(no_source())
+        };
+        match built {
+            Ok(source) => (source, String::new(), false),
+            Err(e) => {
+                let _ = fs::remove_dir_all(&partial);
+                return Err(e);
+            }
         }
-        (format!("git {}@{}", src.git, src.rev), String::new(), false)
     } else {
         let asset = recipe
             .asset_for(&host)
@@ -449,6 +459,10 @@ const ENGINE_LICENSES: &[(&str, &str)] = &[
     (
         "stable-diffusion-cpp",
         include_str!("../../../packaging/licenses/stable-diffusion-cpp.txt"),
+    ),
+    (
+        "ptts-openai-server",
+        include_str!("../../../packaging/licenses/ptts-openai-server.txt"),
     ),
 ];
 

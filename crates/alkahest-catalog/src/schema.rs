@@ -70,6 +70,15 @@ const SOURCE: Shape = Shape::Table(&[
     ("bin_dir", Shape::Leaf),
 ]);
 
+const CARGO: Shape = Shape::Table(&[
+    ("git", Shape::Leaf),
+    ("rev", Shape::Leaf),
+    ("package", Shape::Leaf),
+    ("features", Shape::Leaf),
+    ("bin", Shape::Leaf),
+    ("tools", Shape::Leaf),
+]);
+
 const VENV: Shape = Shape::Table(&[
     ("python", Shape::Leaf),
     ("packages", Shape::Leaf),
@@ -89,6 +98,7 @@ const VARIANT: Shape = Shape::Table(&[
     ("native", Shape::Leaf),
     ("source", SOURCE),
     ("venv", VENV),
+    ("cargo", CARGO),
 ]);
 
 /// `engines/<id>.toml` (ALK-SP-0003.R3 format).

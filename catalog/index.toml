@@ -33,6 +33,11 @@ sha256 = "a7da0453ebba23f8807e94b94decaf7e5d0e7abf34562cc73adf0361b2a76b86"
 size = 12776
 
 [[files]]
+path = "engines/ptts-openai-server.toml"
+sha256 = "b57e70281c03f1a31ebda38e4eecb36ed8bb4e1fc4bac1a2218ac6a5f17d723e"
+size = 2877
+
+[[files]]
 path = "engines/stable-diffusion-cpp.toml"
 sha256 = "91c2f68ef61d9cac5e31511035959796e60c872fd8d5c483f407332294a8d70d"
 size = 7511
