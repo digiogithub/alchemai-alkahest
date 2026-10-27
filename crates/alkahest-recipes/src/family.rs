@@ -10,12 +10,13 @@
 //! `alkahest_engine::EngineId::from_str` share one definition.
 
 /// Canonical ids of the built-in engines, in display order.
-pub const BUILTIN_ENGINE_IDS: [&str; 5] = [
+pub const BUILTIN_ENGINE_IDS: [&str; 6] = [
     "llama-cpp",
     "prism-llama-cpp",
     "vllm",
     "whisper-cpp",
     "stable-diffusion-cpp",
+    "ptts-openai-server",
 ];
 
 /// Spellings users type for the built-in engines, mapped to the canonical id. The keys are in
@@ -38,6 +39,9 @@ const ALIASES: &[(&str, &str)] = &[
     ("sd-cpp", "stable-diffusion-cpp"),
     ("stable-diffusion", "stable-diffusion-cpp"),
     ("sdcpp", "stable-diffusion-cpp"),
+    ("ptts-openai-server", "ptts-openai-server"),
+    ("ptts", "ptts-openai-server"),
+    ("phonon", "ptts-openai-server"),
 ];
 
 /// The form engine names are compared in: trimmed, lower case, `_` and `.` read as `-`
