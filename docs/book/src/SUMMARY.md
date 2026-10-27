@@ -11,6 +11,7 @@
 
 - [Models](guide/models.md)
 - [Engines and recipes](guide/engines.md)
+- [Speech](guide/speech.md)
 - [Writing a catalog](guide/catalogs.md)
 - [Serving and security](guide/serving.md)
 - [Configuration](guide/configuration.md)

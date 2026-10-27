@@ -122,6 +122,9 @@ fn show_doc(catalog: &Catalog, model: &str) -> Result<Value, HttpError> {
         "capabilities": s.capabilities,
         "modified_at": s.modified,
     });
+    if crate::audio::speech::is_speech_model(&entry) {
+        doc["voices"] = json!(crate::audio::speech::speech_voices(&entry));
+    }
     if let Some(l) = &detail.license {
         doc["license"] = json!(l);
     }

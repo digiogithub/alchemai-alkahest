@@ -44,7 +44,8 @@ server (`scripts/conformance.sh`).
 | `POST /v1/embeddings` | `encoding_format` `float` or `base64`, `dimensions` |
 | `GET /v1/models`, `GET /v1/models/{id}` | models the caller's key may use; ids may contain slashes |
 | `POST /v1/audio/transcriptions`, `POST /v1/audio/translations` | speech to text on whisper.cpp; `response_format` `json`, `text`, `verbose_json`, `srt`, `vtt` |
-| `POST /v1/audio/speech` | answers 501 `not_implemented`: no licence-clean text-to-speech engine is shipped yet |
+| `POST /v1/audio/speech` | text to speech on `ptts-openai-server` (Phonon); `response_format` `wav` (default, 16-bit mono 24 kHz, streamed), `pcm`, `mp3`, `opus`; `input` ≤ 4096 characters; `speed` 1 only; `instructions` refused |
+| `GET /v1/audio/voices?model=` | voices of a speech model (`/api/show` also returns them as `voices`) |
 | `POST /v1/images/generations` | stable-diffusion.cpp; `prompt`, `size`, `n`, `response_format: b64_json` (URL responses and edits are not supported) |
 | `POST /v1/rerank` | Jina/Cohere shape: `query`, `documents` (strings or `{text}`), `top_n`, `return_documents`; needs a rerank model |
 

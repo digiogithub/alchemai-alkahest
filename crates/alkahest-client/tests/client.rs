@@ -334,3 +334,44 @@ async fn hf_estimate_sends_the_quant_and_overrides() {
         .unwrap();
     assert_eq!(v["fits"], true);
 }
+
+#[tokio::test]
+async fn speech_streams_audio_and_show_lists_voices() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/speech"))
+        .and(body_partial_json(
+            json!({"model": "phonon", "input": "Hi", "voice": "Hugh"}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "audio/wav")
+                .set_body_bytes(b"RIFFdata".to_vec()),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/show"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"capabilities": ["speech"], "voices": ["default", "Hugh"]})),
+        )
+        .mount(&server)
+        .await;
+    let c = Client::new(&server.uri()).unwrap();
+    let mut audio = c
+        .speech(&alkahest_client::SpeechRequest {
+            model: "phonon".into(),
+            input: "Hi".into(),
+            voice: Some("Hugh".into()),
+            response_format: None,
+        })
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = audio.next().await {
+        bytes.extend_from_slice(&chunk.unwrap());
+    }
+    assert_eq!(bytes, b"RIFFdata");
+    assert_eq!(c.show("phonon").await.unwrap().voices, ["default", "Hugh"]);
+}

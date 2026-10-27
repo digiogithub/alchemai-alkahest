@@ -1,5 +1,6 @@
 //! OpenAI audio endpoints (ALK-SP-0005.R4): `POST /v1/audio/transcriptions` and
-//! `POST /v1/audio/translations` (speech to text, [`transcribe`]) and `POST /v1/audio/speech` ([`speech`], 501 until an engine exists).
+//! `POST /v1/audio/translations` (speech to text, [`transcribe`]), and `POST /v1/audio/speech`
+//! with `GET /v1/audio/voices` (text to speech, [`speech`]).
 
 use axum::Router;
 

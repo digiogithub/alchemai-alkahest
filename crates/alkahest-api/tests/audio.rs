@@ -1,15 +1,20 @@
 //! `/v1/audio/transcriptions` and `/v1/audio/translations` (ALK-US-0057, ALK-SP-0005.R4)
-//! against a fake whisper-server.
+//! against a fake whisper-server, and `/v1/audio/speech` (ALK-US-0142) against a fake
+//! ptts-openai-server.
 #![allow(clippy::unwrap_used)]
 
 mod common;
 
-use common::{Harness, chat_model, stt_model};
+use common::{Harness, chat_model, stt_model, tts_model};
 use reqwest::multipart::{Form, Part};
 use serde_json::Value;
 
 fn models() -> Vec<(&'static str, common::FakeModel)> {
-    vec![("llama3.2", chat_model()), ("whisper-tiny", stt_model())]
+    vec![
+        ("llama3.2", chat_model()),
+        ("whisper-tiny", stt_model()),
+        ("phonon", tts_model()),
+    ]
 }
 
 fn form(model: &str, file: &[u8]) -> Form {
@@ -205,29 +210,73 @@ async fn undecodable_audio_explains_wav_and_ffmpeg() {
     assert!(msg.contains("ffmpeg") && msg.contains("WAV"), "{msg}");
 }
 
-/// ADR 0003: no TTS engine ships; the route answers a clear 501 and still validates the body.
+/// ALK-US-0142: speech streams the engine's audio through, in Ollama's default format.
 #[tokio::test]
-async fn speech_is_a_clear_501_until_an_engine_exists() {
+async fn speech_streams_the_engine_audio() {
     let h = Harness::start(&models()).await;
     let resp = h
         .post(
             "/v1/audio/speech",
-            serde_json::json!({"model": "tts-1", "input": "hello", "voice": "alloy"}),
+            serde_json::json!({"model": "phonon", "input": "Hello from Alkahest.", "voice": "hugh"}),
         )
         .await;
-    assert_eq!(resp.status(), 501);
-    let e: Value = resp.json().await.unwrap();
-    assert_eq!(e["error"]["code"], "not_implemented");
-    let msg = e["error"]["message"].as_str().unwrap();
-    assert!(
-        msg.contains("text to speech") && msg.contains("ADR 0003"),
-        "{msg}"
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.headers()["content-type"], "audio/wav");
+    assert_eq!(&resp.bytes().await.unwrap()[..], b"RIFFaudio");
+    let sent = h.llama.last("/v1/audio/speech");
+    assert_eq!(
+        sent,
+        serde_json::json!({"model": "phonon", "input": "Hello from Alkahest.", "voice": "hugh",
+            "response_format": "wav"})
     );
+
+    let resp = h
+        .post(
+            "/v1/audio/speech",
+            serde_json::json!({"model": "phonon", "input": "x", "response_format": "pcm"}),
+        )
+        .await;
+    assert_eq!(resp.headers()["content-type"], "audio/pcm");
+}
+
+/// Errors: the engine's unknown-voice message, a model without speech, invalid fields.
+#[tokio::test]
+async fn speech_errors_use_the_openai_error_object() {
+    let h = Harness::start(&models()).await;
+    let resp = h
+        .post(
+            "/v1/audio/speech",
+            serde_json::json!({"model": "phonon", "input": "hello", "voice": "nope"}),
+        )
+        .await;
+    assert_eq!(resp.status(), 400);
+    let e: Value = resp.json().await.unwrap();
+    assert!(
+        e["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown voice"),
+        "{e}"
+    );
+
+    let resp = h
+        .post(
+            "/v1/audio/speech",
+            serde_json::json!({"model": "llama3.2", "input": "hello"}),
+        )
+        .await;
+    assert_eq!(resp.status(), 400);
 
     for bad in [
         serde_json::json!({"input": "hello"}),
-        serde_json::json!({"model": "tts-1"}),
+        serde_json::json!({"model": "phonon"}),
+        serde_json::json!({"model": "phonon", "input": "x", "speed": 2}),
+        serde_json::json!({"model": "phonon", "input": "x", "response_format": "flac"}),
+        serde_json::json!({"model": "phonon", "input": "x", "instructions": "calm"}),
     ] {
-        assert_eq!(h.post("/v1/audio/speech", bad).await.status(), 400);
+        let resp = h.post("/v1/audio/speech", bad.clone()).await;
+        assert_eq!(resp.status(), 400, "{bad}");
+        let e: Value = resp.json().await.unwrap();
+        assert_eq!(e["error"]["type"], "invalid_request_error", "{bad}");
     }
 }

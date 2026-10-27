@@ -22,6 +22,7 @@ use alkahest_sched::{
 use alkahest_store::{
     AlkahestStore, Catalog, Digest, ModelOverlays, ModelSettings, OllamaStore, StoreError,
 };
+use axum::Json;
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::State;
@@ -253,6 +254,40 @@ async fn rerank(State(log): State<Arc<LlamaLog>>, body: Bytes) -> Response {
     .into_response_body()
 }
 
+/// ptts-openai-server `/v1/audio/speech`: logs the body and streams two chunks in the requested
+/// format (`RIFF` first for wav); voice `nope` is a 400 like the engine's unknown voice.
+async fn audio_speech(State(log): State<Arc<LlamaLog>>, Json(body): Json<Value>) -> Response {
+    log.requests
+        .lock()
+        .push(("/v1/audio/speech".into(), body.clone()));
+    if body["voice"] == "nope" {
+        return Response::builder()
+            .status(400)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"error":{"message":"unknown voice 'nope'; this server has Hugh, default","type":"invalid_request_error","param":"voice","code":null}}"#,
+            ))
+            .unwrap();
+    }
+    let format = body["response_format"]
+        .as_str()
+        .unwrap_or("mp3")
+        .to_string();
+    let first: &'static [u8] = if format == "wav" {
+        b"RIFF"
+    } else {
+        b"\x01\x02"
+    };
+    let chunks = futures::stream::iter([
+        Ok::<_, Infallible>(Bytes::from_static(first)),
+        Ok(Bytes::from_static(b"audio")),
+    ]);
+    Response::builder()
+        .header("content-type", format!("audio/{format}"))
+        .body(Body::from_stream(chunks))
+        .unwrap()
+}
+
 /// whisper-server `/inference`: logs the multipart fields (the file as its length) and answers
 /// in the requested `response_format` with the transcript "Hello world.".
 async fn inference(State(log): State<Arc<LlamaLog>>, mut mp: axum::extract::Multipart) -> Response {
@@ -461,6 +496,7 @@ pub async fn fake_llama(log: Arc<LlamaLog>) -> u16 {
         .route("/props", axum::routing::get(props))
         .route("/v1/rerank", post(rerank))
         .route("/inference", post(inference))
+        .route("/v1/audio/speech", post(audio_speech))
         .route("/v1/images/generations", post(images_generations))
         .route("/v1/systemone", post(systemone))
         .with_state(log);
@@ -607,6 +643,13 @@ pub fn rerank_model() -> FakeModel {
 pub fn stt_model() -> FakeModel {
     FakeModel {
         caps: Capabilities::of(&[Capability::SpeechToText]),
+        settings: ModelSettings::default(),
+    }
+}
+
+pub fn tts_model() -> FakeModel {
+    FakeModel {
+        caps: Capabilities::of(&[Capability::TextToSpeech]),
         settings: ModelSettings::default(),
     }
 }

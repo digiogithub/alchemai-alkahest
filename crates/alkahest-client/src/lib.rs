@@ -117,6 +117,24 @@ pub type Result<T, E = ClientError> = std::result::Result<T, E>;
 /// A stream of decoded NDJSON objects.
 pub type JsonStream<T> = Pin<Box<dyn Stream<Item = Result<T>> + Send>>;
 
+/// Raw response bytes as they arrive (audio of `/v1/audio/speech`).
+pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes>> + Send>>;
+
+/// A `POST /v1/audio/speech` request.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpeechRequest {
+    /// Speech model.
+    pub model: String,
+    /// Text to speak, at most 4096 characters.
+    pub input: String,
+    /// Voice name; `None` speaks with the model's `default` voice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice: Option<String>,
+    /// `wav` (the server's default), `pcm`, `mp3` or `opus`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<String>,
+}
+
 /// `/api/version`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -189,6 +207,8 @@ pub struct ShowResponse {
     pub model_info: serde_json::Map<String, Value>,
     /// Capabilities.
     pub capabilities: Vec<String>,
+    /// Voices of a speech model (`speech` capability), sorted; empty for other models.
+    pub voices: Vec<String>,
     /// Last modification.
     pub modified_at: String,
 }
@@ -744,6 +764,22 @@ impl Client {
         let mut body = serde_json::to_value(req).map_err(|e| ClientError::Decode(e.to_string()))?;
         body["stream"] = json!(true);
         self.stream("/api/generate", &body).await
+    }
+
+    /// `POST /v1/audio/speech`: the audio, streamed as the model speaks.
+    pub async fn speech(&self, req: &SpeechRequest) -> Result<ByteStream> {
+        let path = "/v1/audio/speech";
+        let body = serde_json::to_value(req).map_err(|e| ClientError::Decode(e.to_string()))?;
+        let resp = self
+            .send(self.request(reqwest::Method::POST, path).json(&body), path)
+            .await?;
+        let url = format!("{}{path}", self.base);
+        Ok(Box::pin(resp.bytes_stream().map(move |r| {
+            r.map_err(|source| ClientError::Http {
+                url: url.clone(),
+                source,
+            })
+        })))
     }
 
     /// `POST /api/chat`, streamed.

@@ -51,7 +51,10 @@ Yes on the chat routes of every dialect when the model's chat template supports 
 and JSON schema (`format` / `response_format`) are enforced by grammar in the engine.
 
 **Is text-to-speech available?**
-Not yet: `/v1/audio/speech` answers 501. Speech-to-text and image generation are available.
+Yes, with Phonon models (as in Ollama 0.40.11): `alkahest engines install ptts-openai-server`
+(builds Gradium's server with cargo; needs `libopus` and `libmp3lame` development packages),
+`alkahest pull phonon`, then `alkahest run phonon --voice Hugh "Hello"` or the OpenAI
+`/v1/audio/speech` endpoint. See [Speech](guide/speech.md).
 
 **How do I back up or move an installation?**
 Stop the server and copy the data directory (or the `ALKAHEST_HOME` root). The store is
