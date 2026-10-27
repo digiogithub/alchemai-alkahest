@@ -25,16 +25,20 @@ pub enum EngineId {
     WhisperCpp,
     /// stable-diffusion.cpp `sd-server` (image generation).
     StableDiffusionCpp,
+    /// Gradium `ptts-openai-server` (Phonon text to speech).
+    #[serde(rename = "ptts-openai-server")]
+    PttsOpenAiServer,
 }
 
 impl EngineId {
     /// Every known engine, in display order.
-    pub const ALL: [EngineId; 5] = [
+    pub const ALL: [EngineId; 6] = [
         EngineId::LlamaCpp,
         EngineId::PrismLlamaCpp,
         EngineId::Vllm,
         EngineId::WhisperCpp,
         EngineId::StableDiffusionCpp,
+        EngineId::PttsOpenAiServer,
     ];
 
     /// Stable string id.
@@ -45,6 +49,7 @@ impl EngineId {
             EngineId::Vllm => "vllm",
             EngineId::WhisperCpp => "whisper-cpp",
             EngineId::StableDiffusionCpp => "stable-diffusion-cpp",
+            EngineId::PttsOpenAiServer => "ptts-openai-server",
         }
     }
 
@@ -55,6 +60,7 @@ impl EngineId {
             EngineId::Vllm => &["vllm"],
             EngineId::WhisperCpp => &["whisper-server"],
             EngineId::StableDiffusionCpp => &["sd-server"],
+            EngineId::PttsOpenAiServer => &["ptts-openai-server"],
         }
     }
 
@@ -198,6 +204,8 @@ pub enum ApiDialect {
     WhisperServer,
     /// stable-diffusion.cpp `sd-server`.
     SdServer,
+    /// Gradium `ptts-openai-server` (`/v1/audio/speech`, `/v1/audio/voices`).
+    PttsServer,
 }
 
 impl ApiDialect {

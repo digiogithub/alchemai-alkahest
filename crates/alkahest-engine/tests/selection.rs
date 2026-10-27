@@ -116,6 +116,20 @@ fn rules_by_format_kind_and_quant() {
         (c.engine, c.reason),
         (EngineId::Vllm, SelectionReason::Safetensors)
     );
+
+    // A Phonon checkpoint folder is safetensors, but text to speech wins over the format rule,
+    // and it runs on CPU-only hosts where vLLM does not.
+    let tts = LaunchRequest::new(
+        "phonon",
+        "/m/phonon",
+        ModelFormat::Safetensors,
+        ModelKind::TextToSpeech,
+    );
+    let c = select_engine(&tts, &linux_cpu()).unwrap();
+    assert_eq!(
+        (c.engine, c.reason),
+        (EngineId::PttsOpenAiServer, SelectionReason::TextToSpeech)
+    );
 }
 
 #[test]

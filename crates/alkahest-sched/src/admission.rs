@@ -231,9 +231,15 @@ pub fn placement(
                 let on_gpu = policy != GpuLayers::None;
                 return estimate_ggml(w, model.weights_bytes, on_gpu);
             }
-            let bytes = model
+            let mut bytes = model
                 .weights_bytes
                 .saturating_add(model.projector_bytes.unwrap_or(0));
+            if model.engine == EngineId::PttsOpenAiServer {
+                // Phonon runs on the CPU; the runtime, codec state and audio buffers add a
+                // roughly fixed amount on top of the weights (276 MB peak RSS measured for
+                // 99 MB of BF16 weights with ptts-openai-server v0.5.0).
+                bytes = bytes.saturating_add(PTTS_OVERHEAD_BYTES);
+            }
             let on_gpu = policy != GpuLayers::None && model.dialect == ApiDialect::VllmOpenAi;
             MemoryEstimate {
                 weights_bytes: model.weights_bytes,
@@ -249,6 +255,9 @@ pub fn placement(
         }
     }
 }
+
+/// Memory `ptts-openai-server` uses besides the weights.
+const PTTS_OVERHEAD_BYTES: u64 = 256 * 1024 * 1024;
 
 /// The ggml workload class of a model run by whisper.cpp or stable-diffusion.cpp.
 fn ggml_workload(model: &ResolvedModel) -> Option<GgmlWorkload> {

@@ -306,12 +306,13 @@ impl ModelInfo {
     }
 
     /// Id of the engine that would run this model by default (`llama-cpp`,
-    /// `prism-llama-cpp`, `vllm`, `whisper-cpp`, `stable-diffusion-cpp`), following the
-    /// engine-choice rule of ALK-SP-0003.R2. A per-model override in the configuration
+    /// `prism-llama-cpp`, `vllm`, `whisper-cpp`, `stable-diffusion-cpp`, `ptts-openai-server`),
+    /// following the engine-choice rule of ALK-SP-0003.R2. A per-model override in the configuration
     /// overlay wins over it.
     pub fn default_engine(&self) -> &'static str {
         match self.kind {
             ModelKind::SpeechToText => "whisper-cpp",
+            ModelKind::TextToSpeech => "ptts-openai-server",
             ModelKind::Image | ModelKind::Video => "stable-diffusion-cpp",
             _ if self.format == ModelFormat::Safetensors => "vllm",
             _ if self.needs_prism || self.quantization.as_deref().is_some_and(is_prism_quant) => {
@@ -349,6 +350,7 @@ fn capabilities_of(
         ModelKind::Rerank => add("rerank"),
         ModelKind::Image => add("image-generation"),
         ModelKind::SpeechToText => add("transcription"),
+        ModelKind::TextToSpeech => add("speech"),
         _ => {}
     }
     if kind == ModelKind::Decision {

@@ -2,7 +2,8 @@
 //!
 //! PQ2_0 / PTQ1_0 GGUF -> the PrismML llama.cpp fork (preferring the tested
 //! `prism-b10777-e3de715` build), other GGUF -> mainline llama.cpp, safetensors -> vLLM (Linux
-//! with NVIDIA, macOS on Apple Silicon), speech to text -> whisper.cpp, image and video ->
+//! with NVIDIA, macOS on Apple Silicon), speech to text -> whisper.cpp, text to speech ->
+//! `ptts-openai-server`, image and video ->
 //! stable-diffusion.cpp. A per-model `engine` setting overrides the rule; it may pin a version
 //! as `<id>@<version>` (`llama-cpp@b6500`), which is how a model keeps an older build while
 //! others move to the newest (ALK-SP-0003.R5).
@@ -101,6 +102,8 @@ pub enum SelectionReason {
     Safetensors,
     /// A speech-to-text model.
     SpeechToText,
+    /// A text-to-speech model.
+    TextToSpeech,
     /// An image or video generation model.
     Image,
     /// Any other GGUF model.
@@ -114,6 +117,7 @@ impl fmt::Display for SelectionReason {
             SelectionReason::PrismQuant(q) => write!(f, "{q} weights"),
             SelectionReason::Safetensors => f.write_str("safetensors weights"),
             SelectionReason::SpeechToText => f.write_str("a speech-to-text model"),
+            SelectionReason::TextToSpeech => f.write_str("a text-to-speech model"),
             SelectionReason::Image => f.write_str("an image generation model"),
             SelectionReason::Gguf => f.write_str("GGUF weights"),
         }
@@ -277,6 +281,9 @@ fn automatic(req: &LaunchRequest) -> (EngineId, SelectionReason) {
     // checkpoint is stable-diffusion.cpp's, not vLLM's.
     match req.kind {
         ModelKind::SpeechToText => return (EngineId::WhisperCpp, SelectionReason::SpeechToText),
+        ModelKind::TextToSpeech => {
+            return (EngineId::PttsOpenAiServer, SelectionReason::TextToSpeech);
+        }
         ModelKind::Image | ModelKind::Video => {
             return (EngineId::StableDiffusionCpp, SelectionReason::Image);
         }

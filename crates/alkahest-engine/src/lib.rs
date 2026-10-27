@@ -21,6 +21,7 @@ pub mod install;
 pub mod launch;
 pub mod llama_cpp;
 pub mod locator;
+pub mod ptts;
 pub mod registry;
 pub mod sd_cpp;
 pub mod select;
