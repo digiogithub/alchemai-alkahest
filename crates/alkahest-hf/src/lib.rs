@@ -10,6 +10,8 @@
 //! - [`gguf`] picks GGUF files by quantisation (default preference `Q4_K_M` first), groups
 //!   split models and finds `mmproj` projectors.
 //!
+//! - [`phonon`] picks the checkpoint-folder files of Gradium Phonon text-to-speech
+//!   repositories (ALK-US-0141).
 //! - [`ggml`] lists the whisper.cpp models (`ggml-*.bin`) of a repository.
 //! - [`remote_gguf`] reads the GGUF header of a Hub file with range requests (memory
 //!   estimates before a download).
@@ -23,6 +25,7 @@ mod client;
 mod error;
 pub mod ggml;
 pub mod gguf;
+pub mod phonon;
 pub mod pull;
 mod recommended;
 pub mod remote_gguf;

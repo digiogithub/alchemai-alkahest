@@ -546,3 +546,15 @@ fn metadata_less_stable_diffusion_checkpoints_are_images() {
     });
     assert_eq!(c.kind, ModelKind::Image);
 }
+
+#[test]
+fn ollama_speech_capability_is_text_to_speech() {
+    // `phonon` (Ollama 0.40.9+): a per-tensor safetensors model whose config says
+    // `capabilities: ["speech"]` (ALK-US-0141).
+    let caps = caps(&["speech"]);
+    let c = classify(&ClassifyInput {
+        ollama_capabilities: &caps,
+        ..Default::default()
+    });
+    assert_eq!(c.kind, ModelKind::TextToSpeech);
+}

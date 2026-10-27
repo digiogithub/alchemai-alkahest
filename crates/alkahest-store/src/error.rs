@@ -123,6 +123,15 @@ pub enum StoreError {
         /// Why it was rejected.
         reason: String,
     },
+    /// A per-tensor safetensors blob cannot be turned into a checkpoint file: not exactly
+    /// one tensor, a name other than its layer name, offsets outside the blob (ALK-US-0141).
+    #[error("invalid tensor blob {what}: {reason}")]
+    InvalidTensor {
+        /// The layer (tensor name and digest) concerned.
+        what: String,
+        /// Why it was rejected.
+        reason: String,
+    },
     /// A name or reference is invalid.
     #[error(transparent)]
     Reference(#[from] RefError),

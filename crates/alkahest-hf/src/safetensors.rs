@@ -228,10 +228,48 @@ pub(crate) async fn pull_snapshot(
     info: &ModelInfo,
 ) -> Result<HfPullOutcome, HfPullError> {
     let repo = hf.repo_id();
-    let revision = info.sha.clone().unwrap_or_default();
     let all: Vec<RepoFile> = info.siblings.iter().map(RepoFile::from).collect();
     let files = select_snapshot_files(&repo, &all)?;
     let name = ModelName::new("hf.co", hf.org(), hf.repo(), TAG)?;
+    install_snapshot(
+        transfer,
+        client,
+        overlays,
+        info,
+        &repo,
+        files,
+        name,
+        Flavour::Vllm,
+    )
+    .await
+}
+
+/// What a snapshot is for, which decides its manifest config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Flavour {
+    /// A transformers snapshot for vLLM: config facts from `config.json`, recommended
+    /// sampling parameters from the repository.
+    Vllm,
+    /// A Gradium Phonon checkpoint folder ([`crate::phonon`]) with these weights.
+    Phonon(crate::phonon::PhononWeights),
+}
+
+/// Downloads `files` of `repo` (pinned to the revision in `info`), stores them as
+/// [`media_type::SAFETENSORS_FILE`] layers named by repository path under `name`, writes the
+/// manifest and builds the snapshot directory.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn install_snapshot(
+    transfer: &Transfer,
+    client: &HfClient,
+    overlays: Option<&ModelOverlays>,
+    info: &ModelInfo,
+    repo: &str,
+    files: Vec<RepoFile>,
+    name: ModelName,
+    flavour: Flavour,
+) -> Result<HfPullOutcome, HfPullError> {
+    let repo = repo.to_string();
+    let revision = info.sha.clone().unwrap_or_default();
     let store = transfer.store();
 
     // Held from the first blob until the manifest is written: GC takes it exclusively.
@@ -350,7 +388,7 @@ pub(crate) async fn pull_snapshot(
         .collect();
     let source = SourceInfo {
         kind: SourceKind::HuggingFace,
-        reference: format!("hf.co/{repo}:{TAG}"),
+        reference: format!("hf.co/{repo}:{}", name.tag()),
         revision: Some(revision.clone()),
         files: file_names.clone(),
         retrieved_at: OffsetDateTime::now_utc().format(&Rfc3339).ok(),
@@ -358,7 +396,12 @@ pub(crate) async fn pull_snapshot(
     layers.push(store.put_json_blob(media_type::ALKAHEST_SOURCE, &source)?);
 
     let mut recommended_json = None;
-    match client.recommended_params(&repo, Some(rev)).await {
+    // Sampling advice is for text generation; a speech checkpoint has none to give.
+    let advice = match flavour {
+        Flavour::Vllm => Some(client.recommended_params(&repo, Some(rev)).await),
+        Flavour::Phonon(_) => None,
+    };
+    match advice.unwrap_or_else(|| Ok(Default::default())) {
         Ok(params) if !params.is_empty() => {
             layers.push(store.put_json_blob(RECOMMENDED_MEDIA_TYPE, &params)?);
             recommended_json = serde_json::to_string(&params).ok();
@@ -372,23 +415,29 @@ pub(crate) async fn pull_snapshot(
         .filter(|p| is_weight(&p.file.path))
         .map(|p| p.size)
         .sum();
-    let mut config = ModelConfig {
-        model_format: "safetensors".into(),
-        model_family: facts.family.clone(),
-        file_type: facts.precision.clone(),
-        capabilities: facts.capabilities.clone(),
-        context_length: facts.context_length,
-        embedding_length: facts.embedding_length,
-        ..ModelConfig::default()
+    let mut config = match flavour {
+        Flavour::Phonon(weights) => crate::phonon::phonon_config(&config_json, info, weights),
+        Flavour::Vllm => {
+            let mut config = ModelConfig {
+                model_format: "safetensors".into(),
+                model_family: facts.family.clone(),
+                file_type: facts.precision.clone(),
+                capabilities: facts.capabilities.clone(),
+                context_length: facts.context_length,
+                embedding_length: facts.embedding_length,
+                ..ModelConfig::default()
+            };
+            if let Some(b) = facts.bytes_per_param.filter(|b| *b > 0) {
+                config.model_type = format_parameters(weight_bytes / b);
+            }
+            if let Some(tag) = &info.pipeline_tag {
+                config
+                    .extra
+                    .insert("pipeline_tag".into(), serde_json::json!(tag));
+            }
+            config
+        }
     };
-    if let Some(b) = facts.bytes_per_param.filter(|b| *b > 0) {
-        config.model_type = format_parameters(weight_bytes / b);
-    }
-    if let Some(tag) = &info.pipeline_tag {
-        config
-            .extra
-            .insert("pipeline_tag".into(), serde_json::json!(tag));
-    }
     let unverified: Vec<&str> = planned
         .iter()
         .filter(|p| p.unverified)

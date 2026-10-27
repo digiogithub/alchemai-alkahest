@@ -108,6 +108,10 @@ pub struct ModelInfo {
     /// GGUF summary, for GGUF repositories.
     #[serde(default)]
     pub gguf: Option<GgufSummary>,
+    /// Summary of the repository's `config.json` as the Hub reports it (`architectures`,
+    /// `model_type`, ...); used to recognise Phonon repositories.
+    #[serde(default)]
+    pub config: Option<serde_json::Value>,
     /// Files (sizes and LFS digests with `blobs=true`).
     #[serde(default)]
     pub siblings: Vec<Sibling>,

@@ -258,6 +258,13 @@ impl ModelInfo {
             }
             k => k,
         };
+        // Text-to-speech evidence that lives outside any GGUF header (ALK-US-0141): the Ollama
+        // `speech` capability, the Hub pipeline tag or a Phonon architecture.
+        let kind = if kind != ModelKind::Decision && is_speech_config(cfg) {
+            ModelKind::TextToSpeech
+        } else {
+            kind
+        };
 
         let known =
             |s: &str| (!s.is_empty() && !s.eq_ignore_ascii_case("unknown")).then(|| s.to_owned());
@@ -320,6 +327,29 @@ impl ModelInfo {
             _ => "llama-cpp",
         }
     }
+}
+
+/// Whether a model config marks a text-to-speech model: the Ollama `speech` capability, a Hub
+/// `pipeline_tag` of `text-to-speech` / `text-to-audio` (kept in `extra` by snapshot pulls) or
+/// a Gradium Phonon class in `architectures` (kept in `extra` by Phonon pulls).
+fn is_speech_config(cfg: &ModelConfig) -> bool {
+    let extra_str = |k: &str| cfg.extra.get(k).and_then(serde_json::Value::as_str);
+    cfg.capabilities
+        .iter()
+        .any(|c| c == crate::checkpoint::SPEECH_CAPABILITY)
+        || matches!(
+            extra_str("pipeline_tag"),
+            Some("text-to-speech" | "text-to-audio")
+        )
+        || cfg
+            .extra
+            .get("architectures")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|a| {
+                a.iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .any(|s| s.starts_with("GradiumPhonon"))
+            })
 }
 
 /// PQ2_0 and PTQ1_0 only load in the PrismML fork.
@@ -396,6 +426,101 @@ mod tests {
         assert_eq!(format_parameters(405_000_000_000), "405B");
         assert_eq!(format_parameters(137_000_000), "137M");
         assert_eq!(format_parameters(900), "900");
+    }
+
+    fn entry_with(config: ModelConfig, layers: Vec<crate::manifest::Descriptor>) -> ModelEntry {
+        use crate::manifest::{Descriptor, Manifest, media_type};
+        let manifest = Manifest::new(
+            Descriptor::new(media_type::CONFIG, Digest::from_bytes([0; 32]), 1),
+            layers,
+        );
+        ModelEntry {
+            name: "phonon".parse().unwrap(),
+            origin: crate::reference::Origin::Alkahest,
+            manifest_digest: Digest::from_bytes([9; 32]),
+            manifest_path: PathBuf::from("/s/manifests/x"),
+            modified: std::time::SystemTime::UNIX_EPOCH,
+            size: 1,
+            layers: manifest
+                .layers
+                .iter()
+                .map(|d| crate::source::LayerInfo {
+                    kind: d.kind(),
+                    descriptor: d.clone(),
+                    path: PathBuf::from("/s/blobs").join(d.digest.filename()),
+                    present: true,
+                })
+                .collect(),
+            manifest,
+            config: Some(config),
+            remote: false,
+        }
+    }
+
+    fn file_layer(name: &str, n: u8) -> crate::manifest::Descriptor {
+        let mut d = crate::manifest::Descriptor::new(
+            crate::manifest::media_type::SAFETENSORS_FILE,
+            Digest::from_bytes([n; 32]),
+            1,
+        );
+        d.name = Some(name.into());
+        d
+    }
+
+    #[test]
+    fn speech_models_are_text_to_speech() {
+        // Converted Ollama `phonon`: capability `speech`, checkpoint folder.
+        let ollama = entry_with(
+            ModelConfig {
+                model_format: "safetensors".into(),
+                capabilities: vec!["speech".into()],
+                ..ModelConfig::default()
+            },
+            vec![
+                file_layer("model.safetensors", 1),
+                file_layer("config.json", 2),
+            ],
+        );
+        let info = ModelInfo::derive(&ollama, None);
+        assert_eq!(info.kind, ModelKind::TextToSpeech);
+        assert_eq!(info.format, ModelFormat::Safetensors);
+        assert!(info.loadable);
+        assert_eq!(
+            ollama.weights_path(),
+            Some(PathBuf::from("/s/snapshots").join(Digest::from_bytes([9; 32]).hex()))
+        );
+
+        // Hub pipeline tag or Phonon architecture, without the capability.
+        for (k, v) in [
+            ("pipeline_tag", serde_json::json!("text-to-speech")),
+            ("pipeline_tag", serde_json::json!("text-to-audio")),
+            (
+                "architectures",
+                serde_json::json!(["GradiumPhononTTSForConditionalGeneration"]),
+            ),
+        ] {
+            let mut cfg = ModelConfig {
+                capabilities: vec!["completion".into()],
+                ..ModelConfig::default()
+            };
+            cfg.extra.insert(k.into(), v);
+            let e = entry_with(cfg, vec![file_layer("model.q8.gguf", 1)]);
+            assert_eq!(
+                ModelInfo::derive(&e, None).kind,
+                ModelKind::TextToSpeech,
+                "{k}"
+            );
+        }
+
+        // A text model stays what it was.
+        let mut cfg = ModelConfig {
+            capabilities: vec!["completion".into()],
+            ..ModelConfig::default()
+        };
+        cfg.extra
+            .insert("pipeline_tag".into(), serde_json::json!("text-generation"));
+        let e = entry_with(cfg, vec![file_layer("model.safetensors", 1)]);
+        assert_eq!(ModelInfo::derive(&e, None).kind, ModelKind::Completion);
     }
 
     #[test]

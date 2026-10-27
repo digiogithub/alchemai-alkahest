@@ -219,6 +219,28 @@ pub async fn pull_hf_with(
     let repo = hf.repo_id();
     let info = client.model_info(&repo, None).await?;
     let files: Vec<RepoFile> = info.siblings.iter().map(RepoFile::from).collect();
+    // Phonon text-to-speech repositories ship GGUF and safetensors weights for one engine
+    // that loads a folder: always a checkpoint-folder snapshot (ALK-US-0141).
+    if crate::phonon::is_phonon_repo(&info) {
+        let sel = crate::phonon::select_phonon_files(
+            &repo,
+            &files,
+            hf.selector(),
+            format == PullFormat::Safetensors,
+        )?;
+        let name = ModelName::new("hf.co", hf.org(), hf.repo(), sel.weights.tag)?;
+        return crate::safetensors::install_snapshot(
+            transfer,
+            client,
+            overlays,
+            &info,
+            &repo,
+            sel.files,
+            name,
+            crate::safetensors::Flavour::Phonon(sel.weights),
+        )
+        .await;
+    }
     // whisper.cpp repositories hold `ggml-*.bin` files and no GGUF.
     if format == PullFormat::Auto
         && gguf_variants(&files).is_empty()
