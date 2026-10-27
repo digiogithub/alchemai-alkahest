@@ -2,14 +2,16 @@
 id: ALK-US-0138
 type: story
 title: "cargo deny advisories fails: RUSTSEC-2026-0382/0383/0385 and yanked clipboard-win"
-status: triage
+status: in_review
 priority: high
+parent: ALK-EP-0014
 author: mcp
 labels: [security, ci]
 created: 2026-10-27T14:48:57Z
-updated: 2026-10-27T14:48:57Z
+updated: 2026-10-27T15:58:06Z
+started: 2026-10-27T15:58:06Z
 inbox:
-  status: pending
+  status: accepted
   source: mcp
   received: 2026-10-27T14:48:57Z
 ---
