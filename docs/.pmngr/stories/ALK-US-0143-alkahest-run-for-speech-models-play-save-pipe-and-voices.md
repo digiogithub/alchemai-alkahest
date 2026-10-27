@@ -2,7 +2,7 @@
 id: ALK-US-0143
 type: story
 title: "alkahest run for speech models: play, save, pipe and voices"
-status: todo
+status: in_review
 priority: medium
 parent: ALK-EP-0011
 milestone: ALK-M-0004
@@ -10,7 +10,8 @@ author: mcp
 labels: [cli, tts]
 estimate: 3
 created: 2026-10-27T15:09:35Z
-updated: 2026-10-27T15:09:35Z
+updated: 2026-10-27T15:39:42Z
+started: 2026-10-27T15:39:42Z
 ---
 
 ## Description

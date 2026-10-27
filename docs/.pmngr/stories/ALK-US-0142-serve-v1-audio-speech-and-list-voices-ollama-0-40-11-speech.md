@@ -2,7 +2,7 @@
 id: ALK-US-0142
 type: story
 title: Serve /v1/audio/speech and list voices (Ollama 0.40.11 speech API)
-status: todo
+status: in_review
 priority: high
 parent: ALK-EP-0011
 milestone: ALK-M-0004
@@ -10,7 +10,8 @@ author: mcp
 labels: [api, tts]
 estimate: 3
 created: 2026-10-27T15:09:35Z
-updated: 2026-10-27T15:09:35Z
+updated: 2026-10-27T15:39:42Z
+started: 2026-10-27T15:39:42Z
 ---
 
 ## Description

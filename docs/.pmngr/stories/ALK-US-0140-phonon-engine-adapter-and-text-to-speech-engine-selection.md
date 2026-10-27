@@ -2,7 +2,7 @@
 id: ALK-US-0140
 type: story
 title: Phonon engine adapter and text-to-speech engine selection
-status: todo
+status: in_review
 priority: high
 parent: ALK-EP-0011
 milestone: ALK-M-0004
@@ -10,7 +10,8 @@ author: mcp
 labels: [engine, tts]
 estimate: 3
 created: 2026-10-27T15:09:34Z
-updated: 2026-10-27T15:09:34Z
+updated: 2026-10-27T15:39:42Z
+started: 2026-10-27T15:39:42Z
 ---
 
 ## Description

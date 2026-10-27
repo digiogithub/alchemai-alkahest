@@ -2,7 +2,7 @@
 id: ALK-US-0141
 type: story
 title: Pull Phonon from the Ollama registry and Hugging Face as a checkpoint folder
-status: todo
+status: in_review
 priority: high
 parent: ALK-EP-0011
 milestone: ALK-M-0004
@@ -10,7 +10,8 @@ author: mcp
 labels: [store, ollama, hf, tts]
 estimate: 5
 created: 2026-10-27T15:09:35Z
-updated: 2026-10-27T15:09:35Z
+updated: 2026-10-27T15:39:42Z
+started: 2026-10-27T15:39:42Z
 ---
 
 ## Description
