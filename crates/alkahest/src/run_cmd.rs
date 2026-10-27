@@ -81,6 +81,22 @@ pub fn run(args: &RunArgs, loaded: &Loaded, stats: bool) -> Result<ExitCode> {
         ),
         Err(e) => return Err(e.into()),
     };
+    if show.capabilities.iter().any(|c| c == "speech") {
+        let text = args.prompt.join(" ");
+        crate::speech_cmd::Speech {
+            client: &c,
+            model: &args.model,
+            voice: args.voice.as_deref(),
+        }
+        .run(&rt, &text, stdin_tty)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args.voice.is_some() {
+        bail!(
+            "--voice is for speech models; '{}' does not speak",
+            args.model
+        );
+    }
     if show.capabilities.iter().any(|c| c == "embedding")
         && !show.capabilities.iter().any(|c| c == "completion")
     {
@@ -783,6 +799,7 @@ mod tests {
             hidethinking: false,
             keepalive: None,
             no_start: true,
+            voice: None,
         }
     }
 

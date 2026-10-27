@@ -97,6 +97,12 @@ pub fn show(args: &ShowArgs, loaded: &Loaded, json: bool) -> Result<ExitCode> {
         let mut doc = serde_json::to_value(entry.summary())?;
         if let Some(map) = doc.as_object_mut() {
             map.insert("template".into(), json!(detail.template));
+            if alkahest_api::audio::speech::is_speech_model(&entry) {
+                map.insert(
+                    "voices".into(),
+                    json!(alkahest_api::audio::speech::speech_voices(&entry)),
+                );
+            }
             map.insert(
                 "template_from_gguf".into(),
                 json!(detail.template_from_gguf),
@@ -173,6 +179,13 @@ fn render_show<W: Write>(
         writeln!(out, "    {:<18}also in: {}", "note", names.join(", "))?;
     }
     section(out, "Capabilities", &i.capabilities.join("\n"))?;
+    if alkahest_api::audio::speech::is_speech_model(e) {
+        section(
+            out,
+            "Voices",
+            &alkahest_api::audio::speech::speech_voices(e).join("\n"),
+        )?;
+    }
     let params: Vec<String> = d
         .parameter_lines()
         .iter()

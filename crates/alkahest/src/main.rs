@@ -21,6 +21,7 @@ mod serve_cmd;
 mod service_cmd;
 mod service_launchd;
 mod service_windows;
+mod speech_cmd;
 mod store_import_cmd;
 mod sysinfo_cmd;
 mod update;

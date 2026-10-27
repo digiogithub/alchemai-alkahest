@@ -140,6 +140,10 @@ pub struct RunArgs {
     /// Do not offer to start the server when it is not running.
     #[arg(long)]
     pub no_start: bool,
+    /// Speech models: the voice to speak with (`alkahest show <model>` lists them); the
+    /// model's `default` voice when omitted.
+    #[arg(long, value_name = "NAME")]
+    pub voice: Option<String>,
 }
 
 /// Arguments of `alkahest create`.

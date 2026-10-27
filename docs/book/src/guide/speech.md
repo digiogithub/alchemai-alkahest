@@ -21,6 +21,22 @@ alkahest pull hf.co/gradium/phonon-31m-en
 `alkahest show phonon` lists the voices. A `phonon` already pulled by Ollama is reused: Alkahest
 reads its files and builds its own copy, never changing Ollama's store.
 
+## Speak from the terminal
+
+```shell
+alkahest run phonon "Hello from Alkahest."
+alkahest run phonon --voice Zoey "Hi, this is Zoey."
+echo "Text from another program works too." | alkahest run phonon
+alkahest run llama3.2 "Tell me a fun fact about owls in two sentences." | alkahest run phonon
+alkahest run phonon "Save this to a file." > speech.wav
+```
+
+Piped text is spoken as it arrives, a few sentences at a time, so a chat model's answer starts
+playing before it is finished. Without text, `alkahest run phonon` opens a `>>>` prompt: each
+line is spoken, Ctrl+C stops speaking, `/bye` or Ctrl+D exits. Audio plays with `afplay` on
+macOS, the first of `paplay`, `pw-play`, `aplay` or `ffplay` on Linux, and PowerShell on
+Windows; when stdout is redirected, one WAV file is written instead.
+
 ## API
 
 OpenAI-compatible `POST /v1/audio/speech`, streamed while the model speaks:
