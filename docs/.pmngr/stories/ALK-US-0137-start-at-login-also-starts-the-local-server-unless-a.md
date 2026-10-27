@@ -2,7 +2,7 @@
 id: ALK-US-0137
 type: story
 title: Start at login also starts the local server unless a service runs it
-status: in_progress
+status: in_review
 priority: medium
 parent: ALK-EP-0013
 milestone: ALK-M-0005
@@ -10,7 +10,7 @@ author: mcp
 labels: [desktop]
 estimate: 2
 created: 2026-10-27T14:46:53Z
-updated: 2026-10-27T14:46:53Z
+updated: 2026-10-27T14:49:00Z
 started: 2026-10-27T14:46:53Z
 ---
 
