@@ -355,7 +355,7 @@ impl RecipeEngineManager {
             )));
         }
         let from_source = req.from_source || recipe.native;
-        if from_source && recipe.source.is_none() {
+        if from_source && !recipe.has_build_steps() {
             return Err(HttpError::bad_request(format!(
                 "{} {} ({}) has no source build steps in its recipe",
                 recipe.id, recipe.tag, recipe.variant
@@ -441,7 +441,7 @@ impl EngineManager for RecipeEngineManager {
                     installed: true,
                     recommended: false,
                     prebuilt: r.is_some_and(|r| r.asset_for(&self.host).is_some()),
-                    source_build: r.is_some_and(|r| r.source.is_some()),
+                    source_build: r.is_some_and(|r| r.has_build_steps()),
                     from_source: e.from_source,
                     cuda: r.and_then(|r| r.cuda).map(|(a, b)| format!("{a}.{b}")),
                     notes: r.map(|r| r.notes.clone()).unwrap_or_default(),
@@ -470,7 +470,7 @@ impl EngineManager for RecipeEngineManager {
                         continue;
                     }
                     let (origin, origin_commit) = origin_of(&catalog, r);
-                    let state = if !r.installable_on(&self.host) && r.source.is_none() {
+                    let state = if !r.installable_on(&self.host) && !r.has_build_steps() {
                         "unsupported"
                     } else if is_recommended {
                         "recommended"
@@ -487,7 +487,7 @@ impl EngineManager for RecipeEngineManager {
                         installed: false,
                         recommended: is_recommended,
                         prebuilt: r.asset_for(&self.host).is_some(),
-                        source_build: r.source.is_some(),
+                        source_build: r.has_build_steps(),
                         from_source: false,
                         cuda: r.cuda.map(|(a, b)| format!("{a}.{b}")),
                         notes: r.notes.clone(),

@@ -25,6 +25,7 @@ const BUILTIN: &[&str] = &[
     include_str!("../../../recipes/vllm.toml"),
     include_str!("../../../recipes/whisper-cpp.toml"),
     include_str!("../../../recipes/stable-diffusion-cpp.toml"),
+    include_str!("../../../recipes/ptts-openai-server.toml"),
 ];
 
 /// A recipe file that was found but could not be used.

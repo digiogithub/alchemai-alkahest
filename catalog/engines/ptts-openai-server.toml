@@ -1,0 +1,70 @@
+# Engine recipe: ptts-openai-server, Gradium's text-to-speech server (ALK-US-0139, ADR 0008).
+#
+# Pinned to the upstream release tag v0.5.0 (commit e851445158f07061f063e3edff0080f9426c0da2 of
+# github.com/gradium-ai/xn-ptts, licence MIT OR Apache-2.0). Upstream publishes no binaries, so
+# every variant is a Cargo source build (`engines install ptts-openai-server` runs
+# `cargo build --release --locked -p ptts-openai-server`; about a minute for the CPU build).
+#
+# Prerequisites on the machine that builds:
+#   - a Rust toolchain (cargo), git and pkg-config;
+#   - libopus and libmp3lame development packages:
+#       Debian/Ubuntu  apt-get install libopus-dev libmp3lame-dev pkg-config
+#       macOS          brew install opus lame pkg-config
+#   LAME is LGPL. Alkahest does not ship or link it: the user installs it and the upstream
+#   server links it dynamically (see docs/development/decisions/0008-phonon-tts-engine.md).
+#
+# Variants (the Cargo features of the package: cuda, vulkan, metal, accelerate, kai):
+#   cpu       no accelerator feature; runs everywhere.
+#   metal     macOS Apple Silicon: the `metal` feature.
+#   cuda12.4  the `cuda` feature; needs a CUDA toolkit (nvcc on PATH) at build time and the CUDA
+#             runtime libraries at run time.
+#   vulkan    the `vulkan` feature; needs the Vulkan SDK at build time and a Vulkan driver.
+
+id = "ptts-openai-server"
+version = "v0.5.0"
+description = "ptts-openai-server (text-to-speech server)"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/gradium-ai/xn-ptts"
+executable = "ptts-openai-server"
+
+
+[variants."cpu"]
+accelerator = "cpu"
+notes = "Cargo source build only: needs Rust, pkg-config, libopus and libmp3lame dev packages."
+[variants."cpu".cargo]
+git = "https://github.com/gradium-ai/xn-ptts.git"
+rev = "e851445158f07061f063e3edff0080f9426c0da2"
+package = "ptts-openai-server"
+
+
+[variants."metal"]
+accelerator = "metal"
+notes = "Cargo source build on macOS Apple Silicon; Metal is compiled in."
+[variants."metal".cargo]
+git = "https://github.com/gradium-ai/xn-ptts.git"
+rev = "e851445158f07061f063e3edff0080f9426c0da2"
+package = "ptts-openai-server"
+features = ["metal"]
+
+
+[variants."cuda12.4"]
+accelerator = "cuda"
+cuda = "12.4"
+notes = "Cargo source build with the CUDA toolkit (nvcc) on PATH; needs the CUDA runtime libraries on the host."
+[variants."cuda12.4".cargo]
+git = "https://github.com/gradium-ai/xn-ptts.git"
+rev = "e851445158f07061f063e3edff0080f9426c0da2"
+package = "ptts-openai-server"
+features = ["cuda"]
+tools = ["git", "cargo", "nvcc"]
+
+
+[variants."vulkan"]
+accelerator = "vulkan"
+notes = "Cargo source build; needs the Vulkan SDK (headers and glslc)."
+[variants."vulkan".cargo]
+git = "https://github.com/gradium-ai/xn-ptts.git"
+rev = "e851445158f07061f063e3edff0080f9426c0da2"
+package = "ptts-openai-server"
+features = ["vulkan"]
+tools = ["git", "cargo", "glslc"]

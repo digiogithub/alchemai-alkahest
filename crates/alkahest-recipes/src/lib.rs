@@ -42,8 +42,8 @@ pub use install::{
     engine_license_text, install, list_installed, locate, remove_installed,
 };
 pub use recipe::{
-    AcceleratorKind, ArchiveFormat, Asset, Companion, Dependency, Host, ParsedRecipes, Recipe,
-    RecipeOrigin, SourceBuild, VenvBuild, parse_recipes, parse_recipes_with, select_native,
+    AcceleratorKind, ArchiveFormat, Asset, CargoBuild, Companion, Dependency, Host, ParsedRecipes,
+    Recipe, RecipeOrigin, SourceBuild, VenvBuild, parse_recipes, parse_recipes_with, select_native,
     select_variant,
 };
 pub use relocate::{EngineCopy, copy_installed};

@@ -352,6 +352,43 @@ impl SourceBuild {
     }
 }
 
+/// How to build a variant from a Cargo workspace (`cargo build --release --locked -p <package>`),
+/// for engines written in Rust that publish no binaries (ALK-US-0139).
+///
+/// The checkout is fetched exactly like a [`SourceBuild`] (`git fetch --depth 1 <rev>`), so the
+/// same pinning rules apply. The produced `target/release/<bin>` is copied into the install
+/// directory root and the checkout is deleted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CargoBuild {
+    /// Git repository URL.
+    pub git: String,
+    /// Commit, tag or branch to build; a commit id or tag keeps the build reproducible.
+    pub rev: String,
+    /// Workspace package to build (`-p`).
+    pub package: String,
+    /// Cargo features to enable (`--features a,b`); none when empty.
+    #[serde(default)]
+    pub features: Vec<String>,
+    /// Name of the produced binary; the package name when absent.
+    #[serde(default)]
+    pub bin: Option<String>,
+    /// Programs that must be on `PATH` before the build starts.
+    #[serde(default = "default_cargo_tools")]
+    pub tools: Vec<String>,
+}
+
+impl CargoBuild {
+    /// Name of the produced binary (without `.exe`): `bin`, or the package name.
+    pub fn bin_name(&self) -> &str {
+        self.bin.as_deref().unwrap_or(&self.package)
+    }
+}
+
+fn default_cargo_tools() -> Vec<String> {
+    vec!["git".into(), "cargo".into()]
+}
+
 fn default_tools() -> Vec<String> {
     vec!["git".into(), "cmake".into(), "ninja".into()]
 }
@@ -417,6 +454,8 @@ struct VariantDef {
     source: Option<SourceBuild>,
     #[serde(default)]
     venv: Option<VenvBuild>,
+    #[serde(default)]
+    cargo: Option<CargoBuild>,
 }
 
 /// A recipe file as written.
@@ -488,6 +527,8 @@ pub struct Recipe {
     pub source: Option<SourceBuild>,
     /// Python virtual environment steps, for engines distributed as Python packages (vLLM).
     pub venv: Option<VenvBuild>,
+    /// Cargo build steps, for Rust engines built from a git checkout (ptts-openai-server).
+    pub cargo: Option<CargoBuild>,
 }
 
 /// The result of [`parse_recipes_with`]: the recipes plus non-fatal findings.
@@ -512,6 +553,23 @@ pub fn parse_recipes(text: &str) -> Result<Vec<Recipe>> {
 fn looks_like_branch(rev: &str) -> bool {
     let hex_id = (7..=64).contains(&rev.len()) && rev.bytes().all(|b| b.is_ascii_hexdigit());
     !(hex_id || rev.chars().any(|c| c.is_ascii_digit())) || rev.starts_with("refs/heads/")
+}
+
+/// Checks the repository URL and the pinned ref of a `source` or `cargo` table; the error
+/// starts with the field name (`git must be ...`, `rev ... is not a valid ref`).
+fn check_git_ref(git: &str, rev: &str) -> std::result::Result<(), String> {
+    if !(git.starts_with("https://") || git.starts_with("ssh://")) {
+        return Err("git must be an https:// or ssh:// URL".into());
+    }
+    if rev.is_empty()
+        || rev.starts_with('-')
+        || !rev
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+    {
+        return Err(format!("rev `{rev}` is not a valid ref"));
+    }
+    Ok(())
 }
 
 /// Parses and validates a recipe file for the given `origin` (ALK-SP-0011.R4): a
@@ -574,15 +632,41 @@ pub fn parse_recipes_with(text: &str, origin: RecipeOrigin) -> Result<ParsedReci
             (_, None) => None,
         };
         if v.native {
-            if !v.assets.is_empty() || v.venv.is_some() {
+            if !v.assets.is_empty() || v.venv.is_some() || v.cargo.is_some() {
                 return Err(vbad("a native variant is source-only".into()));
             }
             if v.source.is_none() {
                 return Err(vbad("a native variant needs a `source` table".into()));
             }
         }
-        if v.assets.is_empty() && v.source.is_none() && v.venv.is_none() {
-            return Err(vbad("needs `assets`, a `source` or a `venv` table".into()));
+        if v.assets.is_empty() && v.source.is_none() && v.venv.is_none() && v.cargo.is_none() {
+            return Err(vbad(
+                "needs `assets`, a `source`, a `venv` or a `cargo` table".into(),
+            ));
+        }
+        if v.cargo.is_some() && (v.source.is_some() || v.venv.is_some()) {
+            return Err(vbad(
+                "`cargo` cannot be combined with `source` or `venv`".into(),
+            ));
+        }
+        if let Some(c) = &v.cargo {
+            check_git_ref(&c.git, &c.rev).map_err(|r| vbad(format!("cargo: {r}")))?;
+            if !ident(&c.package)
+                || c.bin.as_deref().is_some_and(|b| !ident(b))
+                || c.tools.iter().any(|t| !ident(t))
+                || c.features.iter().any(|f| !ident(f))
+            {
+                return Err(vbad(
+                    "cargo.package, cargo.bin, cargo.features and cargo.tools must be names".into(),
+                ));
+            }
+            if origin == RecipeOrigin::GitCatalog && looks_like_branch(&c.rev) {
+                warnings.push(format!(
+                    "recipe `{}` variant `{name}`: cargo.rev `{}` looks like a branch; pin a \
+                     commit id or a tag",
+                    file.id, c.rev
+                ));
+            }
         }
         if let Some(venv) = &v.venv {
             check_venv(venv).map_err(|r| vbad(format!("venv: {r}")))?;
@@ -676,18 +760,7 @@ pub fn parse_recipes_with(text: &str, origin: RecipeOrigin) -> Result<ParsedReci
             check_relative(&d.dest).map_err(|r| vbad(format!("{at}: dest: {r}")))?;
         }
         if let Some(s) = &v.source {
-            if !(s.git.starts_with("https://") || s.git.starts_with("ssh://")) {
-                return Err(vbad("source.git must be an https:// or ssh:// URL".into()));
-            }
-            if s.rev.is_empty()
-                || s.rev.starts_with('-')
-                || !s
-                    .rev
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
-            {
-                return Err(vbad(format!("source.rev `{}` is not a valid ref", s.rev)));
-            }
+            check_git_ref(&s.git, &s.rev).map_err(|r| vbad(format!("source.{r}")))?;
             if s.tools.iter().any(|t| !ident(t)) || s.targets.iter().any(|t| !ident(t)) {
                 return Err(vbad("source.tools and source.targets must be names".into()));
             }
@@ -719,6 +792,7 @@ pub fn parse_recipes_with(text: &str, origin: RecipeOrigin) -> Result<ParsedReci
             native: v.native,
             source: v.source,
             venv: v.venv,
+            cargo: v.cargo,
         });
     }
     Ok(ParsedRecipes {
@@ -904,14 +978,19 @@ impl Recipe {
     /// the recipe has build steps (whisper.cpp publishes no Linux binaries). Python
     /// environments are not source builds.
     pub fn needs_source_build(&self, host: &Host) -> bool {
-        self.asset_for(host).is_none() && self.source.is_some() && self.venv.is_none()
+        self.asset_for(host).is_none() && self.has_build_steps() && self.venv.is_none()
+    }
+
+    /// Whether the variant can be built locally: it has `source` (CMake) or `cargo` steps.
+    pub fn has_build_steps(&self) -> bool {
+        self.source.is_some() || self.cargo.is_some()
     }
 
     /// Whether this variant can be installed on `host`: a prebuilt asset exists, or it can be
     /// built from source.
     pub fn installable_on(&self, host: &Host) -> bool {
         self.asset_for(host).is_some()
-            || self.source.is_some()
+            || self.has_build_steps()
             || self.venv.as_ref().is_some_and(|v| v.supports(host))
     }
 

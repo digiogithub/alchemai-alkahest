@@ -502,13 +502,13 @@ fn builtin_recipes_declare_licence_and_ship_text() {
     for r in builtin_recipes() {
         let spdx = r.license.as_deref().unwrap_or("");
         assert!(
-            matches!(spdx, "MIT" | "Apache-2.0"),
+            matches!(spdx, "MIT" | "Apache-2.0" | "MIT OR Apache-2.0"),
             "{} declares {spdx:?}",
             r.id
         );
         let text = alkahest_recipes::engine_license_text(&r.id)
             .unwrap_or_else(|| panic!("no licence text for {}", r.id));
-        assert!(text.contains(if spdx == "MIT" {
+        assert!(text.contains(if spdx.contains("MIT") {
             "MIT"
         } else {
             "Apache License"

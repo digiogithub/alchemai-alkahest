@@ -10,7 +10,7 @@ use std::process::Stdio;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{RecipeError, Result};
-use crate::recipe::{SourceBuild, VenvBuild};
+use crate::recipe::{CargoBuild, SourceBuild, VenvBuild};
 
 /// The programs a source build runs; overridable so tests (and unusual systems) can point at
 /// other executables.
@@ -20,6 +20,8 @@ pub struct BuildTools {
     pub git: PathBuf,
     /// The `cmake` program.
     pub cmake: PathBuf,
+    /// The `cargo` program, for `cargo` recipe builds.
+    pub cargo: PathBuf,
     /// The `uv` program, preferred for Python environments.
     pub uv: PathBuf,
     /// The Python interpreter used when `uv` is absent.
@@ -31,6 +33,7 @@ impl Default for BuildTools {
         Self {
             git: "git".into(),
             cmake: "cmake".into(),
+            cargo: "cargo".into(),
             uv: "uv".into(),
             python: "python3".into(),
         }
@@ -43,6 +46,7 @@ impl BuildTools {
         match name {
             "git" => self.git.clone(),
             "cmake" => self.cmake.clone(),
+            "cargo" => self.cargo.clone(),
             other => PathBuf::from(other),
         }
     }
@@ -64,7 +68,12 @@ fn tool_exists(program: &Path) -> bool {
 
 /// Checks that every tool the recipe lists is available.
 pub(crate) fn check_tools(src: &SourceBuild, tools: &BuildTools) -> Result<()> {
-    for name in &src.tools {
+    check_tool_names(&src.tools, tools)
+}
+
+/// Checks that every program named in `names` is available.
+fn check_tool_names(names: &[String], tools: &BuildTools) -> Result<()> {
+    for name in names {
         if !tool_exists(&tools.program(name)) {
             return Err(RecipeError::BuildToolMissing(name.clone()));
         }
@@ -88,82 +97,24 @@ pub(crate) async fn build_from_source(
     }
     let checkout = work.join("src");
     fs::create_dir_all(&checkout).map_err(|e| RecipeError::io(&checkout, e))?;
-    let git = tools.git.clone();
     let cmake = tools.cmake.clone();
     let step = |name: &'static str, program: &Path, args: Vec<String>| Step {
         name,
         program: program.to_path_buf(),
         args,
         cwd: checkout.clone(),
+        env: Vec::new(),
     };
-
-    run(
-        &step("git init", &git, vec!["init".into(), "-q".into()]),
+    git_checkout(
+        &src.git,
+        &src.rev,
+        src.submodules,
+        tools,
+        &checkout,
         log,
         cancel,
     )
     .await?;
-    run(
-        &step(
-            "git remote",
-            &git,
-            vec![
-                "remote".into(),
-                "add".into(),
-                "origin".into(),
-                src.git.clone(),
-            ],
-        ),
-        log,
-        cancel,
-    )
-    .await?;
-    run(
-        &step(
-            "git fetch",
-            &git,
-            vec![
-                "fetch".into(),
-                "--depth".into(),
-                "1".into(),
-                "origin".into(),
-                src.rev.clone(),
-            ],
-        ),
-        log,
-        cancel,
-    )
-    .await?;
-    run(
-        &step(
-            "git checkout",
-            &git,
-            vec!["checkout".into(), "-q".into(), "FETCH_HEAD".into()],
-        ),
-        log,
-        cancel,
-    )
-    .await?;
-
-    if src.submodules {
-        run(
-            &step(
-                "git submodules",
-                &git,
-                vec![
-                    "submodule".into(),
-                    "update".into(),
-                    "--init".into(),
-                    "--recursive".into(),
-                    "--depth".into(),
-                    "1".into(),
-                ],
-            ),
-            log,
-            cancel,
-        )
-        .await?;
-    }
 
     let mut configure: Vec<String> = vec![
         "-S".into(),
@@ -203,6 +154,126 @@ pub(crate) async fn build_from_source(
     Ok(())
 }
 
+/// Fetches `rev` of `git_url` (shallow) into the empty directory `checkout` and checks it out,
+/// with its submodules when asked. Shared by the CMake and Cargo builds.
+async fn git_checkout(
+    git_url: &str,
+    rev: &str,
+    submodules: bool,
+    tools: &BuildTools,
+    checkout: &Path,
+    log: &Path,
+    cancel: &CancellationToken,
+) -> Result<()> {
+    let git = &tools.git;
+    let step = |name: &'static str, args: Vec<String>| Step {
+        name,
+        program: git.clone(),
+        args,
+        cwd: checkout.to_path_buf(),
+        env: Vec::new(),
+    };
+    let strs = |a: &[&str]| a.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+    run(&step("git init", strs(&["init", "-q"])), log, cancel).await?;
+    run(
+        &step("git remote", strs(&["remote", "add", "origin", git_url])),
+        log,
+        cancel,
+    )
+    .await?;
+    run(
+        &step("git fetch", strs(&["fetch", "--depth", "1", "origin", rev])),
+        log,
+        cancel,
+    )
+    .await?;
+    run(
+        &step("git checkout", strs(&["checkout", "-q", "FETCH_HEAD"])),
+        log,
+        cancel,
+    )
+    .await?;
+    if submodules {
+        run(
+            &step(
+                "git submodules",
+                strs(&[
+                    "submodule",
+                    "update",
+                    "--init",
+                    "--recursive",
+                    "--depth",
+                    "1",
+                ]),
+            ),
+            log,
+            cancel,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// The `cargo build` arguments of `c`: release profile, locked dependencies, the package and
+/// its features.
+pub(crate) fn cargo_build_args(c: &CargoBuild) -> Vec<String> {
+    let mut args: Vec<String> = ["build", "--release", "--locked", "-p"]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    args.push(c.package.clone());
+    if !c.features.is_empty() {
+        args.push("--features".into());
+        args.push(c.features.join(","));
+    }
+    args
+}
+
+/// File name of the binary `cargo` produces for `bin` on this platform.
+fn cargo_bin_file(bin: &str) -> String {
+    if cfg!(windows) {
+        format!("{bin}.exe")
+    } else {
+        bin.to_string()
+    }
+}
+
+/// Fetches `c` into `work/src`, runs `cargo build --release --locked -p <package>` with the
+/// target directory inside the checkout, copies the produced binary to the root of `work` and
+/// removes the checkout. Output of every step is appended to `log`.
+pub(crate) async fn build_cargo(
+    c: &CargoBuild,
+    tools: &BuildTools,
+    work: &Path,
+    log: &Path,
+    cancel: &CancellationToken,
+) -> Result<()> {
+    check_tool_names(&c.tools, tools)?;
+    if let Some(parent) = log.parent() {
+        fs::create_dir_all(parent).map_err(|e| RecipeError::io(parent, e))?;
+    }
+    let checkout = work.join("src");
+    fs::create_dir_all(&checkout).map_err(|e| RecipeError::io(&checkout, e))?;
+    git_checkout(&c.git, &c.rev, false, tools, &checkout, log, cancel).await?;
+
+    let target = checkout.join("target");
+    let build = Step {
+        name: "cargo build",
+        program: tools.cargo.clone(),
+        args: cargo_build_args(c),
+        cwd: checkout.clone(),
+        env: vec![("CARGO_TARGET_DIR".into(), target.display().to_string())],
+    };
+    run(&build, log, cancel).await?;
+
+    let file = cargo_bin_file(c.bin_name());
+    let from = target.join("release").join(&file);
+    let to = work.join(&file);
+    fs::rename(&from, &to).map_err(|e| RecipeError::io(&from, e))?;
+    fs::remove_dir_all(&checkout).map_err(|e| RecipeError::io(&checkout, e))?;
+    Ok(())
+}
+
 /// Creates the virtual environment of `venv` at `dir` (which must not exist yet) and installs
 /// its packages. Output of every step is appended to `log`. The caller removes `dir` on error.
 pub(crate) async fn build_venv(
@@ -232,6 +303,7 @@ pub(crate) async fn build_venv(
         program,
         args,
         cwd: cwd.clone(),
+        env: Vec::new(),
     };
 
     if tool_exists(&tools.uv) {
@@ -293,6 +365,8 @@ struct Step {
     program: PathBuf,
     args: Vec<String>,
     cwd: PathBuf,
+    /// Extra environment variables for the process.
+    env: Vec<(String, String)>,
 }
 
 /// Runs `step`, appending its output to `log`. Cancelling kills the process.
@@ -318,6 +392,7 @@ async fn run(step: &Step, log: &Path, cancel: &CancellationToken) -> Result<()> 
     let mut child = tokio::process::Command::new(&step.program)
         .args(&step.args)
         .current_dir(&step.cwd)
+        .envs(step.env.iter().map(|(k, v)| (k, v)))
         // Build scripts are third-party code; the server's API key stays out of their reach.
         .env_remove("ALKAHEST_API_KEY")
         .env_remove("ALKAHEST_API_KEY_FILE")
@@ -351,4 +426,72 @@ async fn run(step: &Step, log: &Path, cancel: &CancellationToken) -> Result<()> 
         log: log.to_path_buf(),
         tail,
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn cargo_build(features: &[&str]) -> CargoBuild {
+        CargoBuild {
+            git: "https://example.org/x.git".into(),
+            rev: "v1".into(),
+            package: "srv".into(),
+            features: features.iter().map(|f| (*f).to_string()).collect(),
+            bin: None,
+            tools: vec!["git".into(), "cargo".into()],
+        }
+    }
+
+    #[test]
+    fn cargo_args_are_release_locked_and_scoped_to_the_package() {
+        assert_eq!(
+            cargo_build_args(&cargo_build(&[])),
+            ["build", "--release", "--locked", "-p", "srv"]
+        );
+        assert_eq!(
+            cargo_build_args(&cargo_build(&["cuda", "kai"])),
+            [
+                "build",
+                "--release",
+                "--locked",
+                "-p",
+                "srv",
+                "--features",
+                "cuda,kai"
+            ]
+        );
+    }
+
+    #[test]
+    fn binary_name_defaults_to_the_package() {
+        let mut c = cargo_build(&[]);
+        assert_eq!(c.bin_name(), "srv");
+        c.bin = Some("other".into());
+        assert_eq!(c.bin_name(), "other");
+    }
+
+    #[tokio::test]
+    async fn missing_cargo_is_reported_before_anything_runs() {
+        let tools = BuildTools {
+            cargo: "/nonexistent/definitely-not-cargo".into(),
+            ..BuildTools::default()
+        };
+        let dir = std::env::temp_dir().join(format!("alk-cargo-missing-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("build.log");
+        let err = build_cargo(
+            &cargo_build(&[]),
+            &tools,
+            &dir,
+            &log,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(&err, RecipeError::BuildToolMissing(t) if t == "cargo"));
+        assert!(!dir.join("src").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
