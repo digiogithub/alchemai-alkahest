@@ -10,6 +10,8 @@
 //!   (ALK-SP-0001.R2).
 //! * [`catalog`]: [`Catalog`], the merged, metadata-enriched view of both stores and the
 //!   resolver for user references (ALK-SP-0001.R5).
+//! * [`checkpoint`]: checkpoint folders for Ollama per-tensor models (Phonon speech models,
+//!   ALK-US-0141).
 //! * [`meta`]: [`ModelInfo`] and the cached GGUF facts behind it.
 //! * [`create`]: `ollama create` on [`AlkahestStore`]: a model from an uploaded GGUF blob or
 //!   an existing model plus Modelfile text layers.
@@ -21,6 +23,7 @@
 //! * [`source`]: the [`ModelSource`] trait the catalog merges stores through.
 
 pub mod catalog;
+pub mod checkpoint;
 pub mod create;
 pub mod digest;
 pub mod error;
@@ -38,6 +41,7 @@ pub mod source;
 pub mod transfer;
 
 pub use catalog::{Catalog, CatalogEntry, ModelDetail, ModelSummary, destination_name};
+pub use checkpoint::{InstalledCheckpoint, SPEECH_CAPABILITY, needs_checkpoint};
 pub use create::{CreateBase, CreateLayers, CreateReport};
 pub use digest::{Digest, DigestParseError};
 pub use error::{Result, StoreError};

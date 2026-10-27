@@ -183,6 +183,25 @@ impl AlkahestStore {
     }
 
     /// Deletes one blob file; returns its size, or `None` when it was already gone.
+    /// Deletes the blobs among `candidates` that no manifest references any more, such as
+    /// the per-tensor layers a checkpoint conversion has just replaced (ALK-US-0141), and
+    /// returns the bytes freed. Blobs some manifest still uses are kept. Unlike
+    /// [`AlkahestStore::gc`] this touches only the blobs named, so a pull may call it while
+    /// it holds the shared lock.
+    pub fn discard_unreferenced_blobs(
+        &self,
+        candidates: impl IntoIterator<Item = Digest>,
+    ) -> Result<u64> {
+        let live = self.referenced_blobs()?;
+        let mut freed = 0;
+        for d in candidates {
+            if !live.contains(&d) {
+                freed += self.remove_blob(&d)?.unwrap_or(0);
+            }
+        }
+        Ok(freed)
+    }
+
     fn remove_blob(&self, d: &Digest) -> Result<Option<u64>> {
         let path = self.blob_path(d);
         let size = match fs::metadata(&path) {

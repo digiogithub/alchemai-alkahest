@@ -13,8 +13,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+mod common;
+
+use alkahest_store::checkpoint::registry_source;
 use alkahest_store::{
-    Digest, LayerKind, ModelName, ModelSource, OllamaStore, Origin, StoreError, media_type,
+    AlkahestStore, Digest, LayerKind, ModelName, ModelSource, OllamaStore, Origin, StoreError,
+    media_type, needs_checkpoint,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -150,6 +154,10 @@ fn fixture() -> Fixture {
     let private = f.manifest(vec![f.layer(media_type::MODEL, b"private")], "llama");
     f.put("manifests-v2", "localhost%3A5000/team/model/v1", &private);
 
+    // A per-tensor speech model (Ollama `phonon`, ALK-US-0141), stored the v2 way.
+    let phonon = common::speech_model(&f.root.join("blobs"));
+    f.put_v2_link("ollama.com/library/phonon/latest", &phonon);
+
     // Damage that must be skipped, not fatal.
     f.put(
         "manifests",
@@ -223,6 +231,33 @@ fn exercise(root: &Path) {
         }
         assert!(store.ensure_writable(&e.name).is_err());
     }
+    // Converting a per-tensor speech model reads its blobs in place (ALK-US-0141); the
+    // checkpoint goes into a separate Alkahest store.
+    let alk_dir = tempfile::tempdir().unwrap();
+    let alk = AlkahestStore::open(alk_dir.path()).unwrap();
+    let mut converted = 0;
+    for e in entries
+        .iter()
+        .filter(|e| needs_checkpoint(&e.manifest, e.config.as_ref()))
+    {
+        let out = alk
+            .install_checkpoint(
+                &e.name,
+                &e.manifest,
+                e.config.as_ref().unwrap(),
+                &store.blobs_dir(),
+                registry_source(&e.name, &e.manifest_digest),
+            )
+            .unwrap();
+        assert!(out.folder.join("model.safetensors").is_file());
+        assert!(
+            out.folder
+                .join("voices/Captain Silas Blackwater.safetensors")
+                .is_file()
+        );
+        converted += 1;
+    }
+    assert_eq!(converted, 1, "the phonon fixture is converted");
     for missing in [
         "nope",
         "hf.co/x/y:Q8_0",
@@ -263,6 +298,7 @@ fn ollama_model_is_listed() {
             "gemma3:latest",
             "llama3.2:latest",
             "multi:latest",
+            "phonon:latest",
             "qwen3:8b",
         ]
     );

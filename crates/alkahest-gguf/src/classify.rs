@@ -301,6 +301,9 @@ fn kind_from_ollama(caps: &[String]) -> Option<ModelKind> {
         Some(ModelKind::Rerank)
     } else if has("transcription") {
         Some(ModelKind::SpeechToText)
+    } else if has("speech") {
+        // Ollama 0.40.9+ text-to-speech models (`phonon`).
+        Some(ModelKind::TextToSpeech)
     } else if has("image-generation") {
         Some(ModelKind::Image)
     } else if has("vision") {
