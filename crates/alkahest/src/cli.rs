@@ -485,8 +485,8 @@ pub enum EnginesAction {
         /// installed side by side.
         #[arg(long = "version")]
         engine_version: Option<String>,
-        /// Build from the recipe's source steps (needs git, cmake and ninja) instead of
-        /// downloading the prebuilt archive.
+        /// Build from the recipe's source steps (git with cmake and ninja, or cargo, as the
+        /// recipe says) instead of downloading the prebuilt archive.
         #[arg(long)]
         from_source: bool,
         /// Reinstall even when the engine is already installed.
