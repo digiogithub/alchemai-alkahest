@@ -93,6 +93,14 @@ pub trait ServerLauncher: Send + Sync + 'static {
         let _ = method;
         None
     }
+
+    /// A service this launcher does not start itself but that runs the server on its own (a
+    /// system systemd unit, a launchd job, a Windows service), described for the log. The
+    /// start-at-login path ([`crate::connection::ConnectionManager::with_auto_start`]) never
+    /// spawns a second server next to one. `None` when no such service is installed.
+    fn external_service(&self) -> Option<String> {
+        None
+    }
 }
 
 /// The last detached child: its pid and, once the reaper saw it exit, its exit status.
@@ -114,6 +122,8 @@ pub struct LocalLauncher {
     /// Where a detached server's stderr goes (`<log_dir>/desktop-serve.stderr.log`); `None`
     /// discards it, and an early exit is then reported without the server's own words.
     pub stderr_log: Option<PathBuf>,
+    /// A service installed outside this launcher's reach ([`ServerLauncher::external_service`]).
+    pub external_service: Option<String>,
     /// The last detached child, shared with its reaper thread.
     spawned: Arc<Mutex<Option<Spawned>>>,
 }
@@ -122,11 +132,15 @@ impl LocalLauncher {
     /// A launcher running `program [args] serve`, using the systemd user unit when its file
     /// exists.
     pub fn new(program: PathBuf, args: Vec<OsString>) -> Self {
-        Self::with_unit(
+        let mut launcher = Self::with_unit(
             program,
             args,
             user_unit_file(&|k| std::env::var_os(k)).filter(|p| p.is_file()),
-        )
+        );
+        launcher.external_service =
+            installed_external_service(&|k| std::env::var_os(k), &|p| p.is_file())
+                .or_else(windows_service_installed);
+        launcher
     }
 
     /// A launcher with an explicit unit file (`None` = always spawn) and no stderr log.
@@ -136,6 +150,7 @@ impl LocalLauncher {
             args,
             user_unit,
             stderr_log: None,
+            external_service: None,
             spawned: Arc::default(),
         }
     }
@@ -352,6 +367,10 @@ impl ServerLauncher for LocalLauncher {
         Ok(StopMethod::Signalled)
     }
 
+    fn external_service(&self) -> Option<String> {
+        self.external_service.clone()
+    }
+
     fn startup_failure(&self, method: &LaunchMethod) -> Option<String> {
         match method {
             LaunchMethod::Process { pid } => self.process_failure(*pid),
@@ -403,6 +422,61 @@ pub fn user_unit_file(env: &dyn Fn(&str) -> Option<OsString>) -> Option<PathBuf>
     Some(base.join("systemd/user").join(USER_UNIT))
 }
 
+/// System systemd unit files `alkahest service install` writes (or a distribution package
+/// ships), checked in this order.
+const SYSTEM_UNIT_FILES: [&str; 3] = [
+    "/etc/systemd/system/alkahest.service",
+    "/usr/lib/systemd/system/alkahest.service",
+    "/lib/systemd/system/alkahest.service",
+];
+/// launchd job label of `alkahest service install` (system daemon and user agent).
+const LAUNCHD_LABEL: &str = "es.digio.alkahest";
+
+/// The installed service that runs the server without this app's help, found by its unit or
+/// property list file: a system systemd unit on Linux, the LaunchDaemon or the per-user
+/// LaunchAgent on macOS (both start the server themselves, the agent at login). The Linux user
+/// unit is not one of them: the launcher starts it with `systemctl --user start`. `exists`
+/// is injected so tests need no real files.
+pub fn installed_external_service(
+    env: &dyn Fn(&str) -> Option<OsString>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> Option<String> {
+    if cfg!(target_os = "linux") {
+        return SYSTEM_UNIT_FILES
+            .iter()
+            .map(Path::new)
+            .find(|p| exists(p))
+            .map(|p| format!("systemd system unit {}", p.display()));
+    }
+    if cfg!(target_os = "macos") {
+        let daemon = PathBuf::from(format!("/Library/LaunchDaemons/{LAUNCHD_LABEL}.plist"));
+        let agent = env("HOME")
+            .map(|h| Path::new(&h).join(format!("Library/LaunchAgents/{LAUNCHD_LABEL}.plist")));
+        return [Some(daemon), agent]
+            .into_iter()
+            .flatten()
+            .find(|p| exists(p))
+            .map(|p| format!("launchd job {}", p.display()));
+    }
+    None
+}
+
+/// The Windows service `alkahest` when `sc.exe query` knows it; `None` elsewhere.
+fn windows_service_installed() -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let out = Command::new("sc.exe")
+        .args(["query", "alkahest"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .ok()?;
+    out.success()
+        .then(|| "Windows service alkahest".to_string())
+}
+
 /// Puts the child in its own process group (Unix) or detaches it from the console
 /// (Windows), so the terminal's Ctrl-C and the app's exit do not take it down.
 fn detach(cmd: &mut Command) {
@@ -439,6 +513,32 @@ pub fn is_local_url(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_system_unit_counts_as_an_external_service_and_the_user_unit_does_not() {
+        let env = |k: &str| (k == "HOME").then(|| OsString::from("/home/ana"));
+        let none = |_: &Path| false;
+        assert_eq!(installed_external_service(&env, &none), None);
+        let user_only =
+            |p: &Path| p == Path::new("/home/ana/.config/systemd/user/alkahest.service");
+        assert_eq!(installed_external_service(&env, &user_only), None);
+        let system = |p: &Path| p == Path::new("/usr/lib/systemd/system/alkahest.service");
+        assert_eq!(
+            installed_external_service(&env, &system).as_deref(),
+            Some("systemd system unit /usr/lib/systemd/system/alkahest.service")
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_launchd_agent_or_daemon_counts_as_an_external_service() {
+        let env = |k: &str| (k == "HOME").then(|| OsString::from("/Users/ana"));
+        let agent =
+            |p: &Path| p == Path::new("/Users/ana/Library/LaunchAgents/es.digio.alkahest.plist");
+        assert!(installed_external_service(&env, &agent).is_some());
+        assert_eq!(installed_external_service(&env, &|_: &Path| false), None);
+    }
 
     #[test]
     fn only_loopback_urls_are_local() {

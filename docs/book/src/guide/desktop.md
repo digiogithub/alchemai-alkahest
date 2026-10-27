@@ -70,7 +70,12 @@ at login.
 ## Tray and autostart
 
 The app keeps a tray icon (disable it with `ALKAHEST_DESKTOP_TRAY=0` on desktops without a tray
-host). "Launch at login" installs an XDG autostart entry on Linux.
+host). "Start Alkahest at login" installs an XDG autostart entry on Linux (a LaunchAgent on macOS, a
+`Run` value on Windows) that runs `alkahest desktop --start-server`: the app opens and, when no
+server answers, starts the local one, through the systemd user unit when `alkahest service
+install --user` installed it. When a system service (systemd system unit, launchd job, Windows
+service) is installed, the app leaves the server to it. An entry from an older version is updated
+the next time the app starts.
 
 ## Smoke test
 

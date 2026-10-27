@@ -71,6 +71,9 @@ pub struct LaunchOptions {
     /// Where a server this app spawns writes its stderr (`<log_dir>/desktop-serve.stderr.log`),
     /// so an early exit can be explained; `None` discards it.
     pub serve_stderr_log: Option<std::path::PathBuf>,
+    /// Start a local server at once when none answers and no installed service runs one
+    /// (`alkahest desktop --start-server`, which the start-at-login entry runs).
+    pub start_server: bool,
     /// Open the window, wait for the first frame, then exit with status 0 (CI smoke test).
     /// Skips the keyring, which could prompt for an unlock.
     pub smoke_test: bool,
@@ -86,6 +89,7 @@ impl Default for LaunchOptions {
             serve_program: None,
             serve_args: Vec::new(),
             serve_stderr_log: None,
+            start_server: false,
             smoke_test: false,
         }
     }

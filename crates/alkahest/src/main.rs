@@ -253,6 +253,7 @@ fn desktop(args: &cli::DesktopArgs, global: &GlobalArgs, loaded: &Loaded) -> Res
                 .log_dir
                 .join("desktop-serve.stderr.log"),
         ),
+        start_server: args.start_server,
         smoke_test: args.smoke_test,
     };
     alkahest_desktop::run(options)?;

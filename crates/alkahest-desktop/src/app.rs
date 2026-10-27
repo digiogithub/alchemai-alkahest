@@ -80,6 +80,19 @@ fn start(cx: &mut App, options: &LaunchOptions) -> Result<(), DesktopError> {
     if !options.smoke_test && tray_wanted(&|k| std::env::var(k).ok()) {
         start_tray(cx);
     }
+    // An entry from an older version opens only the window; bring it up to date so the next
+    // login also starts the server.
+    if let Some(exe) = options
+        .serve_program
+        .as_deref()
+        .filter(|_| !options.smoke_test)
+    {
+        match crate::autostart::refresh(exe, &crate::autostart::process_env) {
+            Ok(true) => tracing::info!("updated the start-at-login entry"),
+            Ok(false) => {}
+            Err(e) => tracing::warn!(error = %e, "cannot update the start-at-login entry"),
+        }
+    }
     // Without a registered tray, closing the window ends the app.
     cx.on_window_closed(|cx, _| {
         let tray_active = cx
@@ -285,6 +298,7 @@ pub(crate) fn connect(
         });
     let url = client.base_url().to_string();
     let (manager, handle) = ConnectionManager::new(client.clone(), launcher, url.clone());
+    let manager = manager.with_auto_start(options.start_server && !options.smoke_test);
     tokio_bridge::handle(cx).spawn(manager.run());
     Ok((url, handle, client))
 }

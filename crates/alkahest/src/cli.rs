@@ -110,6 +110,10 @@ pub struct DesktopArgs {
     /// (used by CI; fails with status 3 when no frame arrives within 30 s).
     #[arg(long)]
     pub smoke_test: bool,
+    /// Start a local server when none answers and no installed service runs one. The
+    /// start-at-login entry passes it, so logging in brings up both the app and the server.
+    #[arg(long)]
+    pub start_server: bool,
 }
 
 /// Arguments of `alkahest run`.

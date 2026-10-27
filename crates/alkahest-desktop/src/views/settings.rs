@@ -1026,9 +1026,9 @@ impl SettingsView {
                         .type_style(text::CAPTION)
                         .text_color(c(p.text_muted))
                         .child(
-                            "Opens this app at login. With a system tray, closing the window keeps \
-                             Alkahest in the tray; Quit is in the tray menu. The server itself \
-                             starts with its service (alkahest service install --user).",
+                            "Opens this app at login and starts the local server unless an \
+                             installed service already runs it. With a system tray, closing the \
+                             window keeps Alkahest in the tray; Quit is in the tray menu.",
                         ),
                 ),
         )

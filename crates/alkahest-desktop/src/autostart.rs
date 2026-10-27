@@ -7,8 +7,11 @@
 //! - Windows: the `Alkahest` value of `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`,
 //!   written with `reg.exe` (no registry crate needed for one value).
 //!
-//! The entry starts `alkahest desktop`; it does not install or start the server (that is the
-//! service manager's job: `alkahest service install --user`).
+//! The entry starts `alkahest desktop --start-server`: the app opens and, when no server
+//! answers and no installed service (system unit, launchd job, Windows service) runs one, starts
+//! the local server itself, through the systemd user unit when one is installed. An entry written
+//! by an older version (without the flag, or for another executable) is rewritten when the app
+//! starts ([`refresh`]).
 
 use std::path::{Path, PathBuf};
 
@@ -16,6 +19,8 @@ use std::path::{Path, PathBuf};
 pub const LINUX_ENTRY: &str = "es.digio.alkahest.desktop";
 /// Label of the macOS LaunchAgent.
 pub const MAC_LABEL: &str = "es.digio.alkahest.desktop";
+/// Arguments the entry passes to `alkahest`.
+pub const ENTRY_ARGS: &str = "desktop --start-server";
 /// Value name under the Windows `Run` key.
 pub const WINDOWS_VALUE: &str = "Alkahest";
 const WINDOWS_RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
@@ -61,17 +66,17 @@ pub fn entry_path(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
     }
 }
 
-/// The XDG desktop entry that starts `exe desktop`.
+/// The XDG desktop entry that starts `exe desktop --start-server`.
 pub fn linux_entry(exe: &Path) -> String {
     format!(
         "[Desktop Entry]\nType=Application\nName=Alkahest\nComment=Local AI model server \
-         and manager\nExec=\"{}\" desktop\nIcon=alkahest\nTerminal=false\nCategories=Development;\
+         and manager\nExec=\"{}\" {ENTRY_ARGS}\nIcon=alkahest\nTerminal=false\nCategories=Development;\
          \nX-GNOME-Autostart-enabled=true\n",
         exe.display()
     )
 }
 
-/// The LaunchAgent property list that starts `exe desktop` at login.
+/// The LaunchAgent property list that starts `exe desktop --start-server` at login.
 pub fn mac_plist(exe: &Path) -> String {
     let exe = exe
         .display()
@@ -84,7 +89,7 @@ pub fn mac_plist(exe: &Path) -> String {
          1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n\
          <dict>\n  <key>Label</key>\n  <string>{MAC_LABEL}</string>\n  \
          <key>ProgramArguments</key>\n  <array>\n    <string>{exe}</string>\n    \
-         <string>desktop</string>\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n</dict>\n\
+         <string>desktop</string>\n    <string>--start-server</string>\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n</dict>\n\
          </plist>\n"
     )
 }
@@ -113,7 +118,7 @@ pub fn set_enabled(
 ) -> Result<(), AutostartError> {
     if cfg!(windows) {
         let status = if on {
-            let value = format!("\"{}\" desktop", exe.display());
+            let value = format!("\"{}\" {ENTRY_ARGS}", exe.display());
             std::process::Command::new("reg")
                 .args([
                     "add",
@@ -162,6 +167,37 @@ pub fn set_enabled(
     }
 }
 
+/// Rewrites an enabled entry that differs from what [`set_enabled`] writes for `exe` today
+/// (an older version's entry without `--start-server`, or a moved executable). Leaves a
+/// disabled one alone. Returns whether it rewrote the entry.
+pub fn refresh(exe: &Path, env: &dyn Fn(&str) -> Option<String>) -> Result<bool, AutostartError> {
+    if !is_enabled(env) {
+        return Ok(false);
+    }
+    if cfg!(windows) {
+        let wanted = format!("\"{}\" {ENTRY_ARGS}", exe.display());
+        let current = std::process::Command::new("reg")
+            .args(["query", WINDOWS_RUN_KEY, "/v", WINDOWS_VALUE])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        if current.contains(&wanted) {
+            return Ok(false);
+        }
+    } else {
+        let path = entry_path(env).ok_or(AutostartError::NoHome)?;
+        let wanted = if cfg!(target_os = "macos") {
+            mac_plist(exe)
+        } else {
+            linux_entry(exe)
+        };
+        if std::fs::read_to_string(&path).is_ok_and(|current| current == wanted) {
+            return Ok(false);
+        }
+    }
+    set_enabled(true, exe, env).map(|()| true)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -179,7 +215,7 @@ mod tests {
         assert!(is_enabled(&env));
         let text = std::fs::read_to_string(dir.path().join("autostart").join(LINUX_ENTRY)).unwrap();
         assert!(
-            text.contains("Exec=\"/opt/alkahest/bin/alkahest\" desktop"),
+            text.contains("Exec=\"/opt/alkahest/bin/alkahest\" desktop --start-server"),
             "{text}"
         );
         set_enabled(false, Path::new("/x"), &env).unwrap();
@@ -188,11 +224,31 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn an_old_entry_is_rewritten_with_start_server_and_a_disabled_one_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().to_string_lossy().to_string();
+        let env = move |k: &str| (k == "XDG_CONFIG_HOME").then(|| base.clone());
+        let exe = Path::new("/opt/alkahest/bin/alkahest");
+        assert!(!refresh(exe, &env).unwrap(), "disabled: nothing to refresh");
+        assert!(!is_enabled(&env));
+
+        let path = dir.path().join("autostart").join(LINUX_ENTRY);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let old = linux_entry(exe).replace(" --start-server", "");
+        std::fs::write(&path, old).unwrap();
+        assert!(refresh(exe, &env).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), linux_entry(exe));
+        assert!(!refresh(exe, &env).unwrap(), "already current");
+    }
+
+    #[test]
     fn plist_starts_the_desktop_at_load() {
         let p = mac_plist(Path::new(
             "/Applications/Alkahest.app/Contents/MacOS/alkahest",
         ));
         assert!(p.contains("<string>desktop</string>") && p.contains("<key>RunAtLoad</key>"));
+        assert!(p.contains("<string>--start-server</string>"));
         assert!(p.contains(MAC_LABEL));
     }
 }

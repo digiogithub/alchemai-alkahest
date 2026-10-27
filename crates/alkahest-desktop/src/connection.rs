@@ -233,6 +233,9 @@ pub struct Machine {
     last_seen: Option<time::OffsetDateTime>,
     /// The pending reconnect attempt, while the connection is down.
     retry: Option<RetryInfo>,
+    /// The app was opened at login to bring a server up: start one if the first probe finds
+    /// nothing listening ([`Machine::take_auto_start`]).
+    auto_start: bool,
 }
 
 impl Machine {
@@ -246,7 +249,26 @@ impl Machine {
             attempts: 0,
             last_seen: None,
             retry: None,
+            auto_start: false,
         }
+    }
+
+    /// Asks for a server to be started once, if the first probe finds none (start at login).
+    /// Ignored when this app may not start servers (remote server, no launcher).
+    pub fn set_auto_start(&mut self, on: bool) {
+        self.auto_start = on && self.can_start;
+    }
+
+    /// Called after every probe: `true` exactly once, when a start was asked for with
+    /// [`Machine::set_auto_start`] and the first probe found nothing listening. Any other first
+    /// answer (a server answers, refuses our key, fails TLS) means a server is already there,
+    /// and the wish is dropped. The caller then launches a server unless a service runs one.
+    pub fn take_auto_start(&mut self) -> bool {
+        if !self.auto_start || matches!(self.state, ConnectionState::Connecting) {
+            return false;
+        }
+        self.auto_start = false;
+        matches!(self.state, ConnectionState::NotRunning { error: None })
     }
 
     /// The pending reconnect attempt, `None` while connected, starting or stopping.
@@ -688,6 +710,15 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
         )
     }
 
+    /// Starts a local server at once if none answers the first probe, unless a service
+    /// installed outside the launcher runs it ([`ServerLauncher::external_service`]). Used
+    /// when the app itself was started at login (`alkahest desktop --start-server`).
+    #[must_use]
+    pub fn with_auto_start(mut self, on: bool) -> Self {
+        self.machine.set_auto_start(on);
+        self
+    }
+
     fn publish(&mut self) {
         if !matches!(self.machine.state(), ConnectionState::Connected(_)) {
             self.runtime = None;
@@ -741,6 +772,21 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
                 delay = self.launch();
                 self.publish();
                 continue;
+            }
+            if self.machine.take_auto_start() {
+                let service = self
+                    .launcher
+                    .as_ref()
+                    .and_then(ServerLauncher::external_service);
+                if let Some(service) = service {
+                    // It may still be coming up at login; keep probing instead of racing it
+                    // for the port.
+                    tracing::info!(%service, "a service runs the server; not starting another");
+                } else {
+                    delay = self.launch();
+                    self.publish();
+                    continue;
+                }
             }
             if matches!(self.machine.state(), ConnectionState::Connected(_)) {
                 match self.follow_events().await {
@@ -1187,6 +1233,8 @@ mod tests {
         fail: bool,
         /// The launched server exits at once with this stderr summary.
         exits_with: Option<String>,
+        /// What [`ServerLauncher::external_service`] reports.
+        external: Option<String>,
     }
 
     impl ServerLauncher for FakeLauncher {
@@ -1208,6 +1256,10 @@ mod tests {
 
         fn service_unit(&self) -> Option<String> {
             None
+        }
+
+        fn external_service(&self) -> Option<String> {
+            self.external.clone()
         }
 
         fn stop(&self, pid: Option<u32>) -> Result<crate::launcher::StopMethod, LaunchError> {
@@ -1235,6 +1287,7 @@ mod tests {
             launches: launches.clone(),
             fail: false,
             exits_with: None,
+            external: None,
         };
         let (manager, mut handle) =
             ConnectionManager::new(server, Some(launcher), "http://127.0.0.1:11435".into());
@@ -1288,6 +1341,7 @@ mod tests {
             launches: Arc::new(AtomicUsize::new(0)),
             fail: false,
             exits_with: Some(why.to_string()),
+            external: None,
         };
         let (manager, mut handle) =
             ConnectionManager::new(server, Some(launcher), "http://127.0.0.1:11435".into());
@@ -1374,6 +1428,7 @@ mod tests {
             launches: launches.clone(),
             fail: false,
             exits_with: None,
+            external: None,
         };
         let (manager, mut handle) =
             ConnectionManager::new(server, Some(launcher), "http://127.0.0.1:11435".into());
@@ -1412,6 +1467,98 @@ mod tests {
             .unwrap();
     }
 
+    #[test]
+    fn auto_start_fires_once_and_only_when_nothing_answers() {
+        let t0 = Instant::now();
+        let mut m = Machine::new(true);
+        m.set_auto_start(true);
+        assert!(!m.take_auto_start(), "no probe yet");
+        m.on_probe(Err(ProbeError::NotRunning), t0);
+        assert!(m.take_auto_start());
+        assert!(!m.take_auto_start(), "only once");
+
+        let mut m = Machine::new(true);
+        m.set_auto_start(true);
+        m.on_probe(Ok(info()), t0);
+        assert!(!m.take_auto_start());
+        m.on_probe(Err(ProbeError::NotRunning), t0);
+        assert!(
+            !m.take_auto_start(),
+            "a server that answered once is not replaced later"
+        );
+
+        let mut m = Machine::new(true);
+        m.set_auto_start(true);
+        m.on_probe(Err(ProbeError::Unauthorized), t0);
+        assert!(!m.take_auto_start(), "something listens there");
+
+        let mut m = Machine::new(false);
+        m.set_auto_start(true);
+        m.on_probe(Err(ProbeError::NotRunning), t0);
+        assert!(!m.take_auto_start(), "a remote server is never started");
+    }
+
+    /// Start at login: the app opened with `--start-server` starts the server by itself when
+    /// nothing answers and no service runs it.
+    #[tokio::test(start_paused = true)]
+    async fn start_at_login_starts_the_server_when_none_runs() {
+        let server = FakeServer {
+            boot_probes: 2,
+            ..FakeServer::default()
+        };
+        let launches = Arc::new(AtomicUsize::new(0));
+        let launcher = FakeLauncher {
+            server: server.clone(),
+            launches: launches.clone(),
+            fail: false,
+            exits_with: None,
+            external: None,
+        };
+        let (manager, mut handle) =
+            ConnectionManager::new(server, Some(launcher), "http://127.0.0.1:11435".into());
+        let task = tokio::spawn(manager.with_auto_start(true).run());
+        wait_for(&mut handle.snapshots, "connected", |s| {
+            matches!(s.state, ConnectionState::Connected(_))
+        })
+        .await;
+        assert_eq!(launches.load(Ordering::SeqCst), 1);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(60), task)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    /// Start at login with an installed system service: the app leaves the server to it.
+    #[tokio::test(start_paused = true)]
+    async fn start_at_login_leaves_the_server_to_an_installed_service() {
+        let server = FakeServer::default();
+        let launches = Arc::new(AtomicUsize::new(0));
+        let launcher = FakeLauncher {
+            server: server.clone(),
+            launches: launches.clone(),
+            fail: false,
+            exits_with: None,
+            external: Some("systemd system unit /etc/systemd/system/alkahest.service".into()),
+        };
+        let (manager, mut handle) =
+            ConnectionManager::new(server, Some(launcher), "http://127.0.0.1:11435".into());
+        let task = tokio::spawn(manager.with_auto_start(true).run());
+        let s = wait_for(&mut handle.snapshots, "not running", |s| {
+            matches!(s.state, ConnectionState::NotRunning { .. })
+        })
+        .await;
+        // Still offered by hand, never started on its own.
+        assert!(s.can_start);
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        assert_eq!(launches.load(Ordering::SeqCst), 0);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(60), task)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_failed_launch_is_reported_and_retry_probes_again() {
         let server = FakeServer::default();
@@ -1420,6 +1567,7 @@ mod tests {
             launches: Arc::new(AtomicUsize::new(0)),
             fail: true,
             exits_with: None,
+            external: None,
         };
         let (manager, mut handle) =
             ConnectionManager::new(server.clone(), Some(launcher), "http://127.0.0.1:1".into());
