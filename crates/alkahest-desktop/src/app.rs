@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use alkahest_client::Client;
 
 use crate::connection::{ConnectionHandle, ConnectionManager};
-use crate::launcher::{LocalLauncher, is_local_url};
-use crate::settings::{DesktopSettings, KeyringKeyStore, resolve_api_key};
+use crate::launcher::LocalLauncher;
+use crate::settings::{DesktopSettings, KeyringKeyStore, migrate_legacy_key, resolve_api_key};
 use crate::theme::tokens::size;
 use crate::tls;
 use futures::StreamExt as _;
@@ -148,7 +148,12 @@ fn tray_wanted(env: &dyn Fn(&str) -> Option<String>) -> bool {
 /// the window was closed).
 fn open_window(cx: &mut App) -> Result<AnyWindowHandle, DesktopError> {
     let options = cx.global::<AppState>().options.clone();
-    let (server_url, connection, client) = connect(cx, &options)?;
+    let Connected {
+        name,
+        url: server_url,
+        handle: connection,
+        client,
+    } = connect(cx, &options)?;
     let bounds = Bounds::centered(
         None,
         ui::size(px(size::DEFAULT_WINDOW.0), px(size::DEFAULT_WINDOW.1)),
@@ -173,7 +178,8 @@ fn open_window(cx: &mut App) -> Result<AnyWindowHandle, DesktopError> {
             commands,
             snapshots,
         } = connection;
-        let shell = cx.new(|cx| Shell::new(options, &url_for_shell, commands, client, window, cx));
+        let shell =
+            cx.new(|cx| Shell::new(options, &url_for_shell, name, commands, client, window, cx));
         Shell::follow(&shell, snapshots, cx);
         shell
     })
@@ -250,34 +256,46 @@ fn load_settings(options: &LaunchOptions) -> DesktopSettings {
     })
 }
 
-/// Builds the client for the effective server (desktop settings and keyring read again, so a
-/// reconnect picks up a new URL or key) and starts the connection manager on the tokio
-/// runtime. It stops by itself when its handle goes away (window closed, reconnect). The
-/// client is returned too: the screens send their own requests (model list, actions) with it.
-pub(crate) fn connect(
-    cx: &mut App,
-    options: &LaunchOptions,
-) -> Result<(String, ConnectionHandle, Client), DesktopError> {
+/// What [`connect`] set up: the active connection's name and URL, the manager's handle and
+/// the client the screens send their own requests with.
+pub(crate) struct Connected {
+    /// Name of the active connection ([`crate::settings::LOCAL`] for the configured server).
+    pub name: String,
+    /// Base URL of the server.
+    pub url: String,
+    /// The connection manager's ends.
+    pub handle: ConnectionHandle,
+    /// Client for the screens.
+    pub client: Client,
+}
+
+/// Builds the client for the active connection (desktop settings and keyring read again, so
+/// a reconnect picks up another connection or key) and starts the connection manager on the
+/// tokio runtime. It stops by itself when its handle goes away (window closed, reconnect).
+pub(crate) fn connect(cx: &mut App, options: &LaunchOptions) -> Result<Connected, DesktopError> {
     let settings = load_settings(options);
-    let server_url = settings
-        .effective_server_url(&options.server_url)
-        .to_string();
+    if !options.smoke_test {
+        migrate_settings(&settings, options);
+    }
+    let active = settings.active_connection(&options.server_url);
     // The smoke test must never block on a keyring unlock prompt.
     let api_key = if options.smoke_test {
         options.api_key.clone()
     } else {
-        resolve_api_key(options.api_key.clone(), &KeyringKeyStore)
+        resolve_api_key(
+            options.api_key.clone(),
+            &KeyringKeyStore::for_connection(&active.name),
+        )
     };
     let mut client =
-        Client::new(&server_url).map_err(|e| DesktopError::ServerUrl(e.to_string()))?;
+        Client::new(&active.url).map_err(|e| DesktopError::ServerUrl(e.to_string()))?;
     let env_ca = std::env::var(alkahest_client::CA_CERT_ENV).ok();
-    let is_default = server_url == options.server_url;
     if let Some(ca) = tls::resolve_ca_cert(
-        &server_url,
+        &active.url,
         env_ca.as_deref(),
-        settings.ca_cert.as_deref(),
+        active.ca_cert.as_deref(),
         options.generated_ca.as_deref(),
-        is_default,
+        active.local,
     ) {
         // An unreadable CA is logged, not fatal: the window must open so the Settings screen
         // can fix the path; the connection then reports an untrusted certificate.
@@ -287,20 +305,63 @@ pub(crate) fn connect(
         }
     }
     let client = client.with_api_key(api_key);
-    // Starting a server only helps when the server is on this machine.
+    // Only the built-in local connection may start a server: a saved connection is another
+    // server even when its URL is loopback (an SSH tunnel), and starting `alkahest serve`
+    // from this user's configuration would not bring it back. Nor is a server started next to
+    // a service that already runs one (ALK-US-0144).
+    let mut external_service = None;
     let launcher = options
         .serve_program
         .clone()
-        .filter(|_| is_local_url(&server_url))
+        .filter(|_| active.local)
         .map(|program| {
             LocalLauncher::new(program, options.serve_args.clone())
                 .with_stderr_log(options.serve_stderr_log.clone())
+        })
+        .filter(|l| {
+            external_service.clone_from(&l.external_service);
+            l.external_service.is_none()
         });
     let url = client.base_url().to_string();
     let (manager, handle) = ConnectionManager::new(client.clone(), launcher, url.clone());
-    let manager = manager.with_auto_start(options.start_server && !options.smoke_test);
+    let manager = manager
+        .with_external_service(external_service)
+        .with_auto_start(options.start_server && !options.smoke_test);
     tokio_bridge::handle(cx).spawn(manager.run());
-    Ok((url, handle, client))
+    tracing::info!(connection = %active.name, server = %url, "connecting");
+    Ok(Connected {
+        name: active.name,
+        url,
+        handle,
+        client,
+    })
+}
+
+/// Saves a settings file written before connections existed in the new form, and moves the
+/// single legacy keyring key to the connection it belonged to: the migrated remote, or the
+/// local server when no connection was ever saved. With saved connections and no migration
+/// the owner of a leftover legacy key is unknown, and it stays where it is.
+fn migrate_settings(settings: &DesktopSettings, options: &LaunchOptions) {
+    let to = settings.migrated().or_else(|| {
+        settings
+            .connections
+            .is_empty()
+            .then_some(crate::settings::LOCAL)
+    });
+    if let Some(to) = to {
+        migrate_legacy_key(
+            &KeyringKeyStore::legacy(),
+            &KeyringKeyStore::for_connection(to),
+        );
+    }
+    if settings.migrated().is_some()
+        && let Some(path) = &options.settings_file
+    {
+        match settings.save(path) {
+            Ok(()) => tracing::info!(?to, "moved the server URL to a saved connection"),
+            Err(e) => tracing::warn!("{e}"),
+        }
+    }
 }
 
 #[cfg(test)]

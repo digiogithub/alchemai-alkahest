@@ -2,9 +2,10 @@
 //!
 //! Server settings (folders, Ollama store reuse, model loading, logging) are edited as a
 //! draft and saved to the server's `config.toml`; env-locked fields are read-only with a
-//! lock note. The side column holds the app's own settings: the server this app talks to and
-//! its API key (OS keyring, never a file), the theme (applies at once, `desktop.toml`), and
-//! the configuration sources. Network settings stay on screen 14 (linked).
+//! lock note. The side column holds the app's own settings: the saved server connections
+//! (built-in local plus remotes; switch, edit, delete, add, ALK-US-0144) with one API key each
+//! (OS keyring, never a file), the theme (applies at once, `desktop.toml`), and the
+//! configuration sources. Network settings stay on screen 14 (linked).
 
 use std::path::PathBuf;
 
@@ -13,9 +14,8 @@ use alkahest_client::{Client, ClientError};
 use serde_json::Value;
 
 use crate::connection::{ConnectionState, Snapshot};
-use crate::launcher::is_local_url;
 use crate::nav::Screen;
-use crate::settings::{ApiKeyStore, DesktopSettings, KeyringKeyStore};
+use crate::settings::{ApiKeyStore, DesktopSettings, KeyringKeyStore, LOCAL, SavedConnection};
 use crate::settings_screen::{
     ConnectionDraft, KEEP_ALIVE_PRESETS, LOG_FORMATS, LOG_LEVELS, LOG_ROTATIONS, ServerDraft,
     auto_text, key_status,
@@ -73,6 +73,12 @@ pub struct SettingsView {
     env_key: bool,
     has_key: bool,
     server_url: String,
+    /// Saved connections (besides the built-in local one), as in `desktop.toml`.
+    connections: Vec<SavedConnection>,
+    /// Name of the active connection.
+    active: String,
+    /// A delete clicked once, waiting for its confirmation click.
+    pending_delete: Option<String>,
     connected: bool,
     manages_server: bool,
     server_pid: Option<u32>,
@@ -84,9 +90,12 @@ pub struct SettingsView {
     restart_after_save: bool,
     notice: Option<(bool, String)>,
     inputs: Vec<(&'static str, Entity<InputState>)>,
+    name_input: Entity<InputState>,
     url_input: Entity<InputState>,
     ca_input: Entity<InputState>,
     key_input: Entity<InputState>,
+    /// The add / edit form is open.
+    editing_connection: bool,
     pending_reload: bool,
     /// The `alkahest` executable an autostart entry runs; `None` hides the toggle.
     autostart_exe: Option<PathBuf>,
@@ -145,9 +154,16 @@ impl SettingsView {
             .detach();
             inputs.push((key, input));
         }
-        let url_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("http://127.0.0.1:11435 (local server)")
-        });
+        let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("gpu-box"));
+        cx.subscribe_in(&name_input, window, |this, input, e: &InputEvent, _, cx| {
+            if matches!(e, InputEvent::Change) {
+                this.conn.name = input.read(cx).value().to_string();
+                cx.notify();
+            }
+        })
+        .detach();
+        let url_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("https://gpu-box:11435"));
         cx.subscribe_in(&url_input, window, |this, input, e: &InputEvent, _, cx| {
             if matches!(e, InputEvent::Change) {
                 this.conn.server_url = input.read(cx).value().to_string();
@@ -181,14 +197,12 @@ impl SettingsView {
             .as_deref()
             .and_then(|p| DesktopSettings::load(p).ok())
             .unwrap_or_default();
-        let saved_url = saved.server_url.unwrap_or_default();
-        let saved_ca = saved.ca_cert.unwrap_or_default();
-        ca_input.update(cx, |s, cx| s.set_value(saved_ca.clone(), window, cx));
-        url_input.update(cx, |s, cx| s.set_value(saved_url.clone(), window, cx));
+        let active = saved.active_name().to_string();
         // Asked off the UI thread: a locked keyring may block on an unlock prompt.
         if keyring && !env_key {
-            let probe = tokio_bridge::spawn(cx, async {
-                tokio::task::spawn_blocking(|| KeyringKeyStore.get().ok().flatten().is_some())
+            let store = KeyringKeyStore::for_connection(&active);
+            let probe = tokio_bridge::spawn(cx, async move {
+                tokio::task::spawn_blocking(move || store.get().ok().flatten().is_some())
                     .await
                     .unwrap_or(false)
             });
@@ -208,24 +222,25 @@ impl SettingsView {
             env_key,
             has_key: false,
             server_url: String::new(),
+            connections: saved.connections,
+            active,
+            pending_delete: None,
             connected: false,
             manages_server: false,
             server_pid: None,
             draft: None,
             load_error: None,
-            conn: ConnectionDraft {
-                server_url: saved_url,
-                new_key: String::new(),
-                ca_cert: saved_ca,
-            },
+            conn: ConnectionDraft::default(),
             editing_key: false,
             saving: false,
             restart_after_save: false,
             notice: None,
             inputs,
+            name_input,
             url_input,
             ca_input,
             key_input,
+            editing_connection: false,
             pending_reload: false,
             autostart: crate::autostart::is_enabled(&crate::autostart::process_env),
             autostart_exe,
@@ -442,38 +457,144 @@ impl SettingsView {
         cx.notify();
     }
 
-    /// Saves the server URL (and a typed key) and asks the shell to reconnect.
-    fn connect(&mut self, cx: &mut Context<Self>) {
-        let url = match self.conn.url() {
-            Ok(u) => u,
+    /// Loads `desktop.toml`, applies `change` and saves it; the error goes to the notice.
+    fn update_settings(
+        &mut self,
+        cx: &mut Context<Self>,
+        change: impl FnOnce(&mut DesktopSettings) -> Result<(), String>,
+    ) -> bool {
+        let Some(path) = self.settings_file.clone() else {
+            return true;
+        };
+        let mut s = DesktopSettings::load(&path).unwrap_or_default();
+        let r = change(&mut s).and_then(|()| s.save(&path).map_err(|e| e.to_string()));
+        match r {
+            Ok(()) => {
+                self.connections = s.connections.clone();
+                self.active = s.active_name().to_string();
+                true
+            }
+            Err(e) => {
+                self.notice = Some((true, e));
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    /// Saves the add / edit form (and a typed key) as the active connection and reconnects.
+    fn save_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let conn = match self.conn.connection() {
+            Ok(c) => c,
             Err(e) => {
                 self.notice = Some((true, e));
                 cx.notify();
                 return;
             }
         };
-        let ca = match self.conn.ca() {
-            Ok(ca) => ca,
-            Err(e) => {
-                self.notice = Some((true, format!("CA certificate: {e}")));
-                cx.notify();
-                return;
-            }
-        };
-        if let Some(path) = &self.settings_file {
-            let mut s = DesktopSettings::load(path).unwrap_or_default();
-            s.server_url = url;
-            s.ca_cert = ca;
-            if let Err(e) = s.save(path) {
-                self.notice = Some((true, e.to_string()));
-                cx.notify();
-                return;
-            }
-        }
-        if !self.store_key(cx) {
+        let name = conn.name.clone();
+        if !self.update_settings(cx, |s| {
+            s.upsert(conn)?;
+            s.select(&name)
+        }) {
             return;
         }
+        if !self.store_key(&name, cx) {
+            return;
+        }
+        self.close_form(window, cx);
+        self.notice = None;
         cx.emit(SettingsEvent::Reconnect);
+    }
+
+    /// Makes `name` the active connection and reconnects.
+    fn switch_to(&mut self, name: &str, cx: &mut Context<Self>) {
+        self.pending_delete = None;
+        if self.update_settings(cx, |s| s.select(name)) {
+            self.notice = None;
+            cx.emit(SettingsEvent::Reconnect);
+        }
+        cx.notify();
+    }
+
+    /// Deletes saved connection `name` and its key; the first click only asks to confirm.
+    fn delete_connection(&mut self, name: &str, cx: &mut Context<Self>) {
+        if self.pending_delete.as_deref() != Some(name) {
+            self.pending_delete = Some(name.to_string());
+            cx.notify();
+            return;
+        }
+        self.pending_delete = None;
+        let was_active = self.active.eq_ignore_ascii_case(name);
+        let removed = name.to_string();
+        if !self.update_settings(cx, |s| {
+            s.remove(&removed);
+            Ok(())
+        }) {
+            return;
+        }
+        if self.keyring
+            && let Err(e) = KeyringKeyStore::for_connection(name).delete()
+        {
+            self.notice = Some((true, e.to_string()));
+        }
+        if was_active {
+            cx.emit(SettingsEvent::Reconnect);
+        }
+        cx.notify();
+    }
+
+    /// Opens the form with saved connection `name` (or empty, to add one).
+    fn open_form(&mut self, name: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+        let found = name.and_then(|n| self.connections.iter().find(|c| c.name == n).cloned());
+        self.conn = ConnectionDraft {
+            name: found.as_ref().map(|c| c.name.clone()).unwrap_or_default(),
+            server_url: found.as_ref().map(|c| c.url.clone()).unwrap_or_default(),
+            ca_cert: found
+                .as_ref()
+                .and_then(|c| c.ca_cert.clone())
+                .unwrap_or_default(),
+            new_key: String::new(),
+        };
+        self.fill_form_inputs(window, cx);
+        self.editing_connection = true;
+        self.pending_delete = None;
+        cx.notify();
+    }
+
+    fn close_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.conn.clear();
+        self.fill_form_inputs(window, cx);
+        self.editing_connection = false;
+        cx.notify();
+    }
+
+    /// Puts the form draft into its inputs (their change events write it back unchanged).
+    fn fill_form_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ConnectionDraft {
+            name,
+            server_url,
+            ca_cert,
+            ..
+        } = self.conn.clone();
+        self.name_input
+            .update(cx, |s, cx| s.set_value(name, window, cx));
+        self.url_input
+            .update(cx, |s, cx| s.set_value(server_url, window, cx));
+        self.ca_input
+            .update(cx, |s, cx| s.set_value(ca_cert, window, cx));
+        self.key_input
+            .update(cx, |s, cx| s.set_value("", window, cx));
+    }
+
+    /// Stores the key typed for the active connection and reconnects.
+    fn save_active_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let active = self.active.clone();
+        if self.store_key(&active, cx) {
+            self.key_input
+                .update(cx, |s, cx| s.set_value("", window, cx));
+            cx.emit(SettingsEvent::Reconnect);
+        }
     }
 
     /// The http / https switch next to the server URL.
@@ -489,15 +610,15 @@ impl SettingsView {
         cx.notify();
     }
 
-    /// Writes a typed key to the keyring; false when that failed.
-    fn store_key(&mut self, cx: &mut Context<Self>) -> bool {
+    /// Writes a typed key to the keyring entry of connection `name`; false when that failed.
+    fn store_key(&mut self, name: &str, cx: &mut Context<Self>) -> bool {
         let key = self.conn.new_key.trim().to_string();
         if key.is_empty() || !self.keyring {
             return true;
         }
-        match KeyringKeyStore.set(&key) {
+        match KeyringKeyStore::for_connection(name).set(&key) {
             Ok(()) => {
-                self.has_key = true;
+                self.has_key = self.active.eq_ignore_ascii_case(name);
                 self.editing_key = false;
                 self.conn.new_key.clear();
                 true
@@ -511,7 +632,11 @@ impl SettingsView {
     }
 
     fn remove_key(&mut self, cx: &mut Context<Self>) {
-        if self.keyring && KeyringKeyStore.delete().is_ok() {
+        if self.keyring
+            && KeyringKeyStore::for_connection(&self.active)
+                .delete()
+                .is_ok()
+        {
             self.has_key = false;
             cx.emit(SettingsEvent::Reconnect);
         }
@@ -809,19 +934,123 @@ impl SettingsView {
             .collect()
     }
 
-    fn connection_card(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
-        let local = is_local_url(&self.server_url);
-        let https = if self.conn.server_url.trim().is_empty() {
-            crate::tls::is_https(&self.server_url)
-        } else {
-            self.conn.https()
+    /// One row of the connection list: name, address, and Use / Edit / Delete.
+    fn connection_row(
+        &self,
+        index: usize,
+        name: &str,
+        address: String,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let active = self.active.eq_ignore_ascii_case(name);
+        let local = name == LOCAL;
+        let tone = match (active, self.connected) {
+            (true, true) => p.ok_default,
+            (true, false) => p.accent_default,
+            _ => p.line_default,
         };
+        let mut row = h_flex()
+            .items_center()
+            .gap(px(space::S2))
+            .py(px(space::S1))
+            .child(dot(c(tone), 8.0))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .type_style(text::SMALL)
+                            .font_weight(if active {
+                                FontWeight::SEMIBOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .child(if local {
+                                "Local (this machine)".to_string()
+                            } else {
+                                name.to_string()
+                            }),
+                    )
+                    .child(mono_caption(address, p)),
+            );
+        if active {
+            row = row.child(mono_caption("in use", p));
+        } else {
+            let target = name.to_string();
+            row = row.child(
+                button(
+                    ("conn-use", index),
+                    "Use",
+                    ButtonKind::Secondary,
+                    size::CONTROL_SMALL,
+                    false,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.switch_to(&target, cx))),
+            );
+        }
+        if !local {
+            let target = name.to_string();
+            row = row.child(
+                button(
+                    ("conn-edit", index),
+                    "Edit",
+                    ButtonKind::Secondary,
+                    size::CONTROL_SMALL,
+                    false,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_form(Some(&target), window, cx);
+                })),
+            );
+            let confirming = self.pending_delete.as_deref() == Some(name);
+            let target = name.to_string();
+            row = row.child(
+                button(
+                    ("conn-delete", index),
+                    if confirming {
+                        "Confirm delete"
+                    } else {
+                        "Delete"
+                    },
+                    ButtonKind::Danger,
+                    size::CONTROL_SMALL,
+                    false,
+                    p,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.delete_connection(&target, cx))),
+            );
+        }
+        row
+    }
+
+    /// The add / edit form of a saved connection.
+    fn connection_form(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+        let https = self.conn.https();
+        let editing = self
+            .connections
+            .iter()
+            .any(|c| c.name == self.conn.name.trim());
         let env_ca = std::env::var(alkahest_client::CA_CERT_ENV)
             .ok()
             .filter(|v| !v.trim().is_empty());
-        let mut el = card(p)
-            .child(div().type_style(text::TITLE).child("Server connection"))
-            .child(field_label("This app talks to", p))
+        let mut el = v_flex()
+            .gap(px(space::S2))
+            .pt(px(space::S2))
+            .border_t_1()
+            .border_color(c(p.line_subtle))
+            .child(field_label("Name", p))
+            .child(
+                field_frame(false, p).child(
+                    div()
+                        .flex_1()
+                        .child(Input::new(&self.name_input).appearance(false)),
+                ),
+            )
+            .child(field_label("Server URL", p))
             .child(segmented(
                 vec![
                     segment("scheme-http", "http", !https, p).on_click(
@@ -834,54 +1063,16 @@ impl SettingsView {
                 p,
             ))
             .child(
-                h_flex()
-                    .gap(px(space::S2))
+                field_frame(self.conn.url().is_err(), p)
+                    .type_style(text::MONO)
                     .child(
-                        field_frame(self.conn.url().is_err(), p)
+                        div()
                             .flex_1()
-                            .type_style(text::MONO)
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .child(Input::new(&self.url_input).appearance(false)),
-                            ),
-                    )
-                    .child(
-                        button(
-                            "settings-connect",
-                            "Connect",
-                            ButtonKind::Secondary,
-                            size::CONTROL,
-                            false,
-                            p,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
+                            .child(Input::new(&self.url_input).appearance(false)),
                     ),
-            )
-            .child(
-                div()
-                    .type_style(text::CAPTION)
-                    .text_color(c(p.text_muted))
-                    .child(format!(
-                        "Now {}. A remote server needs an API key, stored in the system keyring. \
-                         Bind address, port and CORS live in API keys & network.",
-                        crate::nav::display_address(&self.server_url)
-                    )),
-            )
-            .child(
-                div()
-                    .id("settings-to-keys")
-                    .type_style(text::CAPTION)
-                    .text_color(c(p.accent_text))
-                    .cursor_pointer()
-                    .child("Open API keys & network \u{2192}")
-                    .on_click(cx.listener(|_, _, _, cx| {
-                        cx.emit(SettingsEvent::Navigate(Screen::ApiKeys));
-                    })),
             );
         if https {
-            el = el.child(field_label("CA certificate (PEM)", p));
-            el = el.child(
+            el = el.child(field_label("CA certificate (PEM)", p)).child(
                 field_frame(self.conn.ca().is_err(), p).child(
                     div()
                         .flex_1()
@@ -895,8 +1086,7 @@ impl SettingsView {
                     alkahest_client::CA_CERT_ENV
                 ),
                 (None, _) => "Needed when the server uses a private CA (alkahest certs generate \
-                              writes ca.pem). Blank trusts the system roots and, for the local \
-                              server, its generated CA."
+                              writes ca.pem). Blank trusts the system roots."
                     .to_string(),
             };
             el = el.child(
@@ -909,6 +1099,128 @@ impl SettingsView {
                     }))
                     .child(note),
             );
+        }
+        if !self.env_key {
+            el = el
+                .child(field_label(
+                    if editing {
+                        "API key (blank keeps the stored one)"
+                    } else {
+                        "API key"
+                    },
+                    p,
+                ))
+                .child(
+                    field_frame(false, p).child(
+                        div()
+                            .flex_1()
+                            .child(Input::new(&self.key_input).appearance(false).mask_toggle()),
+                    ),
+                );
+        }
+        let invalid = self.conn.connection().err();
+        el.child(
+            div()
+                .type_style(text::CAPTION)
+                .text_color(c(p.text_muted))
+                .child(invalid.clone().unwrap_or_else(|| {
+                    "The key is kept in the system keyring, never in a file. A saved \
+                     connection is never started or stopped from here, even on 127.0.0.1 \
+                     (a tunnel)."
+                        .to_string()
+                })),
+        )
+        .child(
+            h_flex()
+                .gap(px(space::S2))
+                .justify_end()
+                .child(
+                    button(
+                        "conn-cancel",
+                        "Cancel",
+                        ButtonKind::Secondary,
+                        size::CONTROL_SMALL,
+                        false,
+                        p,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| this.close_form(window, cx))),
+                )
+                .child(
+                    button(
+                        "conn-save",
+                        "Save & connect",
+                        ButtonKind::Secondary,
+                        size::CONTROL_SMALL,
+                        invalid.is_some(),
+                        p,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| this.save_connection(window, cx))),
+                ),
+        )
+    }
+
+    fn connection_card(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+        let local = self.active == LOCAL;
+        let local_address = if local && !self.server_url.is_empty() {
+            crate::nav::display_address(&self.server_url)
+        } else {
+            "the server of config.toml".to_string()
+        };
+        let mut el = card(p)
+            .child(div().type_style(text::TITLE).child("Server connections"))
+            .child(self.connection_row(0, LOCAL, local_address, p, cx));
+        for (i, conn) in self.connections.iter().enumerate() {
+            el = el.child(self.connection_row(
+                i + 1,
+                &conn.name,
+                crate::nav::display_address(&conn.url),
+                p,
+                cx,
+            ));
+        }
+        if self.editing_connection {
+            el = el.child(self.connection_form(p, cx));
+        } else {
+            el = el.child(
+                h_flex().child(
+                    button(
+                        "conn-add",
+                        "Add connection\u{2026}",
+                        ButtonKind::Secondary,
+                        size::CONTROL_SMALL,
+                        false,
+                        p,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.editing_key = false;
+                        this.open_form(None, window, cx);
+                    })),
+                ),
+            );
+        }
+        el = el
+            .child(
+                div()
+                    .type_style(text::CAPTION)
+                    .text_color(c(p.text_muted))
+                    .child(
+                        "Only the local connection can start, stop or restart a server. Bind \
+                         address, port and CORS live in API keys & network.",
+                    ),
+            )
+            .child(
+                div()
+                    .id("settings-to-keys")
+                    .type_style(text::CAPTION)
+                    .text_color(c(p.accent_text))
+                    .cursor_pointer()
+                    .child("Open API keys & network \u{2192}")
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.emit(SettingsEvent::Navigate(Screen::ApiKeys));
+                    })),
+            );
+        if self.editing_connection {
+            return el;
         }
         let status = key_status(local, self.has_key, self.env_key);
         let mut key_row = h_flex()
@@ -982,7 +1294,11 @@ impl SettingsView {
                                 self.conn.new_key.trim().is_empty(),
                                 p,
                             )
-                            .on_click(cx.listener(|this, _, _, cx| this.connect(cx))),
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    this.save_active_key(window, cx);
+                                },
+                            )),
                         ),
                 );
         }
@@ -1227,5 +1543,92 @@ impl Render for SettingsView {
                         .child(side),
                 ),
         )
+    }
+}
+
+#[cfg(all(test, feature = "gui-test"))]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::ui::WindowAppearance;
+    use crate::ui::testing::{TestAppContext, gpui_test};
+
+    /// ALK-US-0144: the connection list switches, edits, deletes (after a confirmation) and
+    /// adds connections in `desktop.toml`, asking the shell to reconnect when the active one
+    /// changes.
+    #[gpui_test]
+    fn connections_switch_edit_delete_and_add(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            crate::ui::init(cx);
+            Theme::install(cx, ThemePreference::Dark, WindowAppearance::Dark);
+            tokio_bridge::init(cx).unwrap();
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("desktop.toml");
+        std::fs::write(
+            &path,
+            "active = \"lab\"\n\n[[connections]]\nname = \"gpu-box\"\nurl = \"https://gpu-box:11435\"\n\n[[connections]]\nname = \"lab\"\nurl = \"http://127.0.0.1:21435\"\n",
+        )
+        .unwrap();
+        let client = Client::new("http://127.0.0.1:9").unwrap();
+        let file = Some(path.clone());
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let catalogs = cx.new(|cx| CatalogsView::new(client.clone(), window, cx));
+            SettingsView::new(client, file, false, false, None, catalogs, window, cx)
+        });
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let seen = events.clone();
+        view.update(cx, |_, cx| {
+            cx.subscribe_self(move |_, e: &SettingsEvent, _| seen.borrow_mut().push(e.clone()))
+                .detach();
+        });
+        cx.run_until_parked();
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.active, "lab");
+            assert_eq!(v.connections.len(), 2);
+        });
+        let saved = || DesktopSettings::load(&path).unwrap();
+
+        // Switch to another saved connection, then back to the local one.
+        view.update_in(cx, |v, _, cx| v.switch_to("gpu-box", cx));
+        assert_eq!(saved().active_name(), "gpu-box");
+        view.update_in(cx, |v, _, cx| v.switch_to(LOCAL, cx));
+        assert_eq!(saved().active_name(), LOCAL);
+        assert_eq!(events.borrow().len(), 2);
+
+        // Edit fills the form.
+        view.update_in(cx, |v, window, cx| v.open_form(Some("gpu-box"), window, cx));
+        cx.run_until_parked();
+        view.read_with(cx, |v, _| {
+            assert!(v.editing_connection);
+            assert_eq!(v.conn.name, "gpu-box");
+            assert_eq!(v.conn.server_url, "https://gpu-box:11435");
+        });
+
+        // Delete asks first; deleting an inactive one needs no reconnect.
+        view.update_in(cx, |v, _, cx| v.delete_connection("lab", cx));
+        assert_eq!(saved().connections.len(), 2, "first click only asks");
+        view.update_in(cx, |v, _, cx| v.delete_connection("lab", cx));
+        assert!(saved().find("lab").is_none());
+        assert_eq!(events.borrow().len(), 2);
+
+        // Add a new one: it is saved and becomes the active connection.
+        view.update_in(cx, |v, window, cx| {
+            v.open_form(None, window, cx);
+            v.conn.name = "dgpu01".into();
+            v.conn.server_url = "https://127.0.0.1:21435".into();
+            v.save_connection(window, cx);
+        });
+        cx.run_until_parked();
+        let s = saved();
+        assert_eq!(s.active_name(), "dgpu01");
+        assert!(!s.active_connection("http://127.0.0.1:11435").local);
+        assert_eq!(events.borrow().last(), Some(&SettingsEvent::Reconnect));
+        view.read_with(cx, |v, _| assert!(!v.editing_connection));
     }
 }

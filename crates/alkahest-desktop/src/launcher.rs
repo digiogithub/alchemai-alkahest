@@ -328,6 +328,13 @@ fn strip_ansi(line: &str) -> String {
 
 impl ServerLauncher for LocalLauncher {
     fn launch(&self) -> Result<LaunchMethod, LaunchError> {
+        // A second server next to the service would read another configuration (the user's,
+        // not the service's) and fight it for the port (ALK-US-0144).
+        if let Some(service) = &self.external_service {
+            return Err(LaunchError::Spawn(format!(
+                "{service} runs the server; start that service instead"
+            )));
+        }
         if self.user_unit.is_some() {
             let status = Command::new("systemctl")
                 .args(["--user", "start", USER_UNIT])
@@ -538,6 +545,18 @@ mod tests {
             |p: &Path| p == Path::new("/Users/ana/Library/LaunchAgents/es.digio.alkahest.plist");
         assert!(installed_external_service(&env, &agent).is_some());
         assert_eq!(installed_external_service(&env, &|_: &Path| false), None);
+    }
+
+    #[test]
+    fn never_spawns_next_to_an_external_service() {
+        let mut launcher =
+            LocalLauncher::with_unit(PathBuf::from("/definitely/not/alkahest"), Vec::new(), None);
+        launcher.external_service = Some("systemd system unit alkahest.service".into());
+        match launcher.launch() {
+            Err(LaunchError::Spawn(why)) => assert!(why.contains("start that service"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(launcher.spawned.lock().unwrap().is_none(), "nothing ran");
     }
 
     #[test]

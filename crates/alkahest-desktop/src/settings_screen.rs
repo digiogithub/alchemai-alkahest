@@ -7,13 +7,14 @@
 //!   field by field with the server's own limits; a field set by an `ALKAHEST_*` variable is
 //!   locked. Every change applies on the next start, so the primary button becomes "Save &
 //!   restart server" when this app manages the local server.
-//! - **App settings** (`desktop.toml` and the OS keyring): the server URL this app talks to,
-//!   its API key and the theme. The key never reaches a file.
+//! - **App settings** (`desktop.toml` and the OS keyring): the saved server connections and
+//!   the active one, one API key per connection and the theme. Keys never reach a file.
 
 use alkahest_client::admin::{ServerSettings, ServerSettingsDoc};
 use serde_json::{Map, Value};
 
 use crate::model_settings::parse_duration;
+use crate::settings::{SavedConnection, validate_name};
 
 /// Keep-alive presets of screen 16 (label, value).
 pub const KEEP_ALIVE_PRESETS: [(&str, &str); 5] = [
@@ -240,10 +241,13 @@ impl ServerDraft {
     }
 }
 
-/// The app settings draft: server URL and theme in `desktop.toml`, the key in the keyring.
+/// The add / edit form of a saved connection: name and URL in `desktop.toml`, the key in the
+/// keyring.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConnectionDraft {
-    /// URL typed; blank = the configured local server.
+    /// Connection name typed.
+    pub name: String,
+    /// URL typed.
     pub server_url: String,
     /// A new key typed (never shown back, never written to a file).
     pub new_key: String,
@@ -252,7 +256,26 @@ pub struct ConnectionDraft {
 }
 
 impl ConnectionDraft {
-    /// The `server_url` to store, or why the text is not a URL. Blank = local default.
+    /// The connection to save, or the first thing wrong with the form. Unlike
+    /// [`ConnectionDraft::url`], a saved connection needs a URL.
+    pub fn connection(&self) -> Result<SavedConnection, String> {
+        validate_name(&self.name)?;
+        let url = self
+            .url()?
+            .ok_or_else(|| "type the server URL (http://host:11435)".to_string())?;
+        Ok(SavedConnection {
+            name: self.name.trim().to_string(),
+            url,
+            ca_cert: self.ca()?,
+        })
+    }
+
+    /// Empties the form.
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    /// The `server_url` to store, or why the text is not a URL. Blank = none.
     pub fn url(&self) -> Result<Option<String>, String> {
         let u = self.server_url.trim().trim_end_matches('/');
         if u.is_empty() {
@@ -387,6 +410,22 @@ mod tests {
         assert!(c.ca().is_err());
         c.ca_cert = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml").into();
         assert!(c.ca().unwrap().is_some());
+        c.ca_cert.clear();
+        c.server_url = "https://gpu-box:11435/".into();
+        assert!(c.connection().is_err(), "no name yet");
+        c.name = " gpu-box ".into();
+        let saved = c.connection().unwrap();
+        assert_eq!(
+            (saved.name.as_str(), saved.url.as_str(), saved.ca_cert),
+            ("gpu-box", "https://gpu-box:11435", None)
+        );
+        c.name = "local".into();
+        assert!(c.connection().is_err(), "reserved name");
+        c.name = "lab".into();
+        c.server_url.clear();
+        assert!(c.connection().is_err(), "a saved connection needs a URL");
+        c.clear();
+        assert_eq!(c, ConnectionDraft::default());
         assert_eq!(key_status(true, false, false), "not needed (loopback)");
         assert_eq!(
             key_status(false, true, false),

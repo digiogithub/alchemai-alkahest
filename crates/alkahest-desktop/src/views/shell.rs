@@ -14,7 +14,6 @@ use tokio::sync::{mpsc, watch};
 
 use crate::LaunchOptions;
 use crate::connection::{CardAction, Command, ConnectionHandle, ConnectionState, Snapshot};
-use crate::launcher::is_local_url;
 use crate::nav::{Counter, NavCounters, Screen, ServiceCard, Tone, display_address};
 use crate::settings::{ApiKeyStore, DesktopSettings, KeyringKeyStore};
 use crate::theme::tokens::{Palette, radius, size, space, text};
@@ -64,6 +63,8 @@ pub struct Shell {
     follow: Option<Task<()>>,
     /// The client of the current connection (tray actions).
     client: Client,
+    /// Name of the active connection ([`crate::settings::LOCAL`] for the configured server).
+    connection: String,
     /// Re-renders once a second while a reconnect countdown is on screen.
     _ticker: Task<()>,
 }
@@ -79,11 +80,13 @@ impl std::fmt::Debug for Shell {
 
 impl Shell {
     /// A shell showing the Library, with unknown counters and the "connecting" card for
-    /// `server_url`. `commands` reaches the connection manager; `client` is what the screens
-    /// use for their own requests; `options` let the shell reconnect.
+    /// `server_url` of connection `connection`. `commands` reaches the connection manager;
+    /// `client` is what the screens use for their own requests; `options` let the shell
+    /// reconnect.
     pub fn new(
         options: LaunchOptions,
         server_url: &str,
+        connection: String,
         commands: mpsc::UnboundedSender<Command>,
         client: Client,
         window: &mut Window,
@@ -121,6 +124,7 @@ impl Shell {
             key_input,
             follow: None,
             client,
+            connection,
             _ticker: ticker,
         }
     }
@@ -244,14 +248,17 @@ impl Shell {
     /// closes.
     pub fn reconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match crate::app::connect(cx, &self.options) {
-            Ok((
+            Ok(crate::app::Connected {
+                name,
                 url,
-                ConnectionHandle {
-                    commands,
-                    snapshots,
-                },
+                handle:
+                    ConnectionHandle {
+                        commands,
+                        snapshots,
+                    },
                 client,
-            )) => {
+            }) => {
+                self.connection = name;
                 self.commands = commands;
                 self.client = client.clone();
                 self.screens = Self::build_screens(&self.options, client, window, cx);
@@ -364,7 +371,7 @@ impl Shell {
         if key.is_empty() || self.options.smoke_test {
             return;
         }
-        if let Err(e) = KeyringKeyStore.set(&key) {
+        if let Err(e) = KeyringKeyStore::for_connection(&self.connection).set(&key) {
             tracing::warn!("cannot store the API key: {e}");
             return;
         }
@@ -373,11 +380,11 @@ impl Shell {
         self.reconnect(window, cx);
     }
 
-    /// Drops the remote server URL from `desktop.toml` and reconnects to the local server.
+    /// Switches to the built-in local connection (the saved ones are kept) and reconnects.
     fn use_local_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(path) = &self.options.settings_file {
             let mut s = DesktopSettings::load(path).unwrap_or_default();
-            s.server_url = None;
+            s.active = None;
             if let Err(e) = s.save(path) {
                 tracing::warn!("{e}");
                 return;
@@ -780,7 +787,7 @@ impl Shell {
             }
             ConnectionState::Unauthorized => {
                 // 17.6: the server wants a key.
-                let local_offer = !is_local_url(&snap.server_url);
+                let local_offer = self.connection != crate::settings::LOCAL;
                 let mut actions = h_flex().gap(px(space::S2)).items_center();
                 if local_offer {
                     actions = actions.child(

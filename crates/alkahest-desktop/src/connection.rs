@@ -461,6 +461,9 @@ pub struct Snapshot {
     pub can_start: bool,
     /// Name of the systemd user unit when one is installed (`alkahest.service`).
     pub service_unit: Option<String>,
+    /// A service installed outside this app runs the local server (a system systemd unit, a
+    /// launchd job, a Windows service): the app neither starts nor stops it (ALK-US-0144).
+    pub external_service: Option<String>,
     /// The latest scheduler snapshot while connected (`None` before the first one, when
     /// disconnected, or when the server refuses the admin routes to this key).
     pub runtime: Option<RuntimeSnapshot>,
@@ -508,7 +511,9 @@ impl Snapshot {
             ConnectionState::Connected(info) => (
                 Tone::Ok,
                 "Service running".to_string(),
-                manager.unwrap_or_else(|| format!("alkahest {}", info.version)),
+                manager
+                    .or_else(|| self.external_service.clone())
+                    .unwrap_or_else(|| format!("alkahest {}", info.version)),
             ),
             ConnectionState::Starting { method, .. } => (
                 Tone::Info,
@@ -521,6 +526,8 @@ impl Snapshot {
                 error.clone().unwrap_or_else(|| {
                     if self.can_start {
                         "No server answers; start one here".to_string()
+                    } else if let Some(service) = &self.external_service {
+                        format!("{service} runs the server; start the service")
                     } else {
                         "No server answers at this address".to_string()
                     }
@@ -657,6 +664,7 @@ pub struct ConnectionManager<C, L> {
     machine: Machine,
     server_url: String,
     service_unit: Option<String>,
+    external_service: Option<String>,
     commands: mpsc::UnboundedReceiver<Command>,
     snapshots: watch::Sender<Snapshot>,
     runtime: Option<RuntimeSnapshot>,
@@ -684,6 +692,7 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
             state: machine.state().clone(),
             can_start: machine.offers_start(),
             service_unit: service_unit.clone(),
+            external_service: None,
             notice: None,
             manages_server: can_start,
             runtime: None,
@@ -698,6 +707,7 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
                 machine,
                 server_url,
                 service_unit,
+                external_service: None,
                 commands: cmd_rx,
                 snapshots: snap_tx,
                 runtime: None,
@@ -719,6 +729,16 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
         self
     }
 
+    /// Names the service that runs the local server outside this app (shown on the service
+    /// card). Give it with no launcher: the app must not start a second server next to it.
+    #[must_use]
+    pub fn with_external_service(mut self, service: Option<String>) -> Self {
+        self.snapshots
+            .send_modify(|s| s.external_service.clone_from(&service));
+        self.external_service = service;
+        self
+    }
+
     fn publish(&mut self) {
         if !matches!(self.machine.state(), ConnectionState::Connected(_)) {
             self.runtime = None;
@@ -728,6 +748,7 @@ impl<C: ServerApi, L: ServerLauncher> ConnectionManager<C, L> {
             state: self.machine.state().clone(),
             can_start: self.machine.offers_start(),
             service_unit: self.service_unit.clone(),
+            external_service: self.external_service.clone(),
             notice: self.last_error.clone(),
             manages_server: self.machine.can_start(),
             runtime: self.runtime.clone(),
@@ -1075,6 +1096,7 @@ mod tests {
             state,
             can_start,
             service_unit: None,
+            external_service: None,
             notice: None,
             manages_server: false,
             retry: None,
@@ -1108,6 +1130,17 @@ mod tests {
 
         let s = snapshot(ConnectionState::NotRunning { error: None }, false);
         assert_eq!(s.card_action(), Some(CardAction::Retry));
+
+        // ALK-US-0144: a system service runs the server; the card names it, offers no start.
+        let mut system = snapshot(ConnectionState::NotRunning { error: None }, false);
+        system.external_service = Some("alkahest.service (system)".into());
+        assert_eq!(system.card_action(), Some(CardAction::Retry));
+        assert_eq!(
+            system.service_card().detail,
+            "alkahest.service (system) runs the server; start the service"
+        );
+        system.state = ConnectionState::Connected(info());
+        assert_eq!(system.service_card().detail, "alkahest.service (system)");
 
         let s = snapshot(ConnectionState::Unauthorized, false);
         assert_eq!(s.service_card().tone, Tone::Attention);

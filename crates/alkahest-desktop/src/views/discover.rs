@@ -3091,6 +3091,7 @@ mod tests {
                     }),
                     can_start: false,
                     service_unit: None,
+                    external_service: None,
                     notice: None,
                     manages_server: false,
                     runtime: None,
