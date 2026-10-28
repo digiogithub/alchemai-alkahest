@@ -34,12 +34,12 @@ fn ls_offers_the_bundled_recipe_when_nothing_is_installed() {
 fn ls_shows_an_installed_engine_once_with_its_path() {
     let home = tempfile::tempdir().unwrap();
     let engines = tempfile::tempdir().unwrap();
-    let dir = engines.path().join("llama-cpp/b11669-cpu");
+    let dir = engines.path().join("llama-cpp/b11970-cpu");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("llama-server"), b"x").unwrap();
     std::fs::write(
         dir.join(".alkahest-engine.json"),
-        r#"{"id":"llama-cpp","variant":"cpu","tag":"b11669","executable":"llama-server","source":"t","sha256":"0"}"#,
+        r#"{"id":"llama-cpp","variant":"cpu","tag":"b11970","executable":"llama-server","source":"t","sha256":"0"}"#,
     )
     .unwrap();
 
@@ -59,9 +59,9 @@ fn ls_shows_an_installed_engine_once_with_its_path() {
         .collect();
     assert_eq!(cpu.len(), 1, "{rows:?}");
     assert_eq!(cpu[0]["state"], "installed");
-    // Compared by components: Windows prints `b11669-cpu\llama-server`.
+    // Compared by components: Windows prints `b11970-cpu\llama-server`.
     let path = std::path::Path::new(cpu[0]["path"].as_str().unwrap());
-    assert!(path.ends_with("b11669-cpu/llama-server"), "{path:?}");
+    assert!(path.ends_with("b11970-cpu/llama-server"), "{path:?}");
     assert_eq!(rows.iter().filter(|r| r["state"] == "installed").count(), 1);
 }
 

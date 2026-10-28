@@ -9,7 +9,7 @@ size = 512
 
 [[files]]
 path = "engines/llama-cpp.toml"
-sha256 = "86395201b2d66726f95b278b89c73e7b6c9175c84c5761abc159f988f5773e57"
+sha256 = "8b648ec9fb70903fc51bb866d76d505623e1f944d8d07bc3e7c91b3b9a859720"
 size = 3011
 
 [[files]]

@@ -2,14 +2,15 @@
 id: ALK-US-0145
 type: story
 title: "Bump llama.cpp pin to >= b11938: LFM3 models fail with \"unknown model architecture: 'lfm3'\""
-status: triage
+status: cancelled
 priority: high
 author: mcp
 labels: [engine, recipes, bug]
 created: 2026-10-28T22:09:46Z
-updated: 2026-10-28T22:09:46Z
+updated: 2026-10-28T22:18:21Z
+closed: 2026-10-28T22:18:21Z
 inbox:
-  status: pending
+  status: rejected
   source: mcp
   received: 2026-10-28T22:09:46Z
 ---

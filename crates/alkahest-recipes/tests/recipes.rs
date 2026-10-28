@@ -125,7 +125,7 @@ fn recipe_validation_names_the_broken_rule() {
 #[test]
 fn llama_cpp_recipe_covers_the_published_gpu_builds_with_pinned_digests() {
     let catalog = Catalog::builtin();
-    let variants = catalog.variants("llama-cpp", "b11669");
+    let variants = catalog.variants("llama-cpp", "b11970");
     let names: Vec<&str> = variants.iter().map(|r| r.variant.as_str()).collect();
     for want in [
         "cpu", "cuda12.4", "cuda12.8", "cuda13.4", "vulkan", "rocm", "metal",

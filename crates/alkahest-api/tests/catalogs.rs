@@ -727,11 +727,11 @@ async fn catalog_model_detail_lists_variants_files_and_engine() {
 
 /// Writes an installed build marker under `engines/<id>/<tag>-<variant>/`.
 fn fake_install(engines: &Path, variant: &str, extra: Value) {
-    let dir = engines.join("llama-cpp").join(format!("b11669-{variant}"));
+    let dir = engines.join("llama-cpp").join(format!("b11970-{variant}"));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("llama-server"), b"#!/bin/sh\n").unwrap();
     let mut marker = json!({
-        "id": "llama-cpp", "variant": variant, "tag": "b11669",
+        "id": "llama-cpp", "variant": variant, "tag": "b11970",
         "executable": "llama-server", "source": "test", "sha256": "",
     });
     for (k, v) in extra.as_object().unwrap() {
@@ -772,7 +772,7 @@ async fn engines_carry_catalog_fields_and_install_takes_with_and_native() {
         rows.iter()
             .find(|r| {
                 r["id"] == "llama-cpp"
-                    && r["version"] == "b11669"
+                    && r["version"] == "b11970"
                     && r["variant"] == variant
                     && r["installed"] == installed
             })
@@ -842,7 +842,7 @@ async fn engines_carry_catalog_fields_and_install_takes_with_and_native() {
         )
         .await
         .unwrap();
-    assert_eq!(started.job.target, "llama-cpp b11669 cpu-native");
+    assert_eq!(started.job.target, "llama-cpp b11970 cpu-native");
     let job = wait_job(&s.h, &started.job.id).await;
     assert_eq!(job["state"], "completed", "{job}");
     if cfg!(all(target_os = "linux", target_arch = "x86_64")) {

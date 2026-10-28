@@ -2,7 +2,7 @@
 id: ALK-US-0144
 type: story
 title: "Desktop: saved server connections (local + remotes) and no rogue local server next to a system service"
-status: in_review
+status: done
 priority: high
 parent: ALK-EP-0013
 milestone: ALK-M-0005
@@ -10,8 +10,9 @@ author: mcp
 labels: [desktop, bug]
 estimate: 5
 created: 2026-10-28T21:43:31Z
-updated: 2026-10-28T21:53:27Z
+updated: 2026-10-28T22:18:24Z
 started: 2026-10-28T21:43:31Z
+closed: 2026-10-28T22:18:24Z
 ---
 
 ## Description

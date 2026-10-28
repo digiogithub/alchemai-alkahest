@@ -2,14 +2,15 @@
 id: ALK-US-0146
 type: story
 title: Recommended context_length = trained context bypasses the default context cap (LFM3 launched with -c 524288 -ngl 0)
-status: triage
+status: cancelled
 priority: high
 author: mcp
 labels: [sched, hf, bug]
 created: 2026-10-28T22:09:46Z
-updated: 2026-10-28T22:09:46Z
+updated: 2026-10-28T22:18:21Z
+closed: 2026-10-28T22:18:21Z
 inbox:
-  status: pending
+  status: rejected
   source: mcp
   received: 2026-10-28T22:09:46Z
 ---
