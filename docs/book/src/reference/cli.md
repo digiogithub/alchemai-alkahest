@@ -352,6 +352,8 @@ Options (besides the global ones):
           How long the model stays loaded after the last request (`5m`, `1h`, `0`, `-1`)
       --no-start
           Do not offer to start the server when it is not running
+      --voice <NAME>
+          Speech models: the voice to speak with (`alkahest show <model>` lists them); the model's `default` voice when omitted
   -h, --help
           Print help (see a summary with '-h')
 ```
@@ -407,6 +409,7 @@ Options (besides the global ones):
 ```text
       --smoke-test          Open the window, wait for the first frame to be rendered, then exit with status 0 (used by CI; fails with status 3 when no frame arrives within 30 s)
       --port <PORT>         Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
+      --start-server        Start a local server when none answers and no installed service runs one. The start-at-login entry passes it, so logging in brings up both the app and the server
 ```
 
 ## alkahest hf
@@ -604,7 +607,7 @@ Options (besides the global ones):
       --variant <VARIANT>         Accelerator build (`cpu`, `cuda12.8`, `cuda12`, `vulkan`, ...); the best one for this machine when omitted
       --port <PORT>               Server port: binds `serve`, targets client commands. Beats the port of `--host`, `ALKAHEST_HOST` and the configuration file (`alkahest config set server.port=N` saves a new default)
       --version <ENGINE_VERSION>  Engine version to install; the newest one when omitted. Several versions can be installed side by side
-      --from-source               Build from the recipe's source steps (needs git, cmake and ninja) instead of downloading the prebuilt archive
+      --from-source               Build from the recipe's source steps (git with cmake and ninja, or cargo, as the recipe says) instead of downloading the prebuilt archive
       --force                     Reinstall even when the engine is already installed
       --with-runtime              Also unpack the CUDA runtime libraries (cudart, cublas; 150 to 600 MB) next to the engine, for a CUDA build on a machine without a system-wide CUDA runtime
       --with <ID>                 Also install the optional dependency with this id (see `engines info`); repeatable
